@@ -36,17 +36,58 @@ jobs:
 
       - name: Create DMG
         run: |
-          cd build/macos/Build/Products/Release
-          mkdir -p dmg_content
-          cp -R "Tunnel Pilot.app" dmg_content/
+          APP_PATH="build/macos/Build/Products/Release/Tunnel Pilot.app"
+          DMG_NAME="TunnelPilot-${{ github.ref_name }}-macos"
+          BG_IMG="assets/dmg/background.png"
+
+          # Create temp DMG content
+          mkdir -p dmg_content/.background
+          cp -R "$APP_PATH" dmg_content/
           ln -s /Applications dmg_content/Applications
-          hdiutil create -volname "Tunnel Pilot" -srcfolder dmg_content -ov -format UDZO "TunnelPilot-${{ github.ref_name }}-macos.dmg"
+          cp "$BG_IMG" dmg_content/.background/background.png
+
+          # Create writable DMG
+          hdiutil create -volname "Tunnel Pilot" -srcfolder dmg_content -ov -format UDRW "${DMG_NAME}-rw.dmg"
+
+          # Mount and configure layout via AppleScript
+          DEVICE=$(hdiutil attach "${DMG_NAME}-rw.dmg" | grep "/Volumes/Tunnel Pilot" | awk '{print $1}')
+          sleep 2
+
+          osascript << 'APPLESCRIPT'
+          tell application "Finder"
+            tell disk "Tunnel Pilot"
+              open
+              set current view of container window to icon view
+              set toolbar visible of container window to false
+              set statusbar visible of container window to false
+              set bounds of container window to {100, 100, 700, 500}
+              set theViewOptions to icon view options of container window
+              set arrangement of theViewOptions to not arranged
+              set icon size of theViewOptions to 80
+              set background picture of theViewOptions to file ".background:background.png"
+              set position of item "Tunnel Pilot.app" of container window to {150, 220}
+              set position of item "Applications" of container window to {450, 220}
+              close
+              open
+              update without registering applications
+              delay 2
+              close
+            end tell
+          end tell
+          APPLESCRIPT
+
+          # Unmount
+          hdiutil detach "$DEVICE"
+
+          # Convert to compressed read-only DMG
+          hdiutil convert "${DMG_NAME}-rw.dmg" -format UDZO -o "${DMG_NAME}.dmg"
+          rm "${DMG_NAME}-rw.dmg"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: build/macos/Build/Products/Release/TunnelPilot-${{ github.ref_name }}-macos.dmg
+          path: TunnelPilot-${{ github.ref_name }}-macos.dmg
 
   release:
     runs-on: ubuntu-latest
