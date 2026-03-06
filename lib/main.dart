@@ -21,21 +21,18 @@ Future<void> main() async {
 
   const windowOptions = WindowOptions(
     size: Size(700, 600),
-    minimumSize: Size(500, 400),
+    minimumSize: Size(700, 600),
+    maximumSize: Size(700, 600),
     center: true,
-    title: 'Tunnel Pilot - Settings',
+    title: 'Tunnel Pilot',
     skipTaskbar: false,
   );
 
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.setPreventClose(true);
-    // Show window in debug, hide in release
-    if (kReleaseMode) {
-      await windowManager.hide();
-    } else {
-      await windowManager.show();
-      await windowManager.focus();
-    }
+    await windowManager.setResizable(false);
+    // Always show first so the engine stays alive
+    await windowManager.show();
   });
 
   final storageService = StorageService();
@@ -146,6 +143,10 @@ class _AppWithWindowListenerState extends State<_AppWithWindowListener>
   void initState() {
     super.initState();
     windowManager.addListener(this);
+    // Hide window after the first frame so the engine is fully alive
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await windowManager.hide();
+    });
   }
 
   @override
@@ -156,7 +157,12 @@ class _AppWithWindowListenerState extends State<_AppWithWindowListener>
 
   @override
   void onWindowClose() async {
-    await windowManager.hide();
+    // Never close the window — always hide it instead.
+    // The app can only be quit via "Quit" in the tray menu.
+    final isPreventClose = await windowManager.isPreventClose();
+    if (isPreventClose) {
+      await windowManager.hide();
+    }
   }
 
   @override
