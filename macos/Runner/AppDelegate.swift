@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import ServiceManagement
 
 @main
 class AppDelegate: FlutterAppDelegate {
@@ -10,5 +11,48 @@ class AppDelegate: FlutterAppDelegate {
 
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     return true
+  }
+
+  override func applicationDidFinishLaunching(_ notification: Notification) {
+    let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
+    let channel = FlutterMethodChannel(name: "launch_at_startup", binaryMessenger: controller.engine.binaryMessenger)
+
+    channel.setMethodCallHandler { (call, result) in
+      if #available(macOS 13.0, *) {
+        switch call.method {
+        case "launchAtStartupIsEnabled":
+          let enabled = SMAppService.mainApp.status == .enabled
+          result(enabled)
+        case "launchAtStartupSetEnabled":
+          guard let args = call.arguments as? [String: Any],
+                let setEnabled = args["setEnabledValue"] as? Bool else {
+            result(FlutterError(code: "INVALID_ARGS", message: "Missing setEnabledValue", details: nil))
+            return
+          }
+          do {
+            if setEnabled {
+              try SMAppService.mainApp.register()
+            } else {
+              try SMAppService.mainApp.unregister()
+            }
+            result(true)
+          } catch {
+            result(FlutterError(code: "SM_ERROR", message: error.localizedDescription, details: nil))
+          }
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      } else {
+        // macOS < 13 fallback using deprecated SMLoginItemSetEnabled
+        switch call.method {
+        case "launchAtStartupIsEnabled":
+          result(false)
+        case "launchAtStartupSetEnabled":
+          result(false)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
   }
 }

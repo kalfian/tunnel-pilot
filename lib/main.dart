@@ -47,8 +47,13 @@ Future<void> main() async {
   }
 
   try {
-    final execPath = Platform.resolvedExecutable;
-    startupService.init('Tunnel Pilot', execPath);
+    // launch_at_startup needs the .app bundle path, not the inner executable
+    String appPath = Platform.resolvedExecutable;
+    final appIndex = appPath.indexOf('.app/');
+    if (appIndex != -1) {
+      appPath = appPath.substring(0, appIndex + 4);
+    }
+    startupService.init('Tunnel Pilot', appPath);
   } catch (e) {
     debugPrint('StartupService init failed: $e');
   }
