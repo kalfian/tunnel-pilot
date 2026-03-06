@@ -1,2 +1,5 @@
 #include "../../Flutter/Flutter-Release.xcconfig"
 #include "Warnings.xcconfig"
+
+// Hide from Dock in release (menu bar / tray only)
+LS_UI_ELEMENT = 1

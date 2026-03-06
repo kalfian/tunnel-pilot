@@ -8,7 +8,7 @@
 PRODUCT_NAME = Tunnel Pilot
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.kalfian.tunnel_pilot
+PRODUCT_BUNDLE_IDENTIFIER = com.kalfian.tunnelpilot
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 kalfian. All rights reserved.

@@ -160,11 +160,11 @@ void main() {
 
   group('StorageService - config file operations', () {
     late Directory tempDir;
-    late StorageService service;
+    // late StorageService service;
 
     setUp(() async {
       tempDir = await Directory.systemTemp.createTemp('tunnel_pilot_cfg_');
-      service = StorageService();
+      // service = StorageService();
     });
 
     tearDown(() async {

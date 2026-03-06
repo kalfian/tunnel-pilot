@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../models/forward_config.dart';
 import '../providers/forward_provider.dart';
@@ -111,42 +112,47 @@ class _SettingsWindowState extends State<SettingsWindow> {
       body: Column(
         children: [
           // Nav bar
-          Container(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              border: Border(bottom: BorderSide(color: borderColor)),
-            ),
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withValues(alpha: isDark ? 0.15 : 0.1),
-                        borderRadius: BorderRadius.circular(7),
+          GestureDetector(
+            onPanStart: (_) => windowManager.startDragging(),
+            child: Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                border: Border(bottom: BorderSide(color: borderColor)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 14, 12, 0),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withValues(alpha: isDark ? 0.15 : 0.1),
+                          borderRadius: BorderRadius.circular(7),
+                        ),
+                        child: Icon(
+                          Icons.sensors_rounded,
+                          size: 16,
+                          color: theme.colorScheme.primary,
+                        ),
                       ),
-                      child: Icon(
-                        Icons.sensors_rounded,
-                        size: 16,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Text('Tunnel Pilot', style: theme.textTheme.titleMedium),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    _navTab('Connections', 0),
-                    const SizedBox(width: 4),
-                    _navTab('Settings', 1),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 10),
+                      Text('Tunnel Pilot', style: theme.textTheme.titleMedium),
+                      const Spacer(),
+                      _closeButton(theme),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _navTab('Connections', 0),
+                      const SizedBox(width: 4),
+                      _navTab('Settings', 1),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
 
@@ -307,6 +313,27 @@ class _SettingsWindowState extends State<SettingsWindow> {
           SizedBox(height: 24),
           BackupRestoreSection(),
         ],
+      ),
+    );
+  }
+
+  Widget _closeButton(ThemeData theme) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => windowManager.hide(),
+        child: Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            Icons.close_rounded,
+            size: 16,
+            color: theme.colorScheme.outline,
+          ),
+        ),
       ),
     );
   }

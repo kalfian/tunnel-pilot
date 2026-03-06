@@ -5,38 +5,102 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tunnel Pilot - SSH Port Forwarding Manager</title>
   <meta name="description" content="A cross-platform SSH local port forwarding manager that lives in your system tray. Manage SSH tunnels with ease on macOS, Windows, and Linux.">
-  <meta name="keywords" content="SSH, port forwarding, tunnel, macOS, Windows, Linux, system tray, menu bar">
   <meta property="og:title" content="Tunnel Pilot - SSH Port Forwarding Manager">
   <meta property="og:description" content="Manage SSH tunnels from your system tray. Cross-platform, open source.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://tunnelpilot.kalfian.com">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚇</text></svg>">
+  <meta property="og:url" content="https://kalfian.github.io/tunnel-pilot">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="icon" type="image/png" href="favicon.png">
   <style>
     :root {
-      --teal: #009688;
-      --teal-dark: #00796B;
-      --teal-light: #B2DFDB;
-      --bg: #0F172A;
-      --bg-card: #1E293B;
-      --text: #F1F5F9;
-      --text-muted: #94A3B8;
+      --blue: #007BFF;
+      --blue-dark: #0056CC;
+      --blue-light: #3D9AFF;
+      --bg: #0B0F1A;
+      --bg-card: #141924;
+      --bg-elevated: #1B2233;
+      --border: #1E2940;
+      --text: #E8ECF4;
+      --text-muted: #7B8BA3;
       --green: #22C55E;
-      --yellow: #EAB308;
+      --yellow: #F59E0B;
       --red: #EF4444;
-      --white-dim: #64748B;
+      --grey: #64748B;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
       background: var(--bg);
       color: var(--text);
       line-height: 1.6;
       overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
     }
 
-    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    /* Nav */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      background: rgba(11, 15, 26, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    nav .container {
+      display: flex;
+      align-items: center;
+      height: 56px;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .nav-brand img { flex-shrink: 0; }
+
+    .nav-links {
+      margin-left: auto;
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    .nav-links .gh-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      color: var(--text);
+      transition: all 0.2s;
+    }
+
+    .nav-links .gh-btn:hover {
+      border-color: var(--blue);
+      background: rgba(0,123,255,0.08);
+    }
 
     /* Hero */
     .hero {
@@ -45,57 +109,84 @@
       align-items: center;
       justify-content: center;
       text-align: center;
+      padding-top: 56px;
       position: relative;
     }
 
     .hero::before {
       content: '';
       position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: radial-gradient(ellipse at 50% 0%, rgba(0,150,136,0.15) 0%, transparent 70%);
+      top: 0; left: 50%; transform: translateX(-50%);
+      width: 800px; height: 600px;
+      background: radial-gradient(ellipse, rgba(0,123,255,0.08) 0%, transparent 70%);
       pointer-events: none;
     }
 
-    .hero-content { position: relative; z-index: 1; }
+    .hero-content { position: relative; z-index: 1; max-width: 640px; }
 
-    .logo {
-      width: 120px;
-      height: 120px;
-      margin: 0 auto 32px;
+    .hero-logo {
+      margin: 0 auto 28px;
     }
 
-    .logo svg {
-      width: 100%;
-      height: 100%;
+    .hero-logo img {
+      width: 96px;
+      height: 96px;
+      border-radius: 22px;
+      box-shadow: 0 8px 32px rgba(0,123,255,0.35), 0 0 0 1px rgba(0,123,255,0.15);
     }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 28px;
+    }
+
+    .hero-badge i { color: var(--blue); }
 
     .hero h1 {
-      font-size: 3.5rem;
+      font-size: 3.2rem;
       font-weight: 800;
-      letter-spacing: -0.02em;
-      margin-bottom: 16px;
-      background: linear-gradient(135deg, var(--teal), #4DB6AC);
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--blue), var(--blue-light));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
 
     .hero p {
-      font-size: 1.25rem;
+      font-size: 1.125rem;
       color: var(--text-muted);
-      max-width: 600px;
-      margin: 0 auto 40px;
+      margin-bottom: 36px;
+      line-height: 1.7;
     }
 
-    .btn-group { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
 
     .btn {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 14px 28px;
-      border-radius: 12px;
-      font-size: 1rem;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-size: 14px;
       font-weight: 600;
       text-decoration: none;
       transition: all 0.2s;
@@ -104,455 +195,452 @@
     }
 
     .btn-primary {
-      background: var(--teal);
+      background: var(--blue);
       color: white;
     }
 
     .btn-primary:hover {
-      background: var(--teal-dark);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(0,150,136,0.3);
+      background: var(--blue-dark);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(0,123,255,0.25);
     }
 
-    .btn-secondary {
-      background: var(--bg-card);
+    .btn-outline {
+      background: transparent;
       color: var(--text);
-      border: 1px solid #334155;
+      border: 1px solid var(--border);
     }
 
-    .btn-secondary:hover {
-      border-color: var(--teal);
-      transform: translateY(-2px);
+    .btn-outline:hover {
+      border-color: var(--blue);
+      background: rgba(0,123,255,0.06);
     }
 
-    .btn svg { width: 20px; height: 20px; }
-
-    /* Status indicator demo */
-    .status-demo {
+    /* Status pills */
+    .status-bar {
       display: flex;
-      gap: 24px;
+      gap: 20px;
       justify-content: center;
       margin-top: 48px;
     }
 
-    .status-item {
+    .status-pill {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 0.875rem;
+      gap: 7px;
+      font-size: 12px;
       color: var(--text-muted);
+      font-weight: 500;
     }
 
-    .status-dot {
-      width: 10px;
-      height: 10px;
+    .dot {
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
     }
 
-    .status-dot.green { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,0.5); }
-    .status-dot.yellow { background: var(--yellow); box-shadow: 0 0 8px rgba(234,179,8,0.5); }
-    .status-dot.red { background: var(--red); box-shadow: 0 0 8px rgba(239,68,68,0.5); }
-    .status-dot.grey { background: var(--white-dim); }
+    .dot-green { background: var(--green); box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+    .dot-yellow { background: var(--yellow); box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+    .dot-red { background: var(--red); box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+    .dot-grey { background: var(--grey); }
 
     /* Features */
-    .features {
-      padding: 100px 0;
+    section.features { padding: 100px 0; }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 56px;
     }
 
-    .features h2 {
-      text-align: center;
-      font-size: 2.25rem;
+    .section-header h2 {
+      font-size: 2rem;
       font-weight: 700;
-      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+      margin-bottom: 10px;
     }
 
-    .features .subtitle {
-      text-align: center;
+    .section-header p {
       color: var(--text-muted);
-      font-size: 1.1rem;
-      margin-bottom: 64px;
+      font-size: 1rem;
     }
 
     .features-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 24px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
     }
 
-    .feature-card {
+    .fcard {
       background: var(--bg-card);
-      border: 1px solid #1E293B;
-      border-radius: 16px;
-      padding: 32px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
       transition: all 0.2s;
     }
 
-    .feature-card:hover {
-      border-color: var(--teal);
-      transform: translateY(-4px);
-      box-shadow: 0 12px 32px rgba(0,0,0,0.3);
+    .fcard:hover {
+      border-color: rgba(0,123,255,0.3);
+      background: var(--bg-elevated);
     }
 
-    .feature-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 12px;
-      background: rgba(0,150,136,0.15);
+    .fcard-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: rgba(0,123,255,0.1);
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 20px;
-      font-size: 1.5rem;
+      margin-bottom: 16px;
+      color: var(--blue);
+      font-size: 18px;
     }
 
-    .feature-card h3 {
-      font-size: 1.125rem;
+    .fcard h3 {
+      font-size: 14px;
       font-weight: 600;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
-    .feature-card p {
+    .fcard p {
       color: var(--text-muted);
-      font-size: 0.938rem;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    /* Platforms */
+    .platforms {
+      padding: 48px 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .platform-row {
+      display: flex;
+      justify-content: center;
+      gap: 56px;
+    }
+
+    .plat {
+      text-align: center;
+      color: var(--text-muted);
+    }
+
+    .plat i {
+      font-size: 28px;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .plat span {
+      font-size: 13px;
+      font-weight: 500;
     }
 
     /* Installation */
-    .installation {
-      padding: 100px 0;
-      border-top: 1px solid #1E293B;
-    }
+    section.installation { padding: 100px 0; }
 
-    .installation h2 {
-      text-align: center;
-      font-size: 2.25rem;
-      font-weight: 700;
-      margin-bottom: 64px;
-    }
-
-    .install-tabs {
+    .tab-row {
       display: flex;
       justify-content: center;
-      gap: 8px;
+      gap: 6px;
       margin-bottom: 32px;
     }
 
     .tab-btn {
-      padding: 10px 24px;
+      padding: 8px 20px;
       border-radius: 8px;
-      border: 1px solid #334155;
+      border: 1px solid var(--border);
       background: transparent;
       color: var(--text-muted);
-      font-size: 0.938rem;
+      font-size: 13px;
+      font-weight: 500;
       cursor: pointer;
       transition: all 0.2s;
     }
 
     .tab-btn.active {
-      background: var(--teal);
-      border-color: var(--teal);
+      background: var(--blue);
+      border-color: var(--blue);
       color: white;
     }
 
     .tab-btn:hover:not(.active) {
-      border-color: var(--teal);
+      border-color: var(--blue);
       color: var(--text);
     }
 
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
+    .tab-panel { display: none; max-width: 680px; margin: 0 auto; }
+    .tab-panel.active { display: block; }
 
-    .code-block {
-      background: #0D1117;
-      border: 1px solid #1E293B;
-      border-radius: 12px;
-      padding: 24px;
-      margin-bottom: 16px;
-      overflow-x: auto;
-    }
-
-    .code-block code {
-      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-      font-size: 0.875rem;
-      color: #E2E8F0;
-      line-height: 1.8;
-    }
-
-    .code-block .comment { color: #6A737D; }
-    .code-block .cmd { color: var(--green); }
-
-    .install-steps {
-      max-width: 700px;
-      margin: 0 auto;
-    }
-
-    .step {
-      margin-bottom: 32px;
-    }
+    .step { margin-bottom: 28px; }
 
     .step h3 {
-      font-size: 1rem;
+      font-size: 14px;
       font-weight: 600;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
       display: flex;
       align-items: center;
       gap: 10px;
     }
 
-    .step-num {
-      width: 28px;
-      height: 28px;
+    .step-n {
+      width: 24px;
+      height: 24px;
       border-radius: 50%;
-      background: var(--teal);
+      background: var(--blue);
       color: white;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.813rem;
+      font-size: 12px;
       font-weight: 700;
       flex-shrink: 0;
     }
 
-    /* Platform badges */
-    .platforms {
-      padding: 60px 0;
-      border-top: 1px solid #1E293B;
-    }
-
-    .platform-grid {
-      display: flex;
-      justify-content: center;
-      gap: 48px;
-      flex-wrap: wrap;
-    }
-
-    .platform-item {
-      text-align: center;
+    .step p {
       color: var(--text-muted);
+      font-size: 13px;
+      margin-bottom: 10px;
     }
 
-    .platform-item .icon {
-      font-size: 2.5rem;
-      margin-bottom: 8px;
+    .step a { color: var(--blue); text-decoration: none; }
+    .step a:hover { text-decoration: underline; }
+
+    .code {
+      background: #070B14;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      overflow-x: auto;
+      font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      line-height: 1.8;
+      color: #CBD5E1;
     }
 
-    .platform-item .label {
-      font-size: 0.875rem;
-      font-weight: 500;
-    }
+    .code .c { color: #4A5568; }
+    .code .g { color: var(--green); }
 
     /* Footer */
     footer {
       padding: 40px 0;
-      border-top: 1px solid #1E293B;
+      border-top: 1px solid var(--border);
       text-align: center;
-      color: var(--text-muted);
-      font-size: 0.875rem;
     }
 
+    footer p { color: var(--text-muted); font-size: 13px; }
+
     footer a {
-      color: var(--teal);
+      color: var(--blue);
       text-decoration: none;
     }
 
     footer a:hover { text-decoration: underline; }
 
+    .footer-links {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      margin-top: 10px;
+    }
+
     @media (max-width: 768px) {
-      .hero h1 { font-size: 2.25rem; }
-      .hero p { font-size: 1rem; }
-      .status-demo { flex-wrap: wrap; gap: 16px; }
+      .hero h1 { font-size: 2.2rem; }
       .features-grid { grid-template-columns: 1fr; }
+      .nav-links a:not(.gh-btn) { display: none; }
+      .status-bar { flex-wrap: wrap; gap: 12px; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Hero -->
+  <nav>
+    <div class="container">
+      <a href="#" class="nav-brand">
+        <img src="app_icon.png" alt="Tunnel Pilot" style="width:26px;height:26px;border-radius:6px;" />
+        Tunnel Pilot
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/kalfian/tunnel-pilot" class="gh-btn">
+          <i class="fab fa-github"></i> GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
   <section class="hero">
     <div class="hero-content">
-      <div class="logo">
-        <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="60" cy="60" r="56" fill="#1E293B" stroke="#009688" stroke-width="3"/>
-          <path d="M25 55 H70 L70 45 L95 60 L70 75 L70 65 H25 Z" fill="#009688"/>
-          <circle cx="60" cy="60" r="35" stroke="#009688" stroke-width="2.5" fill="none" opacity="0.3"/>
-          <circle cx="30" cy="60" r="4" fill="#22C55E"/>
-          <circle cx="42" cy="60" r="3" fill="#22C55E" opacity="0.6"/>
-        </svg>
+      <div class="hero-logo">
+        <img src="app_icon.png" alt="Tunnel Pilot" />
       </div>
-      <h1>Tunnel Pilot</h1>
-      <p>A cross-platform SSH local port forwarding manager that lives in your system tray. Simple, fast, and secure.</p>
-      <div class="btn-group">
+      <div class="hero-badge">
+        <i class="fas fa-bolt"></i>
+        Open source &middot; Cross-platform
+      </div>
+      <h1><span>Tunnel Pilot</span></h1>
+      <p style="font-size:1.4rem;color:var(--text);font-weight:600;margin-bottom:8px;letter-spacing:-0.01em;">SSH tunnels, simplified.</p>
+      <p>Stop typing <code style="background:rgba(0,123,255,0.15);padding:2px 8px;border-radius:5px;font-size:0.9em;color:var(--blue-light);font-family:'SF Mono','JetBrains Mono',monospace;">ssh -L</code> over and over. Tunnel Pilot manages your port forwarding from the system tray — configure once, toggle with a click.</p>
+      <div class="btn-row">
         <a href="https://github.com/kalfian/tunnel-pilot/releases" class="btn btn-primary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          Download
+          <i class="fas fa-download"></i> Download
         </a>
-        <a href="https://github.com/kalfian/tunnel-pilot" class="btn btn-secondary">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/></svg>
-          GitHub
+        <a href="https://github.com/kalfian/tunnel-pilot" class="btn btn-outline">
+          <i class="fab fa-github"></i> View Source
         </a>
       </div>
-      <div class="status-demo">
-        <div class="status-item"><span class="status-dot green"></span> Connected</div>
-        <div class="status-item"><span class="status-dot yellow"></span> Connecting</div>
-        <div class="status-item"><span class="status-dot red"></span> Error</div>
-        <div class="status-item"><span class="status-dot grey"></span> Disconnected</div>
+      <div class="status-bar">
+        <div class="status-pill"><span class="dot dot-green"></span> Connected</div>
+        <div class="status-pill"><span class="dot dot-yellow"></span> Connecting</div>
+        <div class="status-pill"><span class="dot dot-red"></span> Error</div>
+        <div class="status-pill"><span class="dot dot-grey"></span> Off</div>
       </div>
     </div>
   </section>
 
-  <!-- Features -->
-  <section class="features">
+  <section class="features" id="features">
     <div class="container">
-      <h2>Everything you need</h2>
-      <p class="subtitle">Manage SSH tunnels without touching the terminal</p>
+      <div class="section-header">
+        <h2>Everything you need</h2>
+        <p>No more memorizing ports and hosts — just point, click, and connect</p>
+      </div>
       <div class="features-grid">
-        <div class="feature-card">
-          <div class="feature-icon">🖥️</div>
+        <div class="fcard">
+          <div class="fcard-icon"><i class="fas fa-desktop"></i></div>
           <h3>System Tray Native</h3>
-          <p>Lives in your menu bar (macOS) or system tray (Windows/Linux). No window clutter — just a clean tray icon with quick access to all your tunnels.</p>
+          <p>Lives in your menu bar or system tray. No window clutter - just a clean icon with quick access to all your tunnels.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon">⚡</div>
+        <div class="fcard">
+          <div class="fcard-icon"><i class="fas fa-toggle-on"></i></div>
           <h3>One-Click Toggle</h3>
-          <p>Toggle SSH tunnels on and off directly from the tray menu. Color-coded status indicators show you the state of each tunnel at a glance.</p>
+          <p>Toggle SSH tunnels on and off from the tray menu. Color-coded indicators show the state of each tunnel at a glance.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔐</div>
-          <h3>Secure Authentication</h3>
-          <p>Supports both password and SSH identity file authentication. Passwords are never included in backup exports for enhanced security.</p>
+        <div class="fcard">
+          <div class="fcard-icon"><i class="fas fa-key"></i></div>
+          <h3>Secure Auth</h3>
+          <p>Password and SSH identity file authentication. Passwords are never included in backup exports.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon">💾</div>
+        <div class="fcard">
+          <div class="fcard-icon"><i class="fas fa-cloud-arrow-down"></i></div>
           <h3>Backup & Restore</h3>
-          <p>Export your tunnel configurations as JSON and import them on another machine. Identity file paths are preserved, passwords require re-entry.</p>
+          <p>Export configurations as JSON and import on another machine. Identity file paths preserved, passwords require re-entry.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔔</div>
-          <h3>Desktop Notifications</h3>
-          <p>Get notified when a tunnel connects, disconnects, or encounters an error. Stay informed without constantly checking the tray.</p>
+        <div class="fcard">
+          <div class="fcard-icon"><i class="fas fa-bell"></i></div>
+          <h3>Notifications</h3>
+          <p>Desktop notifications when tunnels connect, disconnect, or encounter errors. Stay informed without checking.</p>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon">🚀</div>
+        <div class="fcard">
+          <div class="fcard-icon"><i class="fas fa-rocket"></i></div>
           <h3>Launch at Login</h3>
-          <p>Configure Tunnel Pilot to start automatically when you log in. Your tunnels are always ready when you need them.</p>
+          <p>Start automatically when you log in. Your tunnels are always ready when you need them.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Platforms -->
   <section class="platforms">
     <div class="container">
-      <div class="platform-grid">
-        <div class="platform-item">
-          <div class="icon">🍎</div>
-          <div class="label">macOS</div>
+      <div class="platform-row">
+        <div class="plat">
+          <i class="fab fa-apple"></i>
+          <span>macOS</span>
         </div>
-        <div class="platform-item">
-          <div class="icon">🪟</div>
-          <div class="label">Windows</div>
+        <div class="plat">
+          <i class="fab fa-windows"></i>
+          <span>Windows</span>
         </div>
-        <div class="platform-item">
-          <div class="icon">🐧</div>
-          <div class="label">Linux</div>
+        <div class="plat">
+          <i class="fab fa-linux"></i>
+          <span>Linux</span>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Installation -->
-  <section class="installation">
+  <section class="installation" id="install">
     <div class="container">
-      <h2>Installation</h2>
-      <div class="install-tabs">
-        <button class="tab-btn active" onclick="showTab('binary')">Download Binary</button>
+      <div class="section-header">
+        <h2>Get Started</h2>
+        <p>Up and running in minutes</p>
+      </div>
+      <div class="tab-row">
+        <button class="tab-btn active" onclick="showTab('binary')">Download</button>
         <button class="tab-btn" onclick="showTab('source')">Build from Source</button>
       </div>
 
-      <div class="install-steps">
-        <div id="tab-binary" class="tab-content active">
-          <div class="step">
-            <h3><span class="step-num">1</span> Download the latest release</h3>
-            <p style="color: var(--text-muted); margin-bottom: 12px;">
-              Go to the <a href="https://github.com/kalfian/tunnel-pilot/releases" style="color: var(--teal);">GitHub Releases</a> page and download the build for your platform.
-            </p>
-          </div>
-          <div class="step">
-            <h3><span class="step-num">2</span> Install</h3>
-            <div class="code-block">
-              <code>
-                <span class="comment"># macOS — drag to Applications</span><br>
-                <span class="comment"># Windows — run the installer or extract the zip</span><br>
-                <span class="comment"># Linux — extract and run</span><br>
-                <span class="cmd">chmod +x tunnel_pilot</span><br>
-                <span class="cmd">./tunnel_pilot</span>
-              </code>
-            </div>
-          </div>
-          <div class="step">
-            <h3><span class="step-num">3</span> Configure your tunnels</h3>
-            <p style="color: var(--text-muted);">
-              Click the tray icon, select "Settings...", and add your SSH tunnel configurations. Toggle them on/off directly from the tray menu.
-            </p>
+      <div id="tab-binary" class="tab-panel active">
+        <div class="step">
+          <h3><span class="step-n">1</span> Download</h3>
+          <p>Grab the latest release from <a href="https://github.com/kalfian/tunnel-pilot/releases">GitHub Releases</a> for your platform.</p>
+        </div>
+        <div class="step">
+          <h3><span class="step-n">2</span> Install</h3>
+          <div class="code">
+            <span class="c"># macOS - drag to Applications</span><br>
+            <span class="c"># Windows - run installer or extract zip</span><br>
+            <span class="c"># Linux - extract and run</span><br>
+            <span class="g">chmod +x tunnel_pilot && ./tunnel_pilot</span>
           </div>
         </div>
+        <div class="step">
+          <h3><span class="step-n">3</span> Configure</h3>
+          <p>Click the tray icon, select "Settings...", and add your SSH tunnel configurations.</p>
+        </div>
+      </div>
 
-        <div id="tab-source" class="tab-content">
-          <div class="step">
-            <h3><span class="step-num">1</span> Prerequisites</h3>
-            <div class="code-block">
-              <code>
-                <span class="comment"># Install Flutter SDK (3.11.1+)</span><br>
-                <span class="comment"># https://flutter.dev/docs/get-started/install</span><br><br>
-                <span class="comment"># Linux only — install system dependencies</span><br>
-                <span class="cmd">sudo apt-get install libayatana-appindicator3-dev libnotify-dev</span>
-              </code>
-            </div>
+      <div id="tab-source" class="tab-panel">
+        <div class="step">
+          <h3><span class="step-n">1</span> Prerequisites</h3>
+          <div class="code">
+            <span class="c"># Flutter SDK 3.11.1+ required</span><br>
+            <span class="c"># https://flutter.dev/docs/get-started/install</span><br><br>
+            <span class="c"># Linux only</span><br>
+            <span class="g">sudo apt-get install libayatana-appindicator3-dev libnotify-dev</span>
           </div>
-          <div class="step">
-            <h3><span class="step-num">2</span> Clone and build</h3>
-            <div class="code-block">
-              <code>
-                <span class="cmd">git clone https://github.com/kalfian/tunnel-pilot.git</span><br>
-                <span class="cmd">cd tunnel-pilot</span><br>
-                <span class="cmd">flutter pub get</span><br><br>
-                <span class="comment"># Run in development</span><br>
-                <span class="cmd">flutter run -d macos</span><br><br>
-                <span class="comment"># Build for release</span><br>
-                <span class="cmd">flutter build macos</span>
-              </code>
-            </div>
+        </div>
+        <div class="step">
+          <h3><span class="step-n">2</span> Clone & Build</h3>
+          <div class="code">
+            <span class="g">git clone https://github.com/kalfian/tunnel-pilot.git</span><br>
+            <span class="g">cd tunnel-pilot</span><br>
+            <span class="g">flutter pub get</span><br><br>
+            <span class="c"># Run in development</span><br>
+            <span class="g">flutter run -d macos</span><br><br>
+            <span class="c"># Build release</span><br>
+            <span class="g">flutter build macos</span>
           </div>
-          <div class="step">
-            <h3><span class="step-num">3</span> Run tests</h3>
-            <div class="code-block">
-              <code>
-                <span class="cmd">flutter test</span>
-              </code>
-            </div>
-          </div>
+        </div>
+        <div class="step">
+          <h3><span class="step-n">3</span> Test</h3>
+          <div class="code"><span class="g">flutter test</span></div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Footer -->
   <footer>
     <div class="container">
-      <p>Tunnel Pilot &mdash; Open source SSH port forwarding manager</p>
-      <p style="margin-top: 8px;">
-        <a href="https://github.com/kalfian/tunnel-pilot">GitHub</a> &middot;
-        <a href="https://github.com/kalfian/tunnel-pilot/releases">Releases</a> &middot;
-        <a href="https://github.com/kalfian/tunnel-pilot/issues">Issues</a>
+      <p style="display:inline-flex;align-items:center;gap:8px;justify-content:center;">
+        <img src="app_icon.png" alt="Tunnel Pilot" style="width:20px;height:20px;border-radius:5px;" />
+        <strong>Tunnel Pilot</strong> &mdash; Open source SSH port forwarding manager
       </p>
-      <p style="margin-top: 16px; font-size: 0.75rem;">&copy; 2026 kalfian. MIT License.</p>
+      <div class="footer-links">
+        <a href="https://github.com/kalfian/tunnel-pilot"><i class="fab fa-github"></i> GitHub</a>
+        <a href="https://github.com/kalfian/tunnel-pilot/releases"><i class="fas fa-tag"></i> Releases</a>
+        <a href="https://github.com/kalfian/tunnel-pilot/issues"><i class="fas fa-bug"></i> Issues</a>
+      </div>
+      <p style="margin-top: 16px; font-size: 11px; color: var(--grey);">&copy; 2026 kalfian. MIT License.</p>
     </div>
   </footer>
 
   <script>
-    function showTab(tab) {
-      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    function showTab(id) {
+      document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-      document.getElementById('tab-' + tab).classList.add('active');
+      document.getElementById('tab-' + id).classList.add('active');
       event.target.classList.add('active');
     }
   </script>

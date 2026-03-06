@@ -2,6 +2,8 @@
 
 A cross-platform SSH local port forwarding manager that lives in your system tray / menu bar.
 
+**Website**: [https://kalfian.github.io/tunnel-pilot](https://kalfian.github.io/tunnel-pilot)
+
 Manage your SSH tunnels (`ssh -L`) with ease — toggle connections on/off directly from the tray menu, configure tunnels through a clean settings interface, and get notified when connection status changes.
 
 ## Features

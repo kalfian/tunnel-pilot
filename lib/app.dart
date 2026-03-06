@@ -27,7 +27,7 @@ class TunnelPilotApp extends StatelessWidget {
     const border = Color(0xFFE2E5EA);
     const textPrimary = Color(0xFF1A1D23);
     const textSecondary = Color(0xFF6B7280);
-    const accent = Color(0xFF0D9488);
+    const accent = Color(0xFF007BFF);
 
     return ThemeData(
       brightness: Brightness.light,
@@ -118,7 +118,7 @@ class TunnelPilotApp extends StatelessWidget {
     const border = Color(0xFF2E333D);
     const textPrimary = Color(0xFFE5E7EB);
     const textSecondary = Color(0xFF8B919A);
-    const accent = Color(0xFF2DD4BF);
+    const accent = Color(0xFF3D9AFF);
 
     return ThemeData(
       brightness: Brightness.dark,
