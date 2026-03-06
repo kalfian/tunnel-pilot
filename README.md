@@ -1,7 +1,6 @@
 # Tunnel Pilot
 
-![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)
+![CI](https://github.com/kalfian/tunnel-pilot/actions/workflows/ci.yml/badge.svg)
 ![Flutter](https://img.shields.io/badge/Flutter-3.11+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
