@@ -31,11 +31,15 @@ jobs:
       - run: flutter pub get
       - run: flutter build macos
 
+      - name: Ad-hoc code sign
+        run: codesign --force --deep --sign - "build/macos/Build/Products/Release/Tunnel Pilot.app"
+
       - name: Create DMG
         run: |
           cd build/macos/Build/Products/Release
           mkdir -p dmg_content
           cp -R "Tunnel Pilot.app" dmg_content/
+          ln -s /Applications dmg_content/Applications
           hdiutil create -volname "Tunnel Pilot" -srcfolder dmg_content -ov -format UDZO "TunnelPilot-${{ github.ref_name }}-macos.dmg"
 
       - name: Upload artifact
