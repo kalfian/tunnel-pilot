@@ -1,5 +1,14 @@
 # Tunnel Pilot
 
+![Build](https://img.shields.io/badge/build-passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)
+![Flutter](https://img.shields.io/badge/Flutter-3.11+-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+![macOS](https://img.shields.io/badge/macOS-tested-brightgreen?logo=apple&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-not%20tested-yellow?logo=windows&logoColor=white)
+![Linux](https://img.shields.io/badge/Linux-not%20tested-yellow?logo=linux&logoColor=white)
+
 A cross-platform SSH local port forwarding manager that lives in your system tray / menu bar.
 
 **Website**: [https://kalfian.github.io/tunnel-pilot](https://kalfian.github.io/tunnel-pilot)
