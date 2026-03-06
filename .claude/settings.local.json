@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sips -g all /Users/kalfian/Developments/Flutter/Project/longpipes/long_pipes/assets/icons/tray_icon.png)",
+      "Bash(/Users/kalfian/Developments/Flutter/flutter/bin/flutter test)"
+    ]
+  }
+}
