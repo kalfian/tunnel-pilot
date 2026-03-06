@@ -83,6 +83,20 @@ Release builds are located in:
 flutter test
 ```
 
+## macOS: Gatekeeper Warning
+
+Since the app is not signed with an Apple Developer certificate, macOS will show a warning on first launch. To allow it:
+
+1. Try to open **Tunnel Pilot.app** — macOS will block it
+2. Go to **System Settings → Privacy & Security**
+3. Scroll down to the **Security** section — you'll see a message about "Tunnel Pilot" being blocked
+4. Click **Open Anyway** and confirm
+
+Alternatively, remove the quarantine attribute via terminal:
+```bash
+xattr -cr "/Applications/Tunnel Pilot.app"
+```
+
 ## Security Notes
 
 - SSH passwords are stored locally on your device in a JSON config file
