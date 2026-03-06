@@ -1,16 +1,19 @@
-# Tunnel Pilot
+<p align="center">
+  <img src="assets/banner.png" alt="Tunnel Pilot" width="100%">
+</p>
 
-![CI](https://github.com/kalfian/tunnel-pilot/actions/workflows/ci.yml/badge.svg)
-![Flutter](https://img.shields.io/badge/Flutter-3.11+-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+<p align="center">
+  <a href="https://github.com/kalfian/tunnel-pilot/actions/workflows/ci.yml"><img src="https://github.com/kalfian/tunnel-pilot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Flutter-3.11+-blue" alt="Flutter">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  <img src="https://img.shields.io/badge/macOS-tested-brightgreen?logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/Windows-not%20tested-yellow?logo=windows&logoColor=white" alt="Windows">
+  <img src="https://img.shields.io/badge/Linux-not%20tested-yellow?logo=linux&logoColor=white" alt="Linux">
+</p>
 
-![macOS](https://img.shields.io/badge/macOS-tested-brightgreen?logo=apple&logoColor=white)
-![Windows](https://img.shields.io/badge/Windows-not%20tested-yellow?logo=windows&logoColor=white)
-![Linux](https://img.shields.io/badge/Linux-not%20tested-yellow?logo=linux&logoColor=white)
-
-A cross-platform SSH local port forwarding manager that lives in your system tray / menu bar.
-
-**Website**: [https://kalfian.github.io/tunnel-pilot](https://kalfian.github.io/tunnel-pilot)
+<p align="center">
+  <b>Website</b>: <a href="https://kalfian.github.io/tunnel-pilot">kalfian.github.io/tunnel-pilot</a>
+</p>
 
 Manage your SSH tunnels (`ssh -L`) with ease — toggle connections on/off directly from the tray menu, configure tunnels through a clean settings interface, and get notified when connection status changes.
 
