@@ -1,16 +1,25 @@
-import 'package:local_notifier/local_notifier.dart';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 
 class NotificationService {
   Future<void> init() async {
-    await localNotifier.setup(appName: 'Tunnel Pilot');
+    // No setup needed for osascript-based notifications
   }
 
   Future<void> show(String title, String body) async {
-    final notification = LocalNotification(
-      title: title,
-      body: body,
-    );
-    await notification.show();
+    if (Platform.isMacOS) {
+      try {
+        final escapedTitle = title.replaceAll('"', '\\"');
+        final escapedBody = body.replaceAll('"', '\\"');
+        await Process.run('osascript', [
+          '-e',
+          'display notification "$escapedBody" with title "$escapedTitle"',
+        ]);
+      } catch (e) {
+        debugPrint('Notification failed: $e');
+      }
+    }
   }
 
   Future<void> showConnected(String name) async {

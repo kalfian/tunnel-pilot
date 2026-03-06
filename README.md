@@ -17,6 +17,12 @@
 
 Manage your SSH tunnels (`ssh -L`) with ease — toggle connections on/off directly from the tray menu, configure tunnels through a clean settings interface, and get notified when connection status changes.
 
+<p align="center">
+  <img src="docs/Screenshot/connections.png" alt="Connections" width="30%">
+  <img src="docs/Screenshot/settings.png" alt="Settings" width="30%">
+  <img src="docs/Screenshot/new-tunnel.png" alt="New Tunnel" width="30%">
+</p>
+
 ## Features
 
 - **System Tray / Menu Bar** — Lives entirely in the menu bar (macOS) or system tray (Windows/Linux)

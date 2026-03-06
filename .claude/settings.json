@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/kalfian/.pub-cache/hosted/pub.dev/launch_at_startup-0.3.1/**)",
+      "Bash(/Users/kalfian/Developments/Flutter/flutter/bin/flutter build macos)",
+      "Bash(ls -la docs/screenshot*)",
+      "Bash(ls -la docs/screenshots*)",
+      "Bash(mv \"CleanShot 2026-03-07 at 05.05.16.png\" connections.png)",
+      "Bash(mv \"CleanShot 2026-03-07 at 05.05.21.png\" settings.png)",
+      "Bash(mv \"CleanShot 2026-03-07 at 05.05.26.png\" new-tunnel.png)",
+      "Bash(rm -f connections.png settings.png new-tunnel.png .DS_Store)",
+      "Bash(mv \"CleanShot 2026-03-07 at 05.12.09.png\" connections.png)",
+      "Bash(mv \"CleanShot 2026-03-07 at 05.12.23.png\" settings.png)",
+      "Bash(mv \"CleanShot 2026-03-07 at 05.12.29.png\" new-tunnel.png)"
+    ]
+  }
+}
