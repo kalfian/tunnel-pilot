@@ -40,16 +40,16 @@ jobs:
           DMG_NAME="TunnelPilot-${{ github.ref_name }}-macos"
           BG_IMG="assets/dmg/background.png"
 
-          # Create temp DMG content
-          mkdir -p dmg_content/.background
-          cp -R "$APP_PATH" dmg_content/
-          ln -s /Applications dmg_content/Applications
-          cp "$BG_IMG" dmg_content/.background/background.png
+          # Stage DMG content
+          mkdir -p dmg_stage/.background
+          cp -R "$APP_PATH" dmg_stage/
+          ln -s /Applications dmg_stage/Applications
+          cp "$BG_IMG" dmg_stage/.background/background.png
 
-          # Create writable DMG
-          hdiutil create -volname "Tunnel Pilot" -srcfolder dmg_content -ov -format UDRW "${DMG_NAME}-rw.dmg"
+          # Create writable DMG from staged content
+          hdiutil create -volname "Tunnel Pilot" -srcfolder dmg_stage -ov -format UDRW "${DMG_NAME}-rw.dmg"
 
-          # Mount and configure layout via AppleScript
+          # Mount and apply Finder layout
           DEVICE=$(hdiutil attach "${DMG_NAME}-rw.dmg" | grep "/Volumes/Tunnel Pilot" | awk '{print $1}')
           sleep 2
 
@@ -60,23 +60,25 @@ jobs:
               set current view of container window to icon view
               set toolbar visible of container window to false
               set statusbar visible of container window to false
-              set bounds of container window to {100, 100, 700, 500}
+              set bounds of container window to {100, 100, 700, 620}
               set theViewOptions to icon view options of container window
               set arrangement of theViewOptions to not arranged
               set icon size of theViewOptions to 80
               set background picture of theViewOptions to file ".background:background.png"
-              set position of item "Tunnel Pilot.app" of container window to {150, 220}
-              set position of item "Applications" of container window to {450, 220}
+              set position of item "Tunnel Pilot.app" of container window to {170, 250}
+              set position of item "Applications" of container window to {430, 250}
+              set position of item ".background" of container window to {80, 60}
+              set position of item ".fseventsd" of container window to {520, 60}
               close
               open
               update without registering applications
-              delay 2
+              delay 3
               close
             end tell
           end tell
           APPLESCRIPT
 
-          # Unmount
+          sync
           hdiutil detach "$DEVICE"
 
           # Convert to compressed read-only DMG
