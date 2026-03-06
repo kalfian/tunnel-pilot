@@ -1,0 +1,136 @@
+import 'dart:io';
+
+import 'package:system_tray/system_tray.dart';
+
+import '../models/forward_config.dart';
+import '../models/forward_status.dart';
+
+class TrayService {
+  final SystemTray _systemTray = SystemTray();
+  final void Function() onSettingsClicked;
+  final void Function() onQuitClicked;
+  final void Function(String id) onToggleForward;
+
+  TrayService({
+    required this.onSettingsClicked,
+    required this.onQuitClicked,
+    required this.onToggleForward,
+  });
+
+  Future<void> init() async {
+    final iconPath = _iconPath(0);
+
+    await _systemTray.initSystemTray(
+      title: '',
+      iconPath: iconPath,
+      toolTip: 'Tunnel Pilot - SSH Port Forwarding',
+    );
+
+    _systemTray.registerSystemTrayEventHandler((eventName) {
+      if (eventName == kSystemTrayEventClick) {
+        _systemTray.popUpContextMenu();
+      } else if (eventName == kSystemTrayEventRightClick) {
+        _systemTray.popUpContextMenu();
+      }
+    });
+
+    await rebuildMenu([], {});
+  }
+
+  String _iconPath(int connectedCount) {
+    final ext = Platform.isWindows ? 'ico' : 'png';
+    if (connectedCount <= 0) {
+      return 'assets/icons/tray_icon_idle.$ext';
+    } else if (connectedCount <= 9) {
+      return 'assets/icons/tray_icon_$connectedCount.$ext';
+    } else {
+      return 'assets/icons/tray_icon_9.$ext';
+    }
+  }
+
+  String _statusIcon(ForwardStatus status) {
+    switch (status) {
+      case ForwardStatus.connected:
+        return '\u{1F7E2}'; // green circle
+      case ForwardStatus.connecting:
+        return '\u{1F7E1}'; // yellow circle
+      case ForwardStatus.error:
+        return '\u{1F534}'; // red circle
+      case ForwardStatus.disconnected:
+        return '\u26AA'; // white circle
+    }
+  }
+
+  String _statusLabel(ForwardStatus status) {
+    switch (status) {
+      case ForwardStatus.connected:
+        return 'ON';
+      case ForwardStatus.connecting:
+        return 'Connecting...';
+      case ForwardStatus.error:
+        return 'Error';
+      case ForwardStatus.disconnected:
+        return 'OFF';
+    }
+  }
+
+  Future<void> rebuildMenu(
+    List<ForwardConfig> forwards,
+    Map<String, ForwardStatus> statuses,
+  ) async {
+    // Count active connections
+    final connectedCount = statuses.values
+        .where((s) => s == ForwardStatus.connected)
+        .length;
+
+    // Update tray icon based on connection count
+    await _systemTray.setImage(_iconPath(connectedCount));
+    await _systemTray.setToolTip(connectedCount > 0
+        ? 'Tunnel Pilot - $connectedCount active'
+        : 'Tunnel Pilot - No active tunnels');
+
+    final List<MenuItemBase> menuItems = [];
+
+    menuItems.add(MenuItemLabel(
+      label: 'Tunnel Pilot${connectedCount > 0 ? '  ($connectedCount active)' : ''}',
+      enabled: false,
+    ));
+
+    menuItems.add(MenuSeparator());
+
+    if (forwards.isEmpty) {
+      menuItems.add(MenuItemLabel(
+        label: 'No tunnels configured',
+        enabled: false,
+      ));
+    } else {
+      for (final forward in forwards) {
+        final status = statuses[forward.id] ?? ForwardStatus.disconnected;
+        final icon = _statusIcon(status);
+        final label = _statusLabel(status);
+        menuItems.add(MenuItemLabel(
+          label: '$icon  ${forward.name}  [$label]',
+          onClicked: (_) => onToggleForward(forward.id),
+        ));
+      }
+    }
+
+    menuItems.add(MenuSeparator());
+
+    menuItems.add(MenuItemLabel(
+      label: 'Settings...',
+      onClicked: (_) => onSettingsClicked(),
+    ));
+
+    menuItems.add(MenuSeparator());
+
+    menuItems.add(MenuItemLabel(
+      label: 'Quit',
+      onClicked: (_) => onQuitClicked(),
+    ));
+
+    final menu = Menu();
+    await menu.buildFrom(menuItems);
+    await _systemTray.setContextMenu(menu);
+  }
+}
