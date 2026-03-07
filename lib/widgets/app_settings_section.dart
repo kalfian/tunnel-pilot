@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -50,6 +52,36 @@ class AppSettingsSection extends StatelessWidget {
                 activeColor: theme.colorScheme.primary,
               ),
             ),
+            Divider(height: 1, color: theme.dividerColor),
+            _settingsRow(
+              context,
+              icon: Icons.refresh_rounded,
+              title: 'Auto Reconnect',
+              subtitle: 'Retry ${provider.autoReconnectMaxRetries}x after ${provider.autoReconnectDelaySec}s delay',
+              trailing: _customToggle(
+                value: provider.autoReconnect,
+                onChanged: (v) => provider.setAutoReconnect(v),
+                activeColor: theme.colorScheme.primary,
+              ),
+            ),
+            Divider(height: 1, color: theme.dividerColor),
+            _settingsRow(
+              context,
+              icon: Platform.isMacOS
+                  ? Icons.dock_outlined
+                  : Icons.desktop_windows_outlined,
+              title: Platform.isMacOS
+                  ? 'Show in Dock'
+                  : 'Show in Taskbar',
+              subtitle: Platform.isMacOS
+                  ? 'Show app icon in Dock when window is open'
+                  : 'Show app icon in taskbar when window is open',
+              trailing: _customToggle(
+                value: provider.showInDock,
+                onChanged: (v) => provider.setShowInDock(v),
+                activeColor: theme.colorScheme.primary,
+              ),
+            ),
           ],
         ),
       ],
@@ -58,7 +90,6 @@ class AppSettingsSection extends StatelessWidget {
 
   Widget _themePicker(
       BuildContext context, AppSettingsProvider provider, bool isDark) {
-    final theme = Theme.of(context);
     final current = provider.themeMode;
 
     return Row(

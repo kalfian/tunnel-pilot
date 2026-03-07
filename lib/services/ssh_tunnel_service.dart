@@ -10,6 +10,8 @@ class TunnelConnection {
   final SSHClient client;
   final ServerSocket serverSocket;
   final List<Socket> activeSockets = [];
+  Timer? keepAliveTimer;
+  int missedAlives = 0;
 
   TunnelConnection({required this.client, required this.serverSocket});
 }
@@ -63,6 +65,41 @@ class SshTunnelService {
       );
       _connections[config.id] = tunnel;
 
+      // Start keep-alive timer
+      if (config.keepAliveIntervalSec > 0) {
+        tunnel.missedAlives = 0;
+        tunnel.keepAliveTimer = Timer.periodic(
+          Duration(seconds: config.keepAliveIntervalSec),
+          (_) async {
+            try {
+              await client.execute('');
+              tunnel.missedAlives = 0;
+            } catch (_) {
+              tunnel.missedAlives++;
+              if (tunnel.missedAlives >= config.keepAliveMaxCount) {
+                tunnel.keepAliveTimer?.cancel();
+                _connections.remove(config.id);
+                for (final s in tunnel.activeSockets) {
+                  s.destroy();
+                }
+                tunnel.activeSockets.clear();
+                try {
+                  await tunnel.serverSocket.close();
+                } catch (_) {}
+                try {
+                  client.close();
+                } catch (_) {}
+                onStatusChanged(
+                  config.id,
+                  ForwardStatus.error,
+                  'Connection lost: ${config.keepAliveMaxCount} unanswered keep-alive messages',
+                );
+              }
+            }
+          },
+        );
+      }
+
       serverSocket.listen(
         (localSocket) async {
           try {
@@ -98,7 +135,8 @@ class SshTunnelService {
         },
         onDone: () {
           if (_connections.containsKey(config.id)) {
-            _connections.remove(config.id);
+            final t = _connections.remove(config.id);
+            t?.keepAliveTimer?.cancel();
             onStatusChanged(config.id, ForwardStatus.disconnected, null);
           }
         },
@@ -114,6 +152,8 @@ class SshTunnelService {
   Future<void> disconnect(String id) async {
     final tunnel = _connections.remove(id);
     if (tunnel == null) return;
+
+    tunnel.keepAliveTimer?.cancel();
 
     for (final socket in tunnel.activeSockets) {
       socket.destroy();

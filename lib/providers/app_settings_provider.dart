@@ -22,6 +22,10 @@ class AppSettingsProvider extends ChangeNotifier {
   bool get launchAtLogin => _settings.launchAtLogin;
   bool get showNotifications => _settings.showNotifications;
   String get themeMode => _settings.themeMode;
+  bool get autoReconnect => _settings.autoReconnect;
+  int get autoReconnectDelaySec => _settings.autoReconnectDelaySec;
+  int get autoReconnectMaxRetries => _settings.autoReconnectMaxRetries;
+  bool get showInDock => _settings.showInDock;
 
   ThemeMode get themeModeEnum {
     switch (_settings.themeMode) {
@@ -49,6 +53,30 @@ class AppSettingsProvider extends ChangeNotifier {
 
   Future<void> setThemeMode(String mode) async {
     _settings.themeMode = mode;
+    await _storage.saveSettings(_settings);
+    notifyListeners();
+  }
+
+  Future<void> setAutoReconnect(bool value) async {
+    _settings.autoReconnect = value;
+    await _storage.saveSettings(_settings);
+    notifyListeners();
+  }
+
+  Future<void> setAutoReconnectDelaySec(int value) async {
+    _settings.autoReconnectDelaySec = value;
+    await _storage.saveSettings(_settings);
+    notifyListeners();
+  }
+
+  Future<void> setAutoReconnectMaxRetries(int value) async {
+    _settings.autoReconnectMaxRetries = value;
+    await _storage.saveSettings(_settings);
+    notifyListeners();
+  }
+
+  Future<void> setShowInDock(bool value) async {
+    _settings.showInDock = value;
     await _storage.saveSettings(_settings);
     notifyListeners();
   }

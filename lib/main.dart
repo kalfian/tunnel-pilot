@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app.dart';
 import 'providers/app_settings_provider.dart';
 import 'providers/forward_provider.dart';
+import 'services/log_service.dart';
 import 'services/notification_service.dart';
 import 'services/ssh_tunnel_service.dart';
 import 'services/startup_service.dart';
@@ -25,7 +26,7 @@ Future<void> main() async {
     maximumSize: Size(700, 600),
     center: true,
     title: 'Tunnel Pilot',
-    skipTaskbar: false,
+    skipTaskbar: true,
   );
 
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
@@ -39,6 +40,7 @@ Future<void> main() async {
   final sshTunnelService = SshTunnelService();
   final notificationService = NotificationService();
   final startupService = StartupService();
+  final logService = LogService();
 
   try {
     await notificationService.init();
@@ -64,7 +66,11 @@ Future<void> main() async {
     storage: storageService,
     tunnel: sshTunnelService,
     notification: notificationService,
+    logService: logService,
     notificationsEnabled: data.settings.showNotifications,
+    autoReconnect: data.settings.autoReconnect,
+    autoReconnectDelaySec: data.settings.autoReconnectDelaySec,
+    autoReconnectMaxRetries: data.settings.autoReconnectMaxRetries,
   );
   await forwardProvider.loadForwards(data.forwards);
 
@@ -78,6 +84,7 @@ Future<void> main() async {
   try {
     trayService = TrayService(
       onSettingsClicked: () async {
+        await windowManager.setSkipTaskbar(false);
         await windowManager.show();
         await windowManager.focus();
       },
@@ -119,6 +126,11 @@ Future<void> main() async {
   appSettingsProvider.addListener(() {
     forwardProvider.notificationsEnabled =
         appSettingsProvider.showNotifications;
+    forwardProvider.autoReconnect = appSettingsProvider.autoReconnect;
+    forwardProvider.autoReconnectDelaySec =
+        appSettingsProvider.autoReconnectDelaySec;
+    forwardProvider.autoReconnectMaxRetries =
+        appSettingsProvider.autoReconnectMaxRetries;
   });
 
   runApp(
@@ -126,8 +138,10 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider.value(value: forwardProvider),
         ChangeNotifierProvider.value(value: appSettingsProvider),
+        ChangeNotifierProvider.value(value: logService),
       ],
       child: _AppWithWindowListener(
+        appSettings: appSettingsProvider,
         child: const TunnelPilotApp(),
       ),
     ),
@@ -136,7 +150,8 @@ Future<void> main() async {
 
 class _AppWithWindowListener extends StatefulWidget {
   final Widget child;
-  const _AppWithWindowListener({required this.child});
+  final AppSettingsProvider appSettings;
+  const _AppWithWindowListener({required this.child, required this.appSettings});
 
   @override
   State<_AppWithWindowListener> createState() => _AppWithWindowListenerState();
@@ -151,6 +166,7 @@ class _AppWithWindowListenerState extends State<_AppWithWindowListener>
     // Hide window after the first frame so the engine is fully alive
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await windowManager.hide();
+      await windowManager.setSkipTaskbar(true);
     });
   }
 
@@ -167,6 +183,9 @@ class _AppWithWindowListenerState extends State<_AppWithWindowListener>
     final isPreventClose = await windowManager.isPreventClose();
     if (isPreventClose) {
       await windowManager.hide();
+      if (!widget.appSettings.showInDock) {
+        await windowManager.setSkipTaskbar(true);
+      }
     }
   }
 

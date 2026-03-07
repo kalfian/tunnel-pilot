@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnel_pilot/models/forward_config.dart';
 import 'package:tunnel_pilot/models/forward_status.dart';
 import 'package:tunnel_pilot/providers/forward_provider.dart';
+import 'package:tunnel_pilot/services/log_service.dart';
 import 'package:tunnel_pilot/services/notification_service.dart';
 import 'package:tunnel_pilot/services/ssh_tunnel_service.dart';
 import 'package:tunnel_pilot/services/storage_service.dart';
@@ -31,6 +32,7 @@ void main() {
         storage: mockStorage,
         tunnel: tunnelService,
         notification: notificationService,
+        logService: LogService(),
       );
     });
 

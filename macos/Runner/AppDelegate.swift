@@ -14,6 +14,9 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
+    // Hide from Dock — run as accessory (tray-only) app
+    NSApp.setActivationPolicy(.accessory)
+
     let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
     let channel = FlutterMethodChannel(name: "launch_at_startup", binaryMessenger: controller.engine.binaryMessenger)
 

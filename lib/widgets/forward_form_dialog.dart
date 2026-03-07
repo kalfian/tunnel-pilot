@@ -26,6 +26,8 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
   late final TextEditingController _localPortController;
   late final TextEditingController _remoteHostController;
   late final TextEditingController _remotePortController;
+  late final TextEditingController _keepAliveIntervalController;
+  late final TextEditingController _keepAliveMaxCountController;
 
   bool _useIdentityFile = false;
 
@@ -47,6 +49,10 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
     _remoteHostController = TextEditingController(text: c?.remoteHost ?? '');
     _remotePortController =
         TextEditingController(text: c != null ? '${c.remotePort}' : '');
+    _keepAliveIntervalController =
+        TextEditingController(text: '${c?.keepAliveIntervalSec ?? 30}');
+    _keepAliveMaxCountController =
+        TextEditingController(text: '${c?.keepAliveMaxCount ?? 5}');
 
     _useIdentityFile =
         c?.identityFilePath != null && c!.identityFilePath!.isNotEmpty;
@@ -64,6 +70,8 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
     _localPortController.dispose();
     _remoteHostController.dispose();
     _remotePortController.dispose();
+    _keepAliveIntervalController.dispose();
+    _keepAliveMaxCountController.dispose();
     super.dispose();
   }
 
@@ -93,6 +101,10 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
       localPort: int.parse(_localPortController.text.trim()),
       remoteHost: _remoteHostController.text.trim(),
       remotePort: int.parse(_remotePortController.text.trim()),
+      keepAliveIntervalSec:
+          int.tryParse(_keepAliveIntervalController.text.trim()) ?? 30,
+      keepAliveMaxCount:
+          int.tryParse(_keepAliveMaxCountController.text.trim()) ?? 5,
     );
 
     Navigator.of(context).pop(config);
@@ -372,6 +384,68 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
                             ),
                           ),
                         ],
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Advanced group (keep-alive)
+                  _groupCard(
+                    title: 'Keep Alive',
+                    icon: Icons.favorite_border_rounded,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _fieldLabel('Interval (seconds)'),
+                                const SizedBox(height: 6),
+                                TextFormField(
+                                  controller: _keepAliveIntervalController,
+                                  decoration: const InputDecoration(
+                                    hintText: '30',
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _fieldLabel('Max unanswered'),
+                                const SizedBox(height: 6),
+                                TextFormField(
+                                  controller: _keepAliveMaxCountController,
+                                  decoration: const InputDecoration(
+                                    hintText: '5',
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Disconnect after this many unanswered alive messages. Set interval to 0 to disable.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.outline,
+                        ),
                       ),
                     ],
                   ),

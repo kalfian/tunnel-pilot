@@ -12,6 +12,8 @@ class ForwardConfig {
   int localPort;
   String remoteHost;
   int remotePort;
+  int keepAliveIntervalSec;
+  int keepAliveMaxCount;
 
   ForwardConfig({
     String? id,
@@ -25,6 +27,8 @@ class ForwardConfig {
     required this.localPort,
     required this.remoteHost,
     required this.remotePort,
+    this.keepAliveIntervalSec = 30,
+    this.keepAliveMaxCount = 5,
   }) : id = id ?? const Uuid().v4();
 
   Map<String, dynamic> toJson() => {
@@ -39,6 +43,8 @@ class ForwardConfig {
         'localPort': localPort,
         'remoteHost': remoteHost,
         'remotePort': remotePort,
+        'keepAliveIntervalSec': keepAliveIntervalSec,
+        'keepAliveMaxCount': keepAliveMaxCount,
       };
 
   Map<String, dynamic> toJsonForBackup() => {
@@ -52,6 +58,8 @@ class ForwardConfig {
         'localPort': localPort,
         'remoteHost': remoteHost,
         'remotePort': remotePort,
+        'keepAliveIntervalSec': keepAliveIntervalSec,
+        'keepAliveMaxCount': keepAliveMaxCount,
       };
 
   factory ForwardConfig.fromJson(Map<String, dynamic> json) => ForwardConfig(
@@ -66,6 +74,8 @@ class ForwardConfig {
         localPort: json['localPort'] as int,
         remoteHost: json['remoteHost'] as String,
         remotePort: json['remotePort'] as int,
+        keepAliveIntervalSec: json['keepAliveIntervalSec'] as int? ?? 30,
+        keepAliveMaxCount: json['keepAliveMaxCount'] as int? ?? 5,
       );
 
   ForwardConfig copyWith({
@@ -80,6 +90,8 @@ class ForwardConfig {
     int? localPort,
     String? remoteHost,
     int? remotePort,
+    int? keepAliveIntervalSec,
+    int? keepAliveMaxCount,
   }) =>
       ForwardConfig(
         id: id ?? this.id,
@@ -93,6 +105,8 @@ class ForwardConfig {
         localPort: localPort ?? this.localPort,
         remoteHost: remoteHost ?? this.remoteHost,
         remotePort: remotePort ?? this.remotePort,
+        keepAliveIntervalSec: keepAliveIntervalSec ?? this.keepAliveIntervalSec,
+        keepAliveMaxCount: keepAliveMaxCount ?? this.keepAliveMaxCount,
       );
 
   bool get needsPassword =>

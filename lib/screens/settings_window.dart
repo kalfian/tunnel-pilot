@@ -3,11 +3,13 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../models/forward_config.dart';
+import '../providers/app_settings_provider.dart';
 import '../providers/forward_provider.dart';
 import '../widgets/app_settings_section.dart';
 import '../widgets/backup_restore_section.dart';
 import '../widgets/forward_form_dialog.dart';
 import '../widgets/forward_list_tile.dart';
+import '../widgets/logs_section.dart';
 
 class SettingsWindow extends StatefulWidget {
   const SettingsWindow({super.key});
@@ -19,6 +21,10 @@ class SettingsWindow extends StatefulWidget {
 class _SettingsWindowState extends State<SettingsWindow> {
   String? _selectedId;
   int _tabIndex = 0;
+
+  void navigateToLogs() {
+    setState(() => _tabIndex = 1);
+  }
 
   Future<void> _addForward() async {
     final result = await showDialog<ForwardConfig>(
@@ -148,7 +154,9 @@ class _SettingsWindowState extends State<SettingsWindow> {
                     children: [
                       _navTab('Connections', 0),
                       const SizedBox(width: 4),
-                      _navTab('Settings', 1),
+                      _navTab('Logs', 1),
+                      const SizedBox(width: 4),
+                      _navTab('Settings', 2),
                     ],
                   ),
                 ],
@@ -162,7 +170,9 @@ class _SettingsWindowState extends State<SettingsWindow> {
               duration: const Duration(milliseconds: 150),
               child: _tabIndex == 0
                   ? _buildConnectionsTab(context)
-                  : _buildSettingsTab(context),
+                  : _tabIndex == 1
+                      ? _buildLogsTab(context)
+                      : _buildSettingsTab(context),
             ),
           ),
         ],
@@ -269,6 +279,14 @@ class _SettingsWindowState extends State<SettingsWindow> {
     );
   }
 
+  Widget _buildLogsTab(BuildContext context) {
+    return const Padding(
+      key: ValueKey('logs'),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 16),
+      child: LogsSection(),
+    );
+  }
+
   Widget _buildEmptyState(ThemeData theme) {
     return Center(
       child: Column(
@@ -321,7 +339,13 @@ class _SettingsWindowState extends State<SettingsWindow> {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
-        onTap: () => windowManager.hide(),
+        onTap: () async {
+          await windowManager.hide();
+          final showInDock = context.read<AppSettingsProvider>().showInDock;
+          if (!showInDock) {
+            await windowManager.setSkipTaskbar(true);
+          }
+        },
         child: Container(
           width: 28,
           height: 28,
