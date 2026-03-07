@@ -3,12 +3,88 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tunnel Pilot - SSH Port Forwarding Manager</title>
-  <meta name="description" content="A cross-platform SSH local port forwarding manager that lives in your system tray. Manage SSH tunnels with ease on macOS, Windows, and Linux.">
-  <meta property="og:title" content="Tunnel Pilot - SSH Port Forwarding Manager">
-  <meta property="og:description" content="Manage SSH tunnels from your system tray. Cross-platform, open source.">
+  <title>Tunnel Pilot - SSH Local Port Forwarding App for Mac, Windows & Linux</title>
+  <meta name="description" content="Free open-source SSH local port forwarding manager for macOS, Windows, and Linux. Manage SSH tunnels from your system tray — toggle connections with one click. The easiest way to replace ssh -L commands.">
+  <meta name="keywords" content="SSH local port forwarding, SSH tunnel manager, port forwarding app, SSH port forwarding Mac, local port forwarding macOS, SSH tunnel GUI, ssh -L manager, SSH forwarding tool, port forwarding desktop app, SSH tunnel toggle, system tray SSH manager, open source SSH tool">
+  <meta name="robots" content="index, follow">
+  <meta name="author" content="kalfian">
+  <link rel="canonical" href="https://kalfian.github.io/tunnel-pilot/">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Tunnel Pilot - SSH Local Port Forwarding App for Mac, Windows & Linux">
+  <meta property="og:description" content="Free open-source SSH local port forwarding manager. Manage SSH tunnels from your system tray — toggle connections with one click. Replaces repetitive ssh -L commands.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://kalfian.github.io/tunnel-pilot">
+  <meta property="og:url" content="https://kalfian.github.io/tunnel-pilot/">
+  <meta property="og:image" content="https://kalfian.github.io/tunnel-pilot/Screenshot/connections.png">
+  <meta property="og:site_name" content="Tunnel Pilot">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Tunnel Pilot - SSH Local Port Forwarding App">
+  <meta name="twitter:description" content="Free open-source SSH local port forwarding manager for macOS, Windows & Linux. Toggle SSH tunnels from your system tray.">
+  <meta name="twitter:image" content="https://kalfian.github.io/tunnel-pilot/Screenshot/connections.png">
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Tunnel Pilot",
+    "description": "A free, open-source SSH local port forwarding manager that lives in your system tray. Configure SSH tunnels once and toggle them on or off with a single click on macOS, Windows, and Linux.",
+    "url": "https://kalfian.github.io/tunnel-pilot/",
+    "downloadUrl": "https://github.com/kalfian/tunnel-pilot/releases",
+    "screenshot": "https://kalfian.github.io/tunnel-pilot/Screenshot/connections.png",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS, Windows, Linux",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "author": {
+      "@type": "Person",
+      "name": "kalfian",
+      "url": "https://github.com/kalfian"
+    },
+    "license": "https://opensource.org/licenses/MIT",
+    "softwareVersion": "0.0.1",
+    "isAccessibleForFree": true
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is SSH local port forwarding?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "SSH local port forwarding (ssh -L) creates a secure tunnel that forwards traffic from a local port on your machine to a remote host through an SSH server. It's commonly used to access remote databases, internal web services, or any TCP service behind a firewall. Tunnel Pilot provides a GUI to manage these tunnels without typing commands."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I set up local port forwarding on Mac?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "With Tunnel Pilot, setting up local port forwarding on macOS is simple: install the app, click the system tray icon, add a new tunnel with your SSH server details, local port, and remote host/port, then toggle it on. No terminal commands needed. The app replaces manual ssh -L commands with a one-click interface."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is Tunnel Pilot free and open source?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes, Tunnel Pilot is completely free and open source under the MIT License. The source code is available on GitHub. It works on macOS, Windows, and Linux."
+        }
+      }
+    ]
+  }
+  </script>
+
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="icon" type="image/png" href="favicon.png">
   <style>
@@ -597,6 +673,66 @@
       margin-top: 10px;
     }
 
+    /* FAQ */
+    section.faq { padding: 100px 0; }
+
+    .faq-list { max-width: 720px; margin: 0 auto; }
+
+    .faq-item {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      background: var(--bg-card);
+      transition: border-color 0.2s;
+    }
+
+    .faq-item:hover { border-color: rgba(0,123,255,0.3); }
+
+    .faq-item[open] { border-color: rgba(0,123,255,0.4); }
+
+    .faq-item summary {
+      padding: 18px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .faq-item summary::-webkit-details-marker { display: none; }
+
+    .faq-item summary::after {
+      content: '+';
+      font-size: 18px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      transition: transform 0.2s;
+    }
+
+    .faq-item[open] summary::after {
+      content: '−';
+      color: var(--blue);
+    }
+
+    .faq-item p {
+      padding: 0 22px 18px;
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.7;
+    }
+
+    .faq-item code {
+      background: rgba(0,123,255,0.12);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+      color: var(--blue-light);
+      font-family: 'SF Mono', 'JetBrains Mono', monospace;
+    }
+
     @media (max-width: 768px) {
       .hero h1 { font-size: 2.2rem; }
       .features-grid { grid-template-columns: 1fr; }
@@ -607,34 +743,40 @@
 </head>
 <body>
 
-  <nav>
-    <div class="container">
-      <a href="#" class="nav-brand">
-        <img src="app_icon.png" alt="Tunnel Pilot" style="width:26px;height:26px;border-radius:6px;" />
-        Tunnel Pilot
-      </a>
-      <div class="nav-links">
-        <a href="#features">Features</a>
-        <a href="#install">Install</a>
-        <a href="https://github.com/kalfian/tunnel-pilot" class="gh-btn">
-          <i class="fab fa-github"></i> GitHub
+  <header>
+    <nav aria-label="Main navigation">
+      <div class="container">
+        <a href="#" class="nav-brand">
+          <img src="app_icon.png" alt="Tunnel Pilot logo" width="26" height="26" style="border-radius:6px;" />
+          Tunnel Pilot
         </a>
+        <div class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#screenshots">Screenshots</a>
+          <a href="#install">Install</a>
+          <a href="#faq">FAQ</a>
+          <a href="https://github.com/kalfian/tunnel-pilot" class="gh-btn">
+            <i class="fab fa-github"></i> GitHub
+          </a>
+        </div>
       </div>
-    </div>
-  </nav>
+    </nav>
+  </header>
+
+  <main>
 
   <section class="hero">
     <div class="hero-content">
       <div class="hero-logo">
-        <img src="app_icon.png" alt="Tunnel Pilot" />
+        <img src="app_icon.png" alt="Tunnel Pilot - SSH local port forwarding app" width="96" height="96" />
       </div>
       <div class="hero-badge">
         <i class="fas fa-bolt"></i>
         Open source &middot; Cross-platform
       </div>
-      <h1><span>Tunnel Pilot</span></h1>
-      <p style="font-size:1.4rem;color:var(--text);font-weight:600;margin-bottom:8px;letter-spacing:-0.01em;">SSH tunnels, simplified.</p>
-      <p>Stop typing <code style="background:rgba(0,123,255,0.15);padding:2px 8px;border-radius:5px;font-size:0.9em;color:var(--blue-light);font-family:'SF Mono','JetBrains Mono',monospace;">ssh -L</code> over and over. Tunnel Pilot manages your port forwarding from the system tray — configure once, toggle with a click.</p>
+      <h1><span>SSH Local Port Forwarding,</span> Simplified</h1>
+      <p style="font-size:1.4rem;color:var(--text);font-weight:600;margin-bottom:8px;letter-spacing:-0.01em;">Tunnel Pilot — your SSH tunnel manager.</p>
+      <p>Stop typing <code style="background:rgba(0,123,255,0.15);padding:2px 8px;border-radius:5px;font-size:0.9em;color:var(--blue-light);font-family:'SF Mono','JetBrains Mono',monospace;">ssh -L</code> over and over. Tunnel Pilot manages your local port forwarding from the system tray on macOS, Windows, and Linux — configure once, toggle with a click.</p>
       <div class="btn-row">
         <a href="https://github.com/kalfian/tunnel-pilot/releases" class="btn btn-primary">
           <i class="fas fa-download"></i> Download
@@ -652,23 +794,23 @@
     </div>
   </section>
 
-  <section class="screenshots">
+  <section class="screenshots" id="screenshots">
     <div class="container">
       <div class="section-header animate-on-scroll">
-        <h2>Clean & Intuitive</h2>
-        <p>Designed for developers who value simplicity</p>
+        <h2>Clean & Intuitive Interface</h2>
+        <p>A modern SSH tunnel manager designed for developers who value simplicity</p>
       </div>
       <div class="screenshot-grid">
         <div class="screenshot-item animate-on-scroll delay-1" onclick="openLightbox('Screenshot/connections.png')">
-          <img src="Screenshot/connections.png" alt="Connections tab">
+          <img src="Screenshot/connections.png" alt="Tunnel Pilot SSH connections list showing active port forwarding tunnels on macOS" loading="lazy">
           <div class="screenshot-label">Connections<span>Manage all your SSH tunnels</span></div>
         </div>
         <div class="screenshot-item animate-on-scroll delay-2" onclick="openLightbox('Screenshot/settings.png')">
-          <img src="Screenshot/settings.png" alt="Settings tab">
+          <img src="Screenshot/settings.png" alt="Tunnel Pilot settings panel with theme, notifications, and backup options" loading="lazy">
           <div class="screenshot-label">Settings<span>Theme, notifications, backup</span></div>
         </div>
         <div class="screenshot-item animate-on-scroll delay-3" onclick="openLightbox('Screenshot/new-tunnel.png')">
-          <img src="Screenshot/new-tunnel.png" alt="New tunnel dialog">
+          <img src="Screenshot/new-tunnel.png" alt="Add new SSH local port forwarding tunnel configuration dialog" loading="lazy">
           <div class="screenshot-label">Add Tunnel<span>Quick configuration form</span></div>
         </div>
       </div>
@@ -678,19 +820,19 @@
   <section class="features" id="features">
     <div class="container">
       <div class="section-header animate-on-scroll">
-        <h2>Everything you need</h2>
-        <p>No more memorizing ports and hosts — just point, click, and connect</p>
+        <h2>Everything You Need to Manage SSH Tunnels</h2>
+        <p>No more memorizing ports and hosts — just point, click, and forward</p>
       </div>
       <div class="features-grid">
         <div class="fcard animate-on-scroll delay-1">
           <div class="fcard-icon"><i class="fas fa-desktop"></i></div>
           <h3>System Tray Native</h3>
-          <p>Lives in your menu bar or system tray. No window clutter - just a clean icon with quick access to all your tunnels.</p>
+          <p>Lives in your Mac menu bar or system tray. No window clutter — just a clean icon with quick access to all your SSH port forwarding tunnels.</p>
         </div>
         <div class="fcard animate-on-scroll delay-2">
           <div class="fcard-icon"><i class="fas fa-toggle-on"></i></div>
-          <h3>One-Click Toggle</h3>
-          <p>Toggle SSH tunnels on and off from the tray menu. Color-coded indicators show the state of each tunnel at a glance.</p>
+          <h3>One-Click Port Forwarding</h3>
+          <p>Toggle SSH local port forwarding on and off from the tray menu. Color-coded status indicators show the state of each connection at a glance.</p>
         </div>
         <div class="fcard animate-on-scroll delay-3">
           <div class="fcard-icon"><i class="fas fa-key"></i></div>
@@ -738,8 +880,8 @@
   <section class="installation" id="install">
     <div class="container">
       <div class="section-header animate-on-scroll">
-        <h2>Get Started</h2>
-        <p>Up and running in minutes</p>
+        <h2>Install Tunnel Pilot</h2>
+        <p>Set up SSH local port forwarding in minutes</p>
       </div>
       <div class="tab-row">
         <button class="tab-btn active" onclick="showTab('binary')">Download</button>
@@ -796,11 +938,44 @@
     </div>
   </section>
 
+  <section class="faq" id="faq">
+    <div class="container">
+      <div class="section-header animate-on-scroll">
+        <h2>Frequently Asked Questions</h2>
+        <p>Common questions about SSH local port forwarding and Tunnel Pilot</p>
+      </div>
+      <div class="faq-list">
+        <details class="faq-item animate-on-scroll delay-1">
+          <summary>What is SSH local port forwarding?</summary>
+          <p>SSH local port forwarding (<code>ssh -L</code>) creates a secure encrypted tunnel that forwards traffic from a local port on your machine to a remote host through an SSH server. It's commonly used to access remote databases, internal web services, APIs, or any TCP service behind a firewall — without exposing them to the public internet. Tunnel Pilot provides a graphical interface to manage these tunnels without typing terminal commands.</p>
+        </details>
+        <details class="faq-item animate-on-scroll delay-2">
+          <summary>How do I set up local port forwarding on macOS?</summary>
+          <p>With Tunnel Pilot, setting up local port forwarding on Mac is simple: download and install the app, click the system tray icon in your menu bar, add a new tunnel with your SSH server details (host, username, password or identity file), specify the local port and remote host/port, then toggle it on. No terminal commands needed — Tunnel Pilot replaces manual <code>ssh -L</code> commands with a one-click interface that lives in your menu bar.</p>
+        </details>
+        <details class="faq-item animate-on-scroll delay-3">
+          <summary>Is Tunnel Pilot free?</summary>
+          <p>Yes, Tunnel Pilot is completely free and open source under the MIT License. There are no paid plans, subscriptions, or hidden costs. The full source code is available on GitHub, and you can build it yourself or download pre-built releases for macOS, Windows, and Linux.</p>
+        </details>
+        <details class="faq-item animate-on-scroll delay-4">
+          <summary>What platforms does Tunnel Pilot support?</summary>
+          <p>Tunnel Pilot runs natively on macOS, Windows, and Linux. On macOS it lives in the menu bar (no Dock icon). On Windows and Linux it runs in the system tray. Built with Flutter for consistent cross-platform performance.</p>
+        </details>
+        <details class="faq-item animate-on-scroll delay-5">
+          <summary>How is this different from using ssh -L in the terminal?</summary>
+          <p>While <code>ssh -L</code> works great for one-off connections, managing multiple tunnels across projects gets tedious. Tunnel Pilot saves your configurations, lets you toggle tunnels on/off with one click, shows connection status with color-coded indicators, sends desktop notifications, and starts automatically at login. It's the GUI that the <code>ssh -L</code> command deserves.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  </main>
+
   <footer>
     <div class="container">
       <p style="display:inline-flex;align-items:center;gap:8px;justify-content:center;">
-        <img src="app_icon.png" alt="Tunnel Pilot" style="width:20px;height:20px;border-radius:5px;" />
-        <strong>Tunnel Pilot</strong> &mdash; Open source SSH port forwarding manager
+        <img src="app_icon.png" alt="Tunnel Pilot" width="20" height="20" style="border-radius:5px;" />
+        <strong>Tunnel Pilot</strong> &mdash; Open source SSH local port forwarding manager
       </p>
       <div class="footer-links">
         <a href="https://github.com/kalfian/tunnel-pilot"><i class="fab fa-github"></i> GitHub</a>
