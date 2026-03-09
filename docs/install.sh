@@ -127,6 +127,11 @@ check_deps() {
   if ! command -v curl &>/dev/null; then
     print_error "'curl' is required but not installed.\n  macOS: brew install curl\n  Linux: sudo apt install curl"
   fi
+  if [ "$PLATFORM" = "windows" ]; then
+    if ! command -v unzip &>/dev/null && ! command -v powershell &>/dev/null && ! command -v pwsh &>/dev/null; then
+      print_error "'unzip' or PowerShell is required on Windows.\n  Install Git for Windows or ensure PowerShell is in PATH."
+    fi
+  fi
   if command -v jq &>/dev/null; then
     HAS_JQ=true
   else
@@ -295,24 +300,43 @@ install_macos() {
 
 # ── Install: Linux ─────────────────────────────────────────────────────────────
 install_linux() {
+  INSTALL_APP_DIR="$HOME/.local/share/$BINARY_NAME"
   INSTALL_BIN="$HOME/.local/bin"
-  mkdir -p "$INSTALL_BIN"
+
+  # Remove previous installation before recreating
+  if [ -d "$INSTALL_APP_DIR" ]; then
+    print_step "Removing previous installation..."
+    rm -rf "$INSTALL_APP_DIR"
+  fi
+  mkdir -p "$INSTALL_APP_DIR" "$INSTALL_BIN"
 
   spinner_start "Extracting archive"
-  tar -xzf "$TMP_FILE" -C "$TMP_DIR"
+  # Extract full bundle (binary + lib/*.so + data/) into the app dir
+  # so the binary can find shared libs via $ORIGIN/lib at runtime
+  tar -xzf "$TMP_FILE" -C "$INSTALL_APP_DIR"
   spinner_stop
 
-  BINARY=$(find "$TMP_DIR" -name "$BINARY_NAME" -type f | head -1)
-  if [ -z "$BINARY" ]; then
+  LINUX_BINARY=$(find "$INSTALL_APP_DIR" -name "$BINARY_NAME" -maxdepth 2 -type f | head -1)
+  if [ -z "$LINUX_BINARY" ]; then
     print_error "Binary '$BINARY_NAME' not found in archive."
   fi
 
-  chmod +x "$BINARY"
-  cp "$BINARY" "$INSTALL_BIN/$BINARY_NAME"
-  print_success "Installed to ${DIM}$INSTALL_BIN/$BINARY_NAME${NC}"
+  chmod +x "$LINUX_BINARY"
+
+  # Create a launcher wrapper so shared libs resolve via $ORIGIN/lib correctly.
+  # A plain symlink would set $ORIGIN to ~/.local/bin and miss the lib/ directory.
+  local LAUNCHER="$INSTALL_BIN/$BINARY_NAME"
+  cat > "$LAUNCHER" << LAUNCHER_EOF
+#!/bin/bash
+exec "$LINUX_BINARY" "\$@"
+LAUNCHER_EOF
+  chmod +x "$LAUNCHER"
+
+  print_success "Installed to ${DIM}$INSTALL_APP_DIR${NC}"
+  print_success "Launcher at ${DIM}$LAUNCHER${NC}"
 
   # Check PATH
-  if ! echo "$PATH" | grep -q "$INSTALL_BIN"; then
+  if ! echo ":$PATH:" | grep -q ":$INSTALL_BIN:"; then
     print_warn "$INSTALL_BIN is not in your PATH"
     print_info "Add this to your ~/.bashrc or ~/.zshrc:"
     echo ""
@@ -323,13 +347,19 @@ install_linux() {
 
 # ── Install: Windows ───────────────────────────────────────────────────────────
 install_windows() {
-  DEST="$APPDATA/Tunnel Pilot"
-  mkdir -p "$DEST"
+  WIN_DEST="$APPDATA/Tunnel Pilot"
+  mkdir -p "$WIN_DEST"
 
   spinner_start "Extracting archive"
-  unzip -q "$TMP_FILE" -d "$DEST"
+  if command -v unzip &>/dev/null; then
+    unzip -q "$TMP_FILE" -d "$WIN_DEST"
+  elif command -v pwsh &>/dev/null; then
+    pwsh -Command "Expand-Archive -Force -Path '$TMP_FILE' -DestinationPath '$WIN_DEST'"
+  else
+    powershell -Command "Expand-Archive -Force -Path '$TMP_FILE' -DestinationPath '$WIN_DEST'"
+  fi
   spinner_stop
-  print_success "Extracted to ${DIM}$DEST${NC}"
+  print_success "Extracted to ${DIM}$WIN_DEST${NC}"
 }
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
@@ -352,10 +382,11 @@ print_summary() {
       ;;
     linux)
       print_info "Run it with: ${CYAN}$BINARY_NAME${NC}"
+      print_info "App bundle: ${DIM}$HOME/.local/share/$BINARY_NAME${NC}"
       ;;
     windows)
       print_info "Run tunnel_pilot.exe from:"
-      print_info "$APPDATA/Tunnel Pilot"
+      print_info "${WIN_DEST:-$APPDATA/Tunnel Pilot}"
       ;;
   esac
   echo ""
@@ -390,5 +421,8 @@ main() {
   print_summary
 }
 
-trap cleanup EXIT
-main
+# Allow sourcing for tests without running main
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  trap cleanup EXIT
+  main
+fi
