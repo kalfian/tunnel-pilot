@@ -46,7 +46,7 @@ class SshTunnelService {
 
     try {
       final socket = await SSHSocket.connect(config.sshHost, config.sshPort)
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 15));
 
       SSHClient client;
 
@@ -70,6 +70,7 @@ class SshTunnelService {
       final serverSocket = await ServerSocket.bind(
         config.localBindAddress,
         config.localPort,
+        shared: true,
       );
 
       final tunnel = TunnelConnection(

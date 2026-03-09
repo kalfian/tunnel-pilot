@@ -128,6 +128,8 @@ class ForwardProvider extends ChangeNotifier {
       _statuses[id] = ForwardStatus.disconnected;
       _errorMessages.remove(id);
       notifyListeners();
+      // Small delay to let OS release the local port (TIME_WAIT)
+      await Future.delayed(const Duration(milliseconds: 500));
       await _connectForward(id);
     }
   }
