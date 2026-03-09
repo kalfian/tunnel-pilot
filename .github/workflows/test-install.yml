@@ -1,0 +1,151 @@
+name: Test Install Script
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # ── Job 1: Unit tests (no network, no real release needed) ──────────────────
+  unit-test:
+    name: Unit tests (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # zip/unzip not in Git Bash on Windows by default
+      - name: Install zip & unzip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install zip unzip -y --no-progress
+          echo "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # jq pre-installed on Ubuntu; Windows falls back to grep/sed in the test
+      - name: Run unit tests
+        shell: bash
+        run: bash docs/install_test.sh
+
+  # ── Job 2: Real install on Linux — download, install, verify, run ───────────
+  e2e-linux:
+    name: E2E install (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            libayatana-appindicator3-1 \
+            libnotify4 \
+            libgtk-3-0 \
+            xvfb
+
+      - name: Install Tunnel Pilot via install script
+        run: curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash
+
+      - name: Verify installation
+        run: |
+          APP_DIR="$HOME/.local/share/tunnel_pilot"
+          LAUNCHER="$HOME/.local/bin/tunnel_pilot"
+
+          echo "==> Checking files..."
+          test -d "$APP_DIR"           && echo "  ✓ App dir exists"
+          test -f "$APP_DIR/tunnel_pilot" && echo "  ✓ Binary present"
+          test -x "$APP_DIR/tunnel_pilot" && echo "  ✓ Binary is executable"
+          test -d "$APP_DIR/lib"       && echo "  ✓ lib/ dir present"
+          test -f "$LAUNCHER"          && echo "  ✓ Launcher present"
+          test -x "$LAUNCHER"          && echo "  ✓ Launcher is executable"
+
+          echo ""
+          echo "==> Checking shared libraries (ldd)..."
+          cd "$APP_DIR"
+          MISSING=$(ldd tunnel_pilot 2>/dev/null | grep "not found" || true)
+          if [ -n "$MISSING" ]; then
+            echo "  ✗ Missing shared libraries:"
+            echo "$MISSING"
+            exit 1
+          fi
+          echo "  ✓ All shared libraries resolved"
+
+          echo ""
+          echo "==> Launcher content:"
+          cat "$LAUNCHER"
+
+      - name: Smoke test — launch with virtual display
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1024x768x24 &
+          XVFB_PID=$!
+          sleep 1
+
+          echo "==> Starting tunnel_pilot..."
+          "$HOME/.local/bin/tunnel_pilot" &
+          APP_PID=$!
+          sleep 2
+
+          if kill -0 "$APP_PID" 2>/dev/null; then
+            echo "  ✓ App is running (PID $APP_PID)"
+            kill "$APP_PID" 2>/dev/null || true
+          else
+            wait "$APP_PID"
+            EXIT_CODE=$?
+            # Exit code 0 = clean exit (app may have found no tray and quit gracefully)
+            if [ "$EXIT_CODE" -eq 0 ]; then
+              echo "  ✓ App started and exited cleanly (exit 0)"
+            else
+              echo "  ✗ App crashed with exit code $EXIT_CODE"
+              exit 1
+            fi
+          fi
+
+          kill "$XVFB_PID" 2>/dev/null || true
+
+  # ── Job 3: Real install on Windows — download, install, verify, run ─────────
+  e2e-windows:
+    name: E2E install (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Install Tunnel Pilot via install script
+        shell: bash
+        run: curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash
+
+      - name: Verify installation
+        shell: bash
+        run: |
+          DEST="$APPDATA/Tunnel Pilot"
+
+          echo "==> Checking files..."
+          test -d "$DEST"                       && echo "  ✓ Install dir exists: $DEST"
+          test -f "$DEST/tunnel_pilot.exe"      && echo "  ✓ tunnel_pilot.exe present"
+          test -f "$DEST/flutter_windows.dll"   && echo "  ✓ flutter_windows.dll present"
+
+          echo ""
+          echo "==> Install contents:"
+          ls -la "$DEST/"
+
+      - name: Smoke test — launch briefly
+        shell: pwsh
+        run: |
+          $exe = "$env:APPDATA\Tunnel Pilot\tunnel_pilot.exe"
+          Write-Host "==> Starting $exe ..."
+
+          $proc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+
+          if (-not $proc.HasExited) {
+            Write-Host "  ✓ App is running (PID $($proc.Id))"
+            $proc.Kill()
+          } else {
+            $code = $proc.ExitCode
+            if ($code -eq 0) {
+              Write-Host "  ✓ App started and exited cleanly (exit 0)"
+            } else {
+              Write-Host "  ✗ App exited with code $code"
+              exit 1
+            }
+          }
