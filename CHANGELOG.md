@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.3 (2026-03-09)
+
+### Fixes
+
+- Fixed tunnel stuck in loading/connecting state after an unexpected disconnect followed by manual toggle
+- Fixed clicking connect on an error or stuck tunnel causing infinite loading — now force-resets to disconnected before reconnecting
+- Added 5 second timeout on SSH socket connection to prevent indefinite loading
+- Added generation token system to invalidate stale callbacks from previous connection attempts
+
 ## 0.0.2 (2026-03-07)
 
 ### Features

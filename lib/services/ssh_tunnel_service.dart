@@ -21,19 +21,32 @@ typedef StatusCallback = void Function(
 
 class SshTunnelService {
   final Map<String, TunnelConnection> _connections = {};
+  // Generation counter to invalidate stale in-flight connect callbacks
+  final Map<String, int> _generation = {};
 
   Future<void> connect(
     ForwardConfig config, {
     required StatusCallback onStatusChanged,
   }) async {
+    // Bump generation — any callback from a previous attempt with a lower
+    // generation will be silently dropped.
+    final gen = (_generation[config.id] ?? 0) + 1;
+    _generation[config.id] = gen;
+
     if (_connections.containsKey(config.id)) {
       await disconnect(config.id);
     }
 
-    onStatusChanged(config.id, ForwardStatus.connecting, null);
+    void safeCallback(ForwardStatus status, String? error) {
+      if ((_generation[config.id] ?? 0) != gen) return;
+      onStatusChanged(config.id, status, error);
+    }
+
+    safeCallback(ForwardStatus.connecting, null);
 
     try {
-      final socket = await SSHSocket.connect(config.sshHost, config.sshPort);
+      final socket = await SSHSocket.connect(config.sshHost, config.sshPort)
+          .timeout(const Duration(seconds: 5));
 
       SSHClient client;
 
@@ -89,8 +102,7 @@ class SshTunnelService {
                 try {
                   client.close();
                 } catch (_) {}
-                onStatusChanged(
-                  config.id,
+                safeCallback(
                   ForwardStatus.error,
                   'Connection lost: ${config.keepAliveMaxCount} unanswered keep-alive messages',
                 );
@@ -131,25 +143,28 @@ class SshTunnelService {
           }
         },
         onError: (error) {
-          onStatusChanged(config.id, ForwardStatus.error, error.toString());
+          safeCallback(ForwardStatus.error, error.toString());
         },
         onDone: () {
           if (_connections.containsKey(config.id)) {
             final t = _connections.remove(config.id);
             t?.keepAliveTimer?.cancel();
-            onStatusChanged(config.id, ForwardStatus.disconnected, null);
+            safeCallback(ForwardStatus.disconnected, null);
           }
         },
       );
 
-      onStatusChanged(config.id, ForwardStatus.connected, null);
+      safeCallback(ForwardStatus.connected, null);
     } catch (e) {
       _connections.remove(config.id);
-      onStatusChanged(config.id, ForwardStatus.error, e.toString());
+      safeCallback(ForwardStatus.error, e.toString());
     }
   }
 
   Future<void> disconnect(String id) async {
+    // Invalidate any in-flight connect callback for this id
+    _generation[id] = (_generation[id] ?? 0) + 1;
+
     final tunnel = _connections.remove(id);
     if (tunnel == null) return;
 

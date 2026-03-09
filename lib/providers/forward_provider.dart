@@ -123,6 +123,11 @@ class ForwardProvider extends ChangeNotifier {
       _userDisconnected.remove(id);
       _cancelReconnect(id);
       _reconnectAttempts.remove(id);
+      // Force to disconnected first to clear any stale error/connecting state
+      await _tunnel.disconnect(id);
+      _statuses[id] = ForwardStatus.disconnected;
+      _errorMessages.remove(id);
+      notifyListeners();
       await _connectForward(id);
     }
   }
