@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../models/forward_config.dart';
-import '../providers/app_settings_provider.dart';
+// import '../providers/app_settings_provider.dart';
 import '../providers/forward_provider.dart';
 import '../widgets/app_settings_section.dart';
 import '../widgets/backup_restore_section.dart';
@@ -146,7 +146,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
                       const SizedBox(width: 10),
                       Text('Tunnel Pilot', style: theme.textTheme.titleMedium),
                       const Spacer(),
-                      _closeButton(theme),
+                      // _closeButton(theme),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -269,6 +269,14 @@ class _SettingsWindowState extends State<SettingsWindow> {
                       onTap: () => setState(() => _selectedId = config.id),
                       onDoubleTap: () => _editForward(config),
                       onToggle: () => provider.toggleForward(config.id),
+                      onEdit: () => _editForward(config),
+                      onDuplicate: () async {
+                        await provider.duplicateForward(config.id);
+                      },
+                      onDelete: () async {
+                        setState(() => _selectedId = config.id);
+                        await _deleteForward();
+                      },
                       isFirst: index == 0,
                       isLast: index == forwards.length - 1,
                     );
@@ -335,32 +343,32 @@ class _SettingsWindowState extends State<SettingsWindow> {
     );
   }
 
-  Widget _closeButton(ThemeData theme) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () async {
-          await windowManager.hide();
-          final showInDock = context.read<AppSettingsProvider>().showInDock;
-          if (!showInDock) {
-            await windowManager.setSkipTaskbar(true);
-          }
-        },
-        child: Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Icon(
-            Icons.close_rounded,
-            size: 16,
-            color: theme.colorScheme.outline,
-          ),
-        ),
-      ),
-    );
-  }
+  // Widget _closeButton(ThemeData theme) {
+  //   return MouseRegion(
+  //     cursor: SystemMouseCursors.click,
+  //     child: GestureDetector(
+  //       onTap: () async {
+  //         await windowManager.hide();
+  //         final showInDock = context.read<AppSettingsProvider>().showInDock;
+  //         if (!showInDock) {
+  //           await windowManager.setSkipTaskbar(true);
+  //         }
+  //       },
+  //       child: Container(
+  //         width: 28,
+  //         height: 28,
+  //         decoration: BoxDecoration(
+  //           borderRadius: BorderRadius.circular(6),
+  //         ),
+  //         child: Icon(
+  //           Icons.close_rounded,
+  //           size: 16,
+  //           color: theme.colorScheme.outline,
+  //         ),
+  //       ),
+  //     ),
+  //   );
+  // }
 
   Widget _toolbarAction(
     IconData icon,

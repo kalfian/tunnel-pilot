@@ -11,6 +11,9 @@ class ForwardListTile extends StatefulWidget {
   final VoidCallback onDoubleTap;
   final bool isSelected;
   final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onDuplicate;
+  final VoidCallback onDelete;
   final bool isFirst;
   final bool isLast;
 
@@ -23,6 +26,9 @@ class ForwardListTile extends StatefulWidget {
     required this.onDoubleTap,
     required this.isSelected,
     required this.onTap,
+    required this.onEdit,
+    required this.onDuplicate,
+    required this.onDelete,
     this.isFirst = false,
     this.isLast = false,
   });
@@ -32,8 +38,6 @@ class ForwardListTile extends StatefulWidget {
 }
 
 class _ForwardListTileState extends State<ForwardListTile> {
-  bool _hovered = false;
-
   Color _statusColor() {
     switch (widget.status) {
       case ForwardStatus.connected:
@@ -44,6 +48,68 @@ class _ForwardListTileState extends State<ForwardListTile> {
         return const Color(0xFFEF4444);
       case ForwardStatus.disconnected:
         return const Color(0xFF6B7280);
+    }
+  }
+
+  void _showContextMenu(BuildContext context, Offset position) async {
+    final theme = Theme.of(context);
+    final result = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      items: [
+        PopupMenuItem(
+          value: 'edit',
+          height: 36,
+          child: Row(
+            children: [
+              Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.onSurface),
+              const SizedBox(width: 8),
+              const Text('Edit', style: TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'duplicate',
+          height: 36,
+          child: Row(
+            children: [
+              Icon(Icons.copy_rounded, size: 16, color: theme.colorScheme.onSurface),
+              const SizedBox(width: 8),
+              const Text('Duplicate', style: TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(height: 8),
+        PopupMenuItem(
+          value: 'delete',
+          height: 36,
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline_rounded, size: 16, color: Colors.red.shade400),
+              const SizedBox(width: 8),
+              Text('Delete', style: TextStyle(fontSize: 13, color: Colors.red.shade400)),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    switch (result) {
+      case 'edit':
+        widget.onEdit();
+        break;
+      case 'duplicate':
+        widget.onDuplicate();
+        break;
+      case 'delete':
+        widget.onDelete();
+        break;
     }
   }
 
@@ -64,148 +130,137 @@ class _ForwardListTileState extends State<ForwardListTile> {
     );
 
     return GestureDetector(
+      onTap: widget.onTap,
       onDoubleTap: widget.onDoubleTap,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          decoration: BoxDecoration(
-            color: widget.isSelected
-                ? theme.colorScheme.primary.withValues(alpha: isDark ? 0.08 : 0.05)
-                : _hovered
-                    ? theme.colorScheme.onSurface.withValues(alpha: 0.02)
-                    : theme.colorScheme.surface,
-            borderRadius: radius,
-            border: Border(
-              left: BorderSide(color: borderColor),
-              right: BorderSide(color: borderColor),
-              top: widget.isFirst
-                  ? BorderSide(color: borderColor)
-                  : BorderSide(color: borderColor, width: 0.5),
-              bottom: widget.isLast
-                  ? BorderSide(color: borderColor)
-                  : BorderSide.none,
-            ),
+      onSecondaryTapUp: (details) =>
+          _showContextMenu(context, details.globalPosition),
+      child: Container(
+        decoration: BoxDecoration(
+          color: widget.isSelected
+              ? theme.colorScheme.primary
+                  .withValues(alpha: isDark ? 0.08 : 0.05)
+              : theme.colorScheme.surface,
+          borderRadius: radius,
+          border: Border(
+            left: BorderSide(color: borderColor),
+            right: BorderSide(color: borderColor),
+            top: widget.isFirst
+                ? BorderSide(color: borderColor)
+                : BorderSide(color: borderColor, width: 0.5),
+            bottom: widget.isLast
+                ? BorderSide(color: borderColor)
+                : BorderSide.none,
           ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: widget.onTap,
-              borderRadius: radius,
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                child: Row(
-                  children: [
-                    // Status indicator
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        boxShadow: isActive
-                            ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 6)]
-                            : null,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        child: Row(
+          children: [
+            // Status indicator
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                boxShadow: isActive
+                    ? [
+                        BoxShadow(
+                            color: color.withValues(alpha: 0.5),
+                            blurRadius: 6)
+                      ]
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 12),
 
-                    // Info
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  widget.config.name,
-                                  style: theme.textTheme.titleSmall,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (widget.config.needsPassword) ...[
-                                const SizedBox(width: 6),
-                                const Icon(Icons.key_off_rounded,
-                                    size: 13, color: Color(0xFFF59E0B)),
-                              ],
-                            ],
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            ':${widget.config.localPort} \u2192 ${widget.config.remoteHost}:${widget.config.remotePort}',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontFamily: 'JetBrains Mono, SF Mono, Menlo, monospace',
-                              color: theme.colorScheme.outline,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          if (hasError) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              widget.errorMessage!,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.red.shade400,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(width: 12),
-
-                    // Custom toggle
-                    GestureDetector(
-                      onTap: widget.onToggle,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: 36,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          color: isActive
-                              ? color
-                              : theme.colorScheme.outlineVariant,
-                        ),
-                        child: AnimatedAlign(
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeInOut,
-                          alignment: isActive
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Container(
-                            width: 16,
-                            height: 16,
-                            margin: const EdgeInsets.symmetric(horizontal: 2),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.white,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.15),
-                                  blurRadius: 2,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
-                            ),
-                          ),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.config.name,
+                          style: theme.textTheme.titleSmall,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if (widget.config.needsPassword) ...[
+                        const SizedBox(width: 6),
+                        const Icon(Icons.key_off_rounded,
+                            size: 13, color: Color(0xFFF59E0B)),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    ':${widget.config.localPort} \u2192 ${widget.config.remoteHost}:${widget.config.remotePort}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'JetBrains Mono, SF Mono, Menlo, monospace',
+                      color: theme.colorScheme.outline,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (hasError) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.errorMessage!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.red.shade400,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
+                ],
+              ),
+            ),
+
+            const SizedBox(width: 12),
+
+            // Custom toggle
+            GestureDetector(
+              onTap: widget.onToggle,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 36,
+                height: 20,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  color: isActive ? color : theme.colorScheme.outlineVariant,
+                ),
+                child: AnimatedAlign(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeInOut,
+                  alignment: isActive
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: Container(
+                    width: 16,
+                    height: 16,
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.15),
+                          blurRadius: 2,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );

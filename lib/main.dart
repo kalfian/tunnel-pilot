@@ -29,8 +29,7 @@ Future<void> main() async {
     center: true,
     title: 'Tunnel Pilot',
     skipTaskbar: true,
-    titleBarStyle:
-        Platform.isMacOS ? TitleBarStyle.normal : TitleBarStyle.hidden,
+    titleBarStyle: TitleBarStyle.normal,
   );
 
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
@@ -96,6 +95,11 @@ Future<void> main() async {
   try {
     trayService = TrayService(
       onSettingsClicked: () async {
+        final isVisible = await windowManager.isVisible();
+        if (isVisible) {
+          await windowManager.focus();
+          return;
+        }
         await windowManager.setSkipTaskbar(false);
         await windowManager.show();
         await windowManager.focus();
@@ -177,7 +181,7 @@ class _AppWithWindowListenerState extends State<_AppWithWindowListener>
     windowManager.addListener(this);
     // Hide window after the first frame so the engine is fully alive
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await windowManager.hide();
+      // await windowManager.hide();
       await windowManager.setSkipTaskbar(true);
     });
   }

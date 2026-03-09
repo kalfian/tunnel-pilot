@@ -8,12 +8,8 @@ class MainFlutterWindow: NSWindow {
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
 
-    // Hide traffic light buttons (close, minimize, maximize)
-    self.standardWindowButton(.closeButton)?.isHidden = true
-    self.standardWindowButton(.miniaturizeButton)?.isHidden = true
-    self.standardWindowButton(.zoomButton)?.isHidden = true
-
-    // Remove title bar but keep window frame
+    // Transparent title bar — Flutter content extends behind it.
+    // Traffic lights remain visible (native macOS affordance).
     self.titlebarAppearsTransparent = true
     self.titleVisibility = .hidden
     self.styleMask.insert(.fullSizeContentView)

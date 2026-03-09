@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0 (2026-03-09)
+
+### Features
+
+- **Right-Click Context Menu** — Right-click on any tunnel in the list to quickly Edit, Duplicate, or Delete
+- **Smart Window Reopen** — Clicking the tray icon now opens/focuses the settings window directly (left-click), preventing duplicate windows from opening
+
+### Improvements
+
+- **Tray Click Behavior** — Left-click on tray icon opens the window; right-click shows the context menu
+- Removed hover animation on tunnel list items to fix visual glitch
+
 ## 0.0.5 (2026-03-09)
 
 ### Features
