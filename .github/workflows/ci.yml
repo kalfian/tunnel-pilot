@@ -1,18 +1,29 @@
 name: CI
 
 on:
+  push:
+    branches: [master]
   pull_request:
     branches: [master]
 
 jobs:
   test:
-    runs-on: macos-latest
+    # Ubuntu starts faster than macOS and is sufficient for pure unit tests
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true          # caches Flutter SDK between runs
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
 
       - run: flutter pub get
-      - run: flutter test
+      - run: flutter test --no-pub
