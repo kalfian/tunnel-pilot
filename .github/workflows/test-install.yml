@@ -104,9 +104,53 @@ jobs:
 
           kill "$XVFB_PID" 2>/dev/null || true
 
-  # ── Job 3: Real install on Windows — download, install, verify, run ─────────
-  e2e-windows:
-    name: E2E install (Windows)
+  # ── Job 3: Real install on macOS — download, install, verify, run ───────────
+  e2e-macos:
+    name: E2E install (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Install Tunnel Pilot via install script
+        run: curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash
+
+      - name: Verify installation
+        run: |
+          APP="/Applications/Tunnel Pilot.app"
+          BIN="$APP/Contents/MacOS/tunnel_pilot"
+
+          echo "==> Checking files..."
+          test -d "$APP"  && echo "  ✓ App bundle exists"
+          test -f "$BIN"  && echo "  ✓ Binary present"
+          test -x "$BIN"  && echo "  ✓ Binary is executable"
+
+          echo ""
+          echo "==> App bundle contents:"
+          ls -la "$APP/Contents/MacOS/"
+
+      - name: Smoke test — launch briefly
+        run: |
+          echo "==> Starting Tunnel Pilot..."
+          open -a "Tunnel Pilot" || "$APP/Contents/MacOS/tunnel_pilot" &
+          APP_PID=$!
+          sleep 2
+
+          if kill -0 "$APP_PID" 2>/dev/null; then
+            echo "  ✓ App is running (PID $APP_PID)"
+            kill "$APP_PID" 2>/dev/null || true
+          else
+            wait "$APP_PID"
+            EXIT_CODE=$?
+            if [ "$EXIT_CODE" -eq 0 ]; then
+              echo "  ✓ App started and exited cleanly (exit 0)"
+            else
+              echo "  ✗ App crashed with exit code $EXIT_CODE"
+              exit 1
+            fi
+          fi
+
+  # ── Job 4: Real install on Windows via WSL bash installer ────────────────────
+  e2e-windows-wsl:
+    name: E2E install (Windows / WSL)
     runs-on: windows-latest
 
     steps:
@@ -127,6 +171,54 @@ jobs:
           echo ""
           echo "==> Install contents:"
           ls -la "$DEST/"
+
+      - name: Smoke test — launch briefly
+        shell: pwsh
+        run: |
+          $exe = "$env:APPDATA\Tunnel Pilot\tunnel_pilot.exe"
+          Write-Host "==> Starting $exe ..."
+
+          $proc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+
+          if (-not $proc.HasExited) {
+            Write-Host "  ✓ App is running (PID $($proc.Id))"
+            $proc.Kill()
+          } else {
+            $code = $proc.ExitCode
+            if ($code -eq 0) {
+              Write-Host "  ✓ App started and exited cleanly (exit 0)"
+            } else {
+              Write-Host "  ✗ App exited with code $code"
+              exit 1
+            }
+          }
+
+  # ── Job 5: Real install on Windows via CMD PowerShell installer ───────────────
+  e2e-windows-cmd:
+    name: E2E install (Windows / CMD)
+    runs-on: windows-latest
+
+    steps:
+      - name: Install Tunnel Pilot via PowerShell installer
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          irm https://kalfian.github.io/tunnel-pilot/install.ps1 | iex
+
+      - name: Verify installation
+        shell: pwsh
+        run: |
+          $dest = "$env:APPDATA\Tunnel Pilot"
+
+          Write-Host "==> Checking files..."
+          if (Test-Path $dest)                              { Write-Host "  ✓ Install dir exists: $dest" }
+          if (Test-Path "$dest\tunnel_pilot.exe")           { Write-Host "  ✓ tunnel_pilot.exe present" }
+          if (Test-Path "$dest\flutter_windows.dll")        { Write-Host "  ✓ flutter_windows.dll present" }
+
+          Write-Host ""
+          Write-Host "==> Install contents:"
+          Get-ChildItem "$dest\" | Format-Table Name, Length, LastWriteTime
 
       - name: Smoke test — launch briefly
         shell: pwsh
