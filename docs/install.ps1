@@ -34,12 +34,10 @@ Write-Header
 
 # ── Fetch latest release ──────────────────────────────────────────────────────
 Write-Step "Fetching latest release..."
-$ghHeaders = @{ Accept = "application/vnd.github+json" }
-if ($env:GITHUB_TOKEN) { $ghHeaders["Authorization"] = "Bearer $env:GITHUB_TOKEN" }
 try {
   $release = Invoke-RestMethod `
     -Uri "https://api.github.com/repos/$REPO/releases/latest" `
-    -Headers $ghHeaders
+    -Headers @{ Accept = "application/vnd.github+json" }
 } catch {
   Write-Err "Could not reach GitHub. Check your internet connection."
 }

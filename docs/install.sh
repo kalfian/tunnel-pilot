@@ -183,13 +183,8 @@ get_installed_version() {
 fetch_latest() {
   spinner_start "Fetching latest release"
   local api_url="https://api.github.com/repos/${REPO}/releases/latest"
-  local auth_header=()
-  if [ -n "${GITHUB_TOKEN:-}" ]; then
-    auth_header=(-H "Authorization: Bearer $GITHUB_TOKEN")
-  fi
   RELEASE_JSON=$(curl -fsSL \
     -H "Accept: application/vnd.github+json" \
-    "${auth_header[@]}" \
     "$api_url" 2>/dev/null) || {
     spinner_stop
     print_error "Could not reach GitHub. Check your internet connection.\n  URL: $api_url"
