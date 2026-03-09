@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.0.4 (2026-03-09)
+
+### Features
+
+- **Install Script** — One-command installation for macOS, Linux, and Windows (Git Bash): `curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash`
+  - Auto-detects platform, downloads latest release, installs and launches the app
+  - macOS: mounts DMG, copies to `/Applications`, removes quarantine flag
+  - Linux: extracts to `~/.local/bin`
+  - Windows: extracts to `%APPDATA%/Tunnel Pilot`
+- **Windows & Linux Releases** — GitHub Actions now builds and publishes release artifacts for all three platforms (`.dmg`, `.zip`, `.tar.gz`)
+- **Launch at Login** — Now enabled by default on fresh installs
+
+### Improvements
+
+- Landing page now shows the install command directly in the hero section with click-to-copy
+- Landing page "Download App" button links directly to GitHub Releases
+
 ## 0.0.3 (2026-03-09)
 
 ### Fixes

@@ -80,6 +80,14 @@ Future<void> main() async {
     settings: data.settings,
   );
 
+  // Sync launch-at-login with OS on every startup so the registration
+  // stays correct (especially on first launch where the default is true).
+  try {
+    await startupService.setEnabled(data.settings.launchAtLogin);
+  } catch (e) {
+    debugPrint('StartupService setEnabled failed: $e');
+  }
+
   TrayService? trayService;
   try {
     trayService = TrayService(

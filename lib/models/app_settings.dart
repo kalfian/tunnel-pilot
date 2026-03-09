@@ -8,7 +8,7 @@ class AppSettings {
   bool showInDock;
 
   AppSettings({
-    this.launchAtLogin = false,
+    this.launchAtLogin = true,
     this.showNotifications = true,
     this.themeMode = 'system',
     this.autoReconnect = true,
@@ -28,7 +28,7 @@ class AppSettings {
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
-        launchAtLogin: json['launchAtLogin'] as bool? ?? false,
+        launchAtLogin: json['launchAtLogin'] as bool? ?? true,
         showNotifications: json['showNotifications'] as bool? ?? true,
         themeMode: json['themeMode'] as String? ?? 'system',
         autoReconnect: json['autoReconnect'] as bool? ?? true,
