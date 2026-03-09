@@ -182,3 +182,36 @@ jobs:
             artifacts/*.dmg
             artifacts/*.zip
             artifacts/*.tar.gz
+
+      - name: Notify Discord
+        if: success()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL not set — skipping notification"
+            exit 0
+          fi
+
+          VERSION="${{ github.ref_name }}"
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
+          NOTES=$(cat release_notes.md | head -50)
+
+          # Escape JSON special characters
+          NOTES_ESCAPED=$(echo "$NOTES" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
+
+          curl -fsSL -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"🚀 Tunnel Pilot ${VERSION} Released\",
+                \"url\": \"${RELEASE_URL}\",
+                \"description\": ${NOTES_ESCAPED},
+                \"color\": 31743,
+                \"fields\": [
+                  { \"name\": \"Downloads\", \"value\": \"[GitHub Releases](${RELEASE_URL})\", \"inline\": true },
+                  { \"name\": \"Platform\", \"value\": \"macOS · Windows · Linux\", \"inline\": true }
+                ],
+                \"footer\": { \"text\": \"Tunnel Pilot — SSH Local Port Forwarding Manager\" }
+              }]
+            }" \
+            "$DISCORD_WEBHOOK_URL"
