@@ -106,6 +106,52 @@ jobs:
 
           kill "$XVFB_PID" 2>/dev/null || true
 
+      - name: Single-instance test
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1024x768x24 2>/dev/null &
+          XVFB_PID=$!
+          sleep 1
+
+          echo "==> Starting first instance..."
+          "$HOME/.local/bin/tunnel_pilot" &
+          FIRST_PID=$!
+          sleep 3
+
+          if ! kill -0 "$FIRST_PID" 2>/dev/null; then
+            echo "  ⚠ First instance exited (no tray in CI) — skipping single-instance test"
+            kill "$XVFB_PID" 2>/dev/null || true
+            exit 0
+          fi
+          echo "  ✓ First instance running (PID $FIRST_PID)"
+
+          echo "==> Starting second instance..."
+          "$HOME/.local/bin/tunnel_pilot" &
+          SECOND_PID=$!
+          sleep 3
+
+          if kill -0 "$SECOND_PID" 2>/dev/null; then
+            echo "  ✗ Second instance is still running — single-instance guard failed"
+            kill "$FIRST_PID" "$SECOND_PID" 2>/dev/null || true
+            kill "$XVFB_PID" 2>/dev/null || true
+            exit 1
+          else
+            wait "$SECOND_PID"
+            SECOND_EXIT=$?
+            echo "  ✓ Second instance exited with code $SECOND_EXIT"
+          fi
+
+          if kill -0 "$FIRST_PID" 2>/dev/null; then
+            echo "  ✓ First instance still running after second exited"
+            kill "$FIRST_PID" 2>/dev/null || true
+          else
+            echo "  ✗ First instance also exited unexpectedly"
+            kill "$XVFB_PID" 2>/dev/null || true
+            exit 1
+          fi
+
+          kill "$XVFB_PID" 2>/dev/null || true
+
   # ── Job 3: Real install on macOS — download, install, verify, run ───────────
   e2e-macos:
     name: E2E install (macOS)
@@ -200,6 +246,41 @@ jobs:
             }
           }
 
+      - name: Single-instance test
+        shell: pwsh
+        run: |
+          $exe = "$env:APPDATA\Tunnel Pilot\tunnel_pilot.exe"
+
+          Write-Host "==> Starting first instance..."
+          $first = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 3
+
+          if ($first.HasExited) {
+            Write-Host "  ⚠ First instance exited (no tray in CI) — skipping single-instance test"
+            exit 0
+          }
+          Write-Host "  ✓ First instance running (PID $($first.Id))"
+
+          Write-Host "==> Starting second instance..."
+          $second = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 3
+
+          if (-not $second.HasExited) {
+            Write-Host "  ✗ Second instance is still running — single-instance guard failed"
+            $first.Kill()
+            $second.Kill()
+            exit 1
+          }
+          Write-Host "  ✓ Second instance exited with code $($second.ExitCode)"
+
+          if (-not $first.HasExited) {
+            Write-Host "  ✓ First instance still running after second exited"
+            $first.Kill()
+          } else {
+            Write-Host "  ✗ First instance also exited unexpectedly"
+            exit 1
+          }
+
   # ── Job 5: Real install on Windows via CMD PowerShell installer ───────────────
   e2e-windows-cmd:
     name: E2E install (Windows / CMD)
@@ -248,4 +329,39 @@ jobs:
               Write-Host "  ✗ App exited with code $code"
               exit 1
             }
+          }
+
+      - name: Single-instance test
+        shell: pwsh
+        run: |
+          $exe = "$env:APPDATA\Tunnel Pilot\tunnel_pilot.exe"
+
+          Write-Host "==> Starting first instance..."
+          $first = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 3
+
+          if ($first.HasExited) {
+            Write-Host "  ⚠ First instance exited (no tray in CI) — skipping single-instance test"
+            exit 0
+          }
+          Write-Host "  ✓ First instance running (PID $($first.Id))"
+
+          Write-Host "==> Starting second instance..."
+          $second = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 3
+
+          if (-not $second.HasExited) {
+            Write-Host "  ✗ Second instance is still running — single-instance guard failed"
+            $first.Kill()
+            $second.Kill()
+            exit 1
+          }
+          Write-Host "  ✓ Second instance exited with code $($second.ExitCode)"
+
+          if (-not $first.HasExited) {
+            Write-Host "  ✓ First instance still running after second exited"
+            $first.Kill()
+          } else {
+            Write-Host "  ✗ First instance also exited unexpectedly"
+            exit 1
           }

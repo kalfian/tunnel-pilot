@@ -27,9 +27,8 @@ class TrayService {
     );
 
     _systemTray.registerSystemTrayEventHandler((eventName) {
-      if (eventName == kSystemTrayEventClick) {
-        onSettingsClicked();
-      } else if (eventName == kSystemTrayEventRightClick) {
+      if (eventName == kSystemTrayEventClick ||
+          eventName == kSystemTrayEventRightClick) {
         _systemTray.popUpContextMenu();
       }
     });

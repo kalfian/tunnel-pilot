@@ -13,6 +13,15 @@ class AppDelegate: FlutterAppDelegate {
     return true
   }
 
+  override func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    // User re-launched the .app → tell Flutter to show the settings window
+    if let controller = mainFlutterWindow?.contentViewController as? FlutterViewController {
+      let channel = FlutterMethodChannel(name: "app_lifecycle", binaryMessenger: controller.engine.binaryMessenger)
+      channel.invokeMethod("showSettings", arguments: nil)
+    }
+    return true
+  }
+
   override func applicationDidFinishLaunching(_ notification: Notification) {
     // Hide from Dock — run as accessory (tray-only) app
     NSApp.setActivationPolicy(.accessory)

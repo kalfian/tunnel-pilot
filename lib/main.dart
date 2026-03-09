@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -13,10 +14,21 @@ import 'services/notification_service.dart';
 import 'services/ssh_tunnel_service.dart';
 import 'services/startup_service.dart';
 import 'services/storage_service.dart';
+import 'services/single_instance_service.dart';
 import 'services/tray_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Single-instance guard (Windows/Linux).
+  // macOS uses applicationShouldHandleReopen instead.
+  final singleInstance = SingleInstanceService();
+  if (!Platform.isMacOS) {
+    final isPrimary = await singleInstance.ensureSingleInstance();
+    if (!isPrimary) {
+      exit(0);
+    }
+  }
 
   await windowManager.ensureInitialized();
 
@@ -106,6 +118,7 @@ Future<void> main() async {
       },
       onQuitClicked: () async {
         await forwardProvider.disconnectAll();
+        await singleInstance.dispose();
         exit(0);
       },
       onToggleForward: (id) {
@@ -137,6 +150,31 @@ Future<void> main() async {
           f.id: forwardProvider.getStatus(f.id),
       },
     );
+  }
+
+  // Show settings when another instance or app reopen is detected
+  Future<void> showSettings() async {
+    final isVisible = await windowManager.isVisible();
+    if (!isVisible) {
+      if (appSettingsProvider.showInDock) {
+        await windowManager.setSkipTaskbar(false);
+      }
+      await windowManager.show();
+    }
+    await windowManager.focus();
+  }
+
+  // macOS: user opens .app again → applicationShouldHandleReopen
+  if (Platform.isMacOS) {
+    const channel = MethodChannel('app_lifecycle');
+    channel.setMethodCallHandler((call) async {
+      if (call.method == 'showSettings') {
+        await showSettings();
+      }
+    });
+  } else {
+    // Windows/Linux: second instance sends "show" via TCP
+    singleInstance.onSecondInstance = showSettings;
   }
 
   appSettingsProvider.addListener(() {

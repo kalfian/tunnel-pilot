@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.1 (2026-03-09)
+
+### Improvements
+
+- **Tray Click Behavior** — Both left-click and right-click on the tray icon now show the tunnel list context menu instead of opening the settings window
+- **Reopen via App Launch** — Running the app again opens the settings window instead of starting a duplicate instance
+  - macOS: handled via `applicationShouldHandleReopen` delegate
+  - Windows/Linux: single-instance guard using local TCP socket — second instance signals the first and exits
+- **Landing Page Responsive** — Added tablet (1024px), mobile (768px), and small mobile (400px) breakpoints for proper responsive layout
+
+### Fixes
+
+- Fixed `install.sh` crash (`auth_header[@]: unbound variable`) caused by empty array expansion under `set -u` — removed unnecessary GitHub auth header for public repo
+- Fixed `install.ps1` similarly — removed unused `GITHUB_TOKEN` auth header
+
 ## 0.1.0 (2026-03-09)
 
 ### Features
