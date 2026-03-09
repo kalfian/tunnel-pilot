@@ -422,7 +422,7 @@ main() {
 }
 
 # Allow sourcing for tests without running main
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
   trap cleanup EXIT
   main
 fi

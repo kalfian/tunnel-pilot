@@ -4,10 +4,21 @@
 #  Run: bash docs/install_test.sh
 # ══════════════════════════════════════════════════════════════════════════════
 
-set -uo pipefail
+set -eo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve script directory robustly — works when run as:
+#   bash docs/install_test.sh       (from project root)
+#   bash install_test.sh            (from docs/)
+#   /absolute/path/install_test.sh  (any CWD)
+_SELF="${BASH_SOURCE[0]:-$0}"
+SCRIPT_DIR="$(cd "$(dirname "$_SELF")" && pwd)"
 INSTALL_SH="$SCRIPT_DIR/install.sh"
+
+if [[ ! -f "$INSTALL_SH" ]]; then
+  echo "Error: install.sh not found at $INSTALL_SH"
+  echo "Run this test from the project root: bash docs/install_test.sh"
+  exit 1
+fi
 
 # ── Minimal test framework ────────────────────────────────────────────────────
 PASS=0
