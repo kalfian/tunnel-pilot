@@ -45,6 +45,8 @@ jobs:
             xvfb
 
       - name: Install Tunnel Pilot via install script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash
 
       - name: Verify installation
@@ -111,6 +113,8 @@ jobs:
 
     steps:
       - name: Install Tunnel Pilot via install script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash
 
       - name: Verify installation
@@ -156,6 +160,8 @@ jobs:
     steps:
       - name: Install Tunnel Pilot via install script
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash
 
       - name: Verify installation
@@ -202,6 +208,8 @@ jobs:
     steps:
       - name: Install Tunnel Pilot via PowerShell installer
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           Set-ExecutionPolicy Bypass -Scope Process -Force
           irm https://kalfian.github.io/tunnel-pilot/install.ps1 | iex

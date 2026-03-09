@@ -97,6 +97,27 @@ jobs:
           channel: stable
 
       - run: flutter pub get
+
+      - name: Generate ICO files from PNG assets
+        shell: pwsh
+        run: |
+          # ImageMagick is pre-installed on windows-latest as 'magick'
+          # app_icon.ico: multi-resolution (16,32,64,128,256) for exe/taskbar icon
+          magick convert `
+            assets/icons/app_icon_16.png `
+            assets/icons/app_icon_32.png `
+            assets/icons/app_icon_64.png `
+            assets/icons/app_icon_128.png `
+            assets/icons/app_icon_256.png `
+            windows/runner/resources/app_icon.ico
+
+          # Tray icons: 32x32 is sufficient for the system tray
+          magick convert assets/icons/tray_icon_idle.png -resize 32x32 assets/icons/tray_icon_idle.ico
+          foreach ($n in 1..9) {
+            magick convert "assets/icons/tray_icon_$n.png" -resize 32x32 "assets/icons/tray_icon_$n.ico"
+          }
+          Write-Host "ICO files generated."
+
       - run: flutter build windows
 
       - name: Create ZIP

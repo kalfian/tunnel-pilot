@@ -183,8 +183,13 @@ get_installed_version() {
 fetch_latest() {
   spinner_start "Fetching latest release"
   local api_url="https://api.github.com/repos/${REPO}/releases/latest"
+  local auth_header=()
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    auth_header=(-H "Authorization: Bearer $GITHUB_TOKEN")
+  fi
   RELEASE_JSON=$(curl -fsSL \
     -H "Accept: application/vnd.github+json" \
+    "${auth_header[@]}" \
     "$api_url" 2>/dev/null) || {
     spinner_stop
     print_error "Could not reach GitHub. Check your internet connection.\n  URL: $api_url"
@@ -336,6 +341,37 @@ LAUNCHER_EOF
 
   print_success "Installed to ${DIM}$INSTALL_APP_DIR${NC}"
   print_success "Launcher at ${DIM}$LAUNCHER${NC}"
+
+  # .desktop file for app menu + desktop shortcut
+  local DESKTOP_DIR="$HOME/.local/share/applications"
+  local ICON_SRC="$INSTALL_APP_DIR/data/flutter_assets/assets/icons/app_icon_256.png"
+  local ICON_DEST="$HOME/.local/share/icons/tunnel_pilot.png"
+  mkdir -p "$DESKTOP_DIR" "$HOME/.local/share/icons"
+  [ -f "$ICON_SRC" ] && cp "$ICON_SRC" "$ICON_DEST"
+  cat > "$DESKTOP_DIR/tunnel_pilot.desktop" << DESKTOP_EOF
+[Desktop Entry]
+Name=Tunnel Pilot
+Comment=SSH Local Port Forwarding Manager
+Exec=$LAUNCHER %U
+Icon=$ICON_DEST
+Terminal=false
+Type=Application
+Categories=Network;Utility;
+StartupNotify=false
+DESKTOP_EOF
+  chmod +x "$DESKTOP_DIR/tunnel_pilot.desktop"
+
+  # Also place shortcut on Desktop if the directory exists
+  local USER_DESKTOP="$HOME/Desktop"
+  if [ -d "$USER_DESKTOP" ]; then
+    cp "$DESKTOP_DIR/tunnel_pilot.desktop" "$USER_DESKTOP/tunnel_pilot.desktop"
+    chmod +x "$USER_DESKTOP/tunnel_pilot.desktop"
+    print_success "Desktop shortcut created at ${DIM}$USER_DESKTOP/tunnel_pilot.desktop${NC}"
+  fi
+
+  # Refresh app menu (best-effort)
+  command -v update-desktop-database &>/dev/null && \
+    update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 
   # Check PATH
   if ! echo ":$PATH:" | grep -q ":$INSTALL_BIN:"; then

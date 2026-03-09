@@ -34,10 +34,12 @@ Write-Header
 
 # ── Fetch latest release ──────────────────────────────────────────────────────
 Write-Step "Fetching latest release..."
+$ghHeaders = @{ Accept = "application/vnd.github+json" }
+if ($env:GITHUB_TOKEN) { $ghHeaders["Authorization"] = "Bearer $env:GITHUB_TOKEN" }
 try {
   $release = Invoke-RestMethod `
     -Uri "https://api.github.com/repos/$REPO/releases/latest" `
-    -Headers @{ Accept = "application/vnd.github+json" }
+    -Headers $ghHeaders
 } catch {
   Write-Err "Could not reach GitHub. Check your internet connection."
 }
@@ -105,6 +107,40 @@ Expand-Archive -Force -Path $tmpFile -DestinationPath $DEST
 Remove-Item $tmpFile -ErrorAction SilentlyContinue
 
 Write-Ok "Extracted to $DEST"
+
+# ── Desktop shortcut ──────────────────────────────────────────────────────────
+Write-Step "Creating desktop shortcut..."
+$desktopPath = [Environment]::GetFolderPath("Desktop")
+$shortcutFile = "$desktopPath\Tunnel Pilot.lnk"
+try {
+  $shell = New-Object -ComObject WScript.Shell
+  $shortcut = $shell.CreateShortcut($shortcutFile)
+  $shortcut.TargetPath = $exe
+  $shortcut.WorkingDirectory = $DEST
+  $shortcut.Description = "SSH Local Port Forwarding Manager"
+  $shortcut.IconLocation = "$exe,0"
+  $shortcut.Save()
+  Write-Ok "Desktop shortcut created: $shortcutFile"
+} catch {
+  Write-Warn "Could not create desktop shortcut: $_"
+}
+
+# ── Start Menu shortcut ───────────────────────────────────────────────────────
+$startMenuPath = [Environment]::GetFolderPath("StartMenu") + "\Programs"
+$startShortcut = "$startMenuPath\Tunnel Pilot.lnk"
+try {
+  New-Item -ItemType Directory -Force -Path $startMenuPath | Out-Null
+  $shell2 = New-Object -ComObject WScript.Shell
+  $sc2 = $shell2.CreateShortcut($startShortcut)
+  $sc2.TargetPath = $exe
+  $sc2.WorkingDirectory = $DEST
+  $sc2.Description = "SSH Local Port Forwarding Manager"
+  $sc2.IconLocation = "$exe,0"
+  $sc2.Save()
+  Write-Ok "Start Menu shortcut created"
+} catch {
+  Write-Warn "Could not create Start Menu shortcut: $_"
+}
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 if (Test-Path $exe) {

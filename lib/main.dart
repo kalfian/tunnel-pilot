@@ -20,13 +20,17 @@ Future<void> main() async {
 
   await windowManager.ensureInitialized();
 
-  const windowOptions = WindowOptions(
-    size: Size(700, 600),
-    minimumSize: Size(700, 600),
-    maximumSize: Size(700, 600),
+  // macOS: native title bar hidden via MainFlutterWindow.swift (traffic lights removed).
+  // Windows/Linux: hide via window_manager so only the custom Flutter close button shows.
+  final windowOptions = WindowOptions(
+    size: const Size(700, 600),
+    minimumSize: const Size(700, 600),
+    maximumSize: const Size(700, 600),
     center: true,
     title: 'Tunnel Pilot',
     skipTaskbar: true,
+    titleBarStyle:
+        Platform.isMacOS ? TitleBarStyle.normal : TitleBarStyle.hidden,
   );
 
   await windowManager.waitUntilReadyToShow(windowOptions, () async {

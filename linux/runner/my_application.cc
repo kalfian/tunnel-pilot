@@ -4,6 +4,8 @@
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
+#include <limits.h>
+#include <unistd.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -25,31 +27,29 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
-  // Use a header bar when running in GNOME as this is the common style used
-  // by applications and is the setup most users will be using (e.g. Ubuntu
-  // desktop).
-  // If running on X and not using GNOME then just use a traditional title bar
-  // in case the window manager does more exotic layout, e.g. tiling.
-  // If running on Wayland assume the header bar will work (may need changing
-  // if future cases occur).
-  gboolean use_header_bar = TRUE;
-#ifdef GDK_WINDOWING_X11
-  GdkScreen* screen = gtk_window_get_screen(window);
-  if (GDK_IS_X11_SCREEN(screen)) {
-    const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
-    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
-      use_header_bar = FALSE;
-    }
-  }
-#endif
-  if (use_header_bar) {
-    GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
-    gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "Tunnel Pilot");
-    gtk_header_bar_set_show_close_button(header_bar, TRUE);
-    gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
-  } else {
-    gtk_window_set_title(window, "Tunnel Pilot");
+  // The app uses a custom Flutter title bar (with its own close button that
+  // hides the window to the system tray instead of quitting). We remove all
+  // native window decorations so the native close/minimize/maximize buttons
+  // do not appear alongside the Flutter ones. window_manager handles
+  // show/hide/drag behaviour from the Dart side.
+  gtk_window_set_decorated(window, FALSE);
+  gtk_window_set_title(window, "Tunnel Pilot");
+
+  // Set the app icon for the taskbar / Alt-Tab switcher.
+  // Assets are at {exe_dir}/data/flutter_assets/ in the installed bundle.
+  char exe_buf[PATH_MAX];
+  ssize_t exe_len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+  if (exe_len > 0) {
+    exe_buf[exe_len] = '\0';
+    gchar* exe_dir = g_path_get_dirname(exe_buf);
+    gchar* icon_path = g_build_filename(
+        exe_dir, "data", "flutter_assets", "assets", "icons",
+        "app_icon_256.png", NULL);
+    GError* icon_err = nullptr;
+    gtk_window_set_default_icon_from_file(icon_path, &icon_err);
+    if (icon_err) g_error_free(icon_err);
+    g_free(icon_path);
+    g_free(exe_dir);
   }
 
   gtk_window_set_default_size(window, 1280, 720);

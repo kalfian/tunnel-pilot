@@ -39,13 +39,19 @@ class TrayService {
 
   String _iconPath(int connectedCount) {
     final ext = Platform.isWindows ? 'ico' : 'png';
-    if (connectedCount <= 0) {
-      return 'assets/icons/tray_icon_idle.$ext';
-    } else if (connectedCount <= 9) {
-      return 'assets/icons/tray_icon_$connectedCount.$ext';
-    } else {
-      return 'assets/icons/tray_icon_9.$ext';
-    }
+    final name = connectedCount <= 0
+        ? 'tray_icon_idle'
+        : 'tray_icon_${connectedCount.clamp(1, 9)}';
+    final assetRelPath = 'assets/icons/$name.$ext';
+
+    // macOS resolves bundle-relative paths automatically
+    if (Platform.isMacOS) return assetRelPath;
+
+    // Windows/Linux: system_tray needs an absolute path.
+    // Flutter bundles assets at {exe_dir}/data/flutter_assets/
+    final execDir = File(Platform.resolvedExecutable).parent.path;
+    final sep = Platform.pathSeparator;
+    return '$execDir${sep}data${sep}flutter_assets${sep}assets${sep}icons${sep}$name.$ext';
   }
 
   String _statusIcon(ForwardStatus status) {
