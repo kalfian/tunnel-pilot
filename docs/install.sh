@@ -99,13 +99,21 @@ download_asset() {
 # ── Install: macOS ─────────────────────────────────────────────────────────────
 install_macos() {
   print_step "Mounting disk image..."
-  MOUNT_POINT=$(hdiutil attach "$TMP_FILE" -nobrowse -quiet | grep "/Volumes/" | awk '{print $NF}')
+  # Use plist output for reliable parsing — avoids issues with -quiet suppressing output
+  PLIST_OUT=$(hdiutil attach "$TMP_FILE" -nobrowse -plist 2>/dev/null) || \
+    print_error "Failed to mount DMG."
+
+  # Extract the last /Volumes/... entry from the plist
+  MOUNT_POINT=$(echo "$PLIST_OUT" | grep -A1 'mount-point' | grep '<string>' | \
+    sed 's|.*<string>||;s|</string>.*||' | tail -1)
 
   if [ -z "$MOUNT_POINT" ]; then
-    print_error "Failed to mount DMG."
+    print_error "Failed to determine mount point."
   fi
 
-  APP_SRC=$(find "$MOUNT_POINT" -name "*.app" -maxdepth 1 | head -1)
+  print_success "Mounted at $MOUNT_POINT"
+
+  APP_SRC=$(find "$MOUNT_POINT" -name "*.app" -maxdepth 2 | head -1)
   if [ -z "$APP_SRC" ]; then
     hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
     print_error "No .app found in DMG."
