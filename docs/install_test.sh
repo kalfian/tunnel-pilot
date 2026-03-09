@@ -260,6 +260,14 @@ if command -v zip &>/dev/null && command -v unzip &>/dev/null; then
   assert_file_exists "tunnel_pilot.exe present"    "$WIN_DEST_DIR/tunnel_pilot.exe"
   assert_file_exists "flutter_windows.dll present" "$WIN_DEST_DIR/flutter_windows.dll"
   assert_file_exists "data dll present"            "$WIN_DEST_DIR/data_flutter.dll"
+
+  # Reinstall: update exe content and re-run; files must be overwritten silently
+  printf "updated exe\n" > "$FAKE_WIN_DIR/tunnel_pilot.exe"
+  rm -f "$FAKE_ZIP"
+  (cd "$FAKE_WIN_DIR" && zip -q -j "$FAKE_ZIP" tunnel_pilot.exe flutter_windows.dll data_flutter.dll)
+  install_windows 2>/dev/null
+  assert_eq "reinstall: exe content updated" \
+    "$(cat "$WIN_DEST_DIR/tunnel_pilot.exe")" "updated exe"
 else
   echo "    ⚠  Skipping Windows simulation — zip/unzip not available"
 fi

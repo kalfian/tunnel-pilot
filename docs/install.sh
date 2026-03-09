@@ -243,9 +243,11 @@ download_asset() {
 
 # ── Quit app if running (macOS) ───────────────────────────────────────────────
 quit_if_running_macos() {
-  if pgrep -x "$APP_NAME" &>/dev/null || \
-     osascript -e "tell application \"$APP_NAME\" to quit" &>/dev/null 2>&1; then
+  # pgrep -f matches full command path; -x alone won't match names with spaces
+  if pgrep -f "$APP_NAME" &>/dev/null; then
     print_step "Quitting running instance..."
+    osascript -e "tell application \"$APP_NAME\" to quit" &>/dev/null 2>&1 || true
+    # Give the app a moment to exit cleanly before we replace its files
     sleep 1
   fi
 }
@@ -352,7 +354,7 @@ install_windows() {
 
   spinner_start "Extracting archive"
   if command -v unzip &>/dev/null; then
-    unzip -q "$TMP_FILE" -d "$WIN_DEST"
+    unzip -qo "$TMP_FILE" -d "$WIN_DEST"   # -o: overwrite existing files (safe for reinstall)
   elif command -v pwsh &>/dev/null; then
     pwsh -Command "Expand-Archive -Force -Path '$TMP_FILE' -DestinationPath '$WIN_DEST'"
   else
