@@ -295,6 +295,27 @@
     }
     .hero-install-copy { color: var(--text-muted); font-size: 12px; flex-shrink: 0; transition: color 0.2s; }
     .hero-install-cmd:hover .hero-install-copy { color: var(--blue-light); }
+    .hero-os-pill {
+      padding: 4px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .hero-os-pill.active {
+      background: rgba(0,123,255,0.15);
+      border-color: rgba(0,123,255,0.4);
+      color: var(--blue-light);
+    }
+    .hero-os-pill:hover:not(.active) {
+      border-color: var(--blue);
+      color: var(--text);
+    }
+    #hero-win-switcher { display: none; }
 
     .btn {
       display: inline-flex;
@@ -827,7 +848,21 @@
       </div>
       <div class="hero-install">
         <span class="hero-install-label">or install with one command</span>
-        <div class="hero-install-cmd" onclick="copyInstallCmd(this)" title="Click to copy">
+        <div id="hero-win-switcher" style="display:none;gap:4px;margin-bottom:8px;justify-content:center;display:none;">
+          <button class="hero-os-pill active" id="hero-pill-cmd" onclick="switchHeroCmd('cmd')">CMD / PowerShell</button>
+          <button class="hero-os-pill" id="hero-pill-wsl" onclick="switchHeroCmd('wsl')">WSL</button>
+        </div>
+        <div id="hero-cmd-bash" class="hero-install-cmd" onclick="copyInstallCmd(this)" title="Click to copy">
+          <i class="fas fa-terminal"></i>
+          <code>curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash</code>
+          <span class="hero-install-copy"><i class="fas fa-copy"></i></span>
+        </div>
+        <div id="hero-cmd-win" class="hero-install-cmd" onclick="copyInstallCmd(this)" title="Click to copy" style="display:none;">
+          <i class="fas fa-terminal"></i>
+          <code>powershell -ExecutionPolicy Bypass -c "irm https://kalfian.github.io/tunnel-pilot/install.ps1 | iex"</code>
+          <span class="hero-install-copy"><i class="fas fa-copy"></i></span>
+        </div>
+        <div id="hero-cmd-wsl" class="hero-install-cmd" onclick="copyInstallCmd(this)" title="Click to copy" style="display:none;">
           <i class="fas fa-terminal"></i>
           <code>curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash</code>
           <span class="hero-install-copy"><i class="fas fa-copy"></i></span>
@@ -932,15 +967,16 @@
         <p>Set up SSH local port forwarding in minutes</p>
       </div>
       <div class="tab-row">
-        <button class="tab-btn active" onclick="showTab('binary')">Install Script</button>
-        <button class="tab-btn" onclick="showTab('manual')">Manual</button>
-        <button class="tab-btn" onclick="showTab('source')">Build from Source</button>
+        <button class="tab-btn" id="tab-btn-bash" onclick="showTab('bash', this)">macOS / Linux / WSL</button>
+        <button class="tab-btn" id="tab-btn-wincmd" onclick="showTab('wincmd', this)">Windows (CMD)</button>
+        <button class="tab-btn" id="tab-btn-manual" onclick="showTab('manual', this)">Manual</button>
+        <button class="tab-btn" id="tab-btn-source" onclick="showTab('source', this)">Build from Source</button>
       </div>
 
-      <div id="tab-binary" class="tab-panel active">
+      <div id="tab-bash" class="tab-panel">
         <div class="step">
           <h3><span class="step-n">1</span> Run the installer</h3>
-          <p>Paste this into your terminal. Works on macOS, Linux, and Windows (Git Bash).</p>
+          <p>Paste this into your terminal. Works on <strong>macOS</strong>, <strong>Linux</strong>, and <strong>Windows WSL</strong> (open WSL first: <code style="background:rgba(0,123,255,0.12);padding:2px 6px;border-radius:4px;font-size:0.85em;color:var(--blue-light);">Win + R</code> → type <code style="background:rgba(0,123,255,0.12);padding:2px 6px;border-radius:4px;font-size:0.85em;color:var(--blue-light);">wsl</code>).</p>
           <div class="code">
             <span class="g">curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash</span>
           </div>
@@ -949,6 +985,25 @@
         <div class="step">
           <h3><span class="step-n">2</span> Configure</h3>
           <p>Click the tray icon in your menu bar, open Settings, and add your SSH tunnels.</p>
+        </div>
+      </div>
+
+      <div id="tab-wincmd" class="tab-panel">
+        <div class="step">
+          <h3><span class="step-n">1</span> Open Command Prompt or PowerShell</h3>
+          <p>Press <code style="background:rgba(0,123,255,0.12);padding:2px 7px;border-radius:4px;font-size:0.9em;color:var(--blue-light);">Win + R</code>, type <code style="background:rgba(0,123,255,0.12);padding:2px 7px;border-radius:4px;font-size:0.9em;color:var(--blue-light);">cmd</code> or <code style="background:rgba(0,123,255,0.12);padding:2px 7px;border-radius:4px;font-size:0.9em;color:var(--blue-light);">powershell</code>, and press Enter.</p>
+        </div>
+        <div class="step">
+          <h3><span class="step-n">2</span> Run the installer</h3>
+          <p>Paste this command and press Enter:</p>
+          <div class="code">
+            <span class="g">powershell -ExecutionPolicy Bypass -c "irm https://kalfian.github.io/tunnel-pilot/install.ps1 | iex"</span>
+          </div>
+          <p style="margin-top:10px;font-size:13px;color:var(--text-muted)">Downloads and runs the PowerShell installer. Fetches the latest release, extracts it to <code style="background:rgba(0,123,255,0.12);padding:2px 5px;border-radius:4px;font-size:0.85em;color:var(--blue-light);">%APPDATA%\Tunnel Pilot</code>, and launches the app.</p>
+        </div>
+        <div class="step">
+          <h3><span class="step-n">3</span> Configure</h3>
+          <p>Find the Tunnel Pilot icon in your system tray (bottom-right), right-click and open Settings, then add your SSH tunnels.</p>
         </div>
       </div>
 
@@ -1069,12 +1124,35 @@
       });
     }
 
-    function showTab(id) {
+    function showTab(id, btn) {
       document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
       document.getElementById('tab-' + id).classList.add('active');
-      event.target.classList.add('active');
+      var activeBtn = btn || (event && event.target);
+      if (activeBtn) activeBtn.classList.add('active');
+      else document.getElementById('tab-btn-' + id).classList.add('active');
     }
+
+    function switchHeroCmd(type) {
+      document.getElementById('hero-cmd-win').style.display = type === 'cmd' ? '' : 'none';
+      document.getElementById('hero-cmd-wsl').style.display = type === 'wsl' ? '' : 'none';
+      document.getElementById('hero-pill-cmd').classList.toggle('active', type === 'cmd');
+      document.getElementById('hero-pill-wsl').classList.toggle('active', type === 'wsl');
+    }
+
+    (function detectOsAndSetDefaultTab() {
+      var ua = navigator.userAgent || '';
+      var platform = navigator.platform || '';
+      var isWindows = /Win/i.test(platform) || /Windows/i.test(ua);
+      showTab(isWindows ? 'wincmd' : 'bash');
+      if (isWindows) {
+        document.getElementById('hero-cmd-bash').style.display = 'none';
+        document.getElementById('hero-cmd-win').style.display = '';
+        document.getElementById('hero-win-switcher').style.display = 'flex';
+      }
+    })();
+
+
 
     function openLightbox(src) {
       document.getElementById('lightbox-img').src = src;
