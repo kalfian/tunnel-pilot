@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.0.5 (2026-03-09)
+
+### Features
+
+- **Windows & Linux Tray** — System tray now works correctly on Windows and Linux
+  - Fixed tray icon not appearing: resolved absolute path issue for `system_tray` on Windows/Linux
+  - Bundled pre-built `.ico` files for all tray icons directly in assets (no build-time conversion needed)
+- **Desktop Shortcut** — Installers now create desktop and Start Menu shortcuts automatically
+  - Linux (`install.sh`): creates `.desktop` file in `~/.local/share/applications/` and `~/Desktop/`
+  - Windows (`install.ps1`): creates `.lnk` shortcut on Desktop and in Start Menu → Programs
+- **App Icon** — Proper Tunnel Pilot icon on Windows and Linux
+  - Windows: `app_icon.ico` (256px, PNG-in-ICO) embedded into `.exe` for taskbar, Alt-Tab, and file explorer
+  - Linux: GTK window icon set from bundled `app_icon_256.png` for taskbar and Alt-Tab switcher
+
+### Improvements
+
+- **No Duplicate Close Button on Windows & Linux** — Native title bar / window decorations now hidden
+  - Windows: `titleBarStyle: TitleBarStyle.hidden` via `window_manager` removes Win32 title bar
+  - Linux: `gtk_window_set_decorated(FALSE)` in native code removes GTK header bar (previously showed native close button alongside the Flutter custom one)
+- **Landing Page** — Install section now auto-detects OS and shows the correct tab and install command by default
+  - Windows users see **Windows (CMD)** tab + PowerShell command; others see **macOS / Linux / WSL** tab + curl command
+  - Windows users can switch to **WSL** command via a pill toggle in the hero install section
+- **CI** — Added GitHub API token passthrough to all e2e install jobs to avoid rate limiting on macOS runners
+  - Added separate e2e jobs for **macOS**, **Windows (WSL)**, and **Windows (CMD)** install paths
+
+### Fixes
+
+- Fixed `install.sh` referencing non-existent `app_icon.png` (correct name is `app_icon_256.png`)
+
 ## 0.0.4 (2026-03-09)
 
 ### Features
