@@ -5,7 +5,7 @@ void main() {
   group('AppSettings', () {
     test('creates with default values', () {
       final settings = AppSettings();
-      expect(settings.launchAtLogin, isFalse);
+      expect(settings.launchAtLogin, isTrue);
       expect(settings.showNotifications, isTrue);
     });
 
@@ -22,7 +22,7 @@ void main() {
       test('serializes default values', () {
         final settings = AppSettings();
         final json = settings.toJson();
-        expect(json['launchAtLogin'], isFalse);
+        expect(json['launchAtLogin'], isTrue);
         expect(json['showNotifications'], isTrue);
       });
 
@@ -50,7 +50,7 @@ void main() {
 
       test('uses defaults for missing fields', () {
         final settings = AppSettings.fromJson({});
-        expect(settings.launchAtLogin, isFalse);
+        expect(settings.launchAtLogin, isTrue);
         expect(settings.showNotifications, isTrue);
       });
 
@@ -60,7 +60,7 @@ void main() {
           'showNotifications': null,
         };
         final settings = AppSettings.fromJson(json);
-        expect(settings.launchAtLogin, isFalse);
+        expect(settings.launchAtLogin, isTrue);
         expect(settings.showNotifications, isTrue);
       });
     });

@@ -42,15 +42,15 @@ detect_platform() {
   case "$(uname -s)" in
     Darwin)
       PLATFORM="macos"
-      ASSET_PATTERN="*.dmg"
+      ASSET_PATTERN="\\.dmg$"
       ;;
     Linux)
       PLATFORM="linux"
-      ASSET_PATTERN="*linux*.tar.gz"
+      ASSET_PATTERN="linux.*\\.tar\\.gz$"
       ;;
     MINGW*|MSYS*|CYGWIN*)
       PLATFORM="windows"
-      ASSET_PATTERN="*.zip"
+      ASSET_PATTERN="\\.zip$"
       ;;
     *)
       print_error "Unsupported platform: $(uname -s)"
