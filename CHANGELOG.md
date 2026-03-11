@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 (2026-03-11)
+
+### Fixes
+
+- **Reconnect After Sleep** — Tunnels that were connected before system sleep are now automatically detected and reconnected when the machine wakes up
+  - Uses `WidgetsBindingObserver` to detect app resume after >30 seconds of inactivity
+  - Probes each "connected" tunnel to verify it's still alive, and reconnects dead ones
+
 ## 0.1.1 (2026-03-09)
 
 ### Improvements
