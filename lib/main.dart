@@ -212,11 +212,14 @@ class _AppWithWindowListener extends StatefulWidget {
 }
 
 class _AppWithWindowListenerState extends State<_AppWithWindowListener>
-    with WindowListener {
+    with WindowListener, WidgetsBindingObserver {
+  DateTime _lastActiveTime = DateTime.now();
+
   @override
   void initState() {
     super.initState();
     windowManager.addListener(this);
+    WidgetsBinding.instance.addObserver(this);
     // Hide window after the first frame so the engine is fully alive
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // await windowManager.hide();
@@ -226,8 +229,27 @@ class _AppWithWindowListenerState extends State<_AppWithWindowListener>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     windowManager.removeListener(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final now = DateTime.now();
+      final elapsed = now.difference(_lastActiveTime);
+      // If more than 30 seconds have passed, the system likely slept
+      if (elapsed.inSeconds > 30) {
+        final forwardProvider =
+            Provider.of<ForwardProvider>(context, listen: false);
+        forwardProvider.checkAndReconnectAll();
+      }
+    }
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      _lastActiveTime = DateTime.now();
+    }
   }
 
   @override

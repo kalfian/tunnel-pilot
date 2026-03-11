@@ -245,6 +245,37 @@ class ForwardProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Checks all tunnels that appear "connected" and reconnects any that are
+  /// actually dead (e.g. after system wake from sleep).
+  Future<void> checkAndReconnectAll() async {
+    final connectedIds = _forwards
+        .where((f) => _statuses[f.id] == ForwardStatus.connected)
+        .map((f) => f.id)
+        .toList();
+
+    if (connectedIds.isEmpty) return;
+
+    _logService.info('System', 'Checking ${connectedIds.length} tunnel(s) after wake...');
+
+    for (final id in connectedIds) {
+      final alive = await _tunnel.isAlive(id);
+      if (!alive) {
+        final config = _forwards.firstWhere((f) => f.id == id);
+        _logService.warning(config.name, 'Connection lost after sleep, reconnecting...');
+        // Disconnect the dead tunnel cleanly
+        await _tunnel.disconnect(id);
+        _statuses[id] = ForwardStatus.disconnected;
+        _errorMessages.remove(id);
+        notifyListeners();
+        // Small delay to let OS release the local port
+        await Future.delayed(const Duration(milliseconds: 500));
+        // Reconnect (not user-disconnected, so auto-reconnect is allowed)
+        _reconnectAttempts.remove(id);
+        await _connectForward(id);
+      }
+    }
+  }
+
   Future<void> exportBackup(String path) async {
     await _storage.exportToFile(path, _forwards);
   }

@@ -193,4 +193,18 @@ class SshTunnelService {
   }
 
   bool isConnected(String id) => _connections.containsKey(id);
+
+  /// Probes a tunnel's SSH connection to check if it's still alive.
+  /// Returns true if the connection responds, false if it's dead.
+  Future<bool> isAlive(String id) async {
+    final tunnel = _connections[id];
+    if (tunnel == null) return false;
+
+    try {
+      await tunnel.client.execute('').timeout(const Duration(seconds: 5));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 }
