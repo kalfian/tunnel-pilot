@@ -162,9 +162,13 @@ Future<void> main() async {
     rebuildTrayMenu();
   }
 
-  // Notify user when update is available
+  // Notify user when update is available (only once per version)
+  String? lastNotifiedVersion;
   updateService.addListener(() {
-    if (updateService.updateAvailable) {
+    if (updateService.updateAvailable &&
+        updateService.latestVersion != null &&
+        updateService.latestVersion != lastNotifiedVersion) {
+      lastNotifiedVersion = updateService.latestVersion;
       try {
         notificationService.show(
           'Update Available',

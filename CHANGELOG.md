@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.1 (2026-03-13)
+
+### Fixes
+
+- **Update Notification Spam** — Fixed update available notification firing multiple times instead of once per version
+- **Auto-Install & Restart** — After downloading an update, the app now automatically installs and restarts instead of just opening the file
+  - macOS: mounts DMG, copies .app to /Applications, relaunches
+  - Windows: extracts ZIP, runs batch script to replace files and relaunch after exit
+  - Linux: extracts tar.gz, runs shell script to replace files and relaunch after exit
+  - Falls back to opening the downloaded file if auto-install fails
+
+### Improvements
+
+- **Dependencies Updated** — `window_manager` 0.4.3 → 0.5.1, `launch_at_startup` 0.3.1 → 0.5.1, `file_picker` 8.3.7 → 10.3.10
+- **GitHub Actions Node.js 24** — Fixed Node.js 20 deprecation warning by setting `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` across all CI/CD workflows
+- **Test Coverage** — Added tests for `LogService`, `UpdateService`, `SshTunnelService`, `AppSettingsProvider`, and expanded `AppSettings` model tests (27 → 115 total tests)
+
 ## 1.0.0 (2026-03-13)
 
 ### Improvements

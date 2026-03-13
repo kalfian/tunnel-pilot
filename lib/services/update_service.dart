@@ -77,7 +77,7 @@ class UpdateService extends ChangeNotifier {
       // Skip pre-release
       if (json['prerelease'] == true) return;
 
-      if (_compareVersions(currentVersion, version) >= 0) {
+      if (compareVersions(currentVersion, version) >= 0) {
         // Current version is up to date
         updateAvailable = false;
         notifyListeners();
@@ -131,7 +131,8 @@ class UpdateService extends ChangeNotifier {
   }
 
   /// Compare two semver strings. Returns negative if a < b, 0 if equal, positive if a > b.
-  int _compareVersions(String a, String b) {
+  @visibleForTesting
+  int compareVersions(String a, String b) {
     final aParts = a.split('.').map((e) => int.tryParse(e) ?? 0).toList();
     final bParts = b.split('.').map((e) => int.tryParse(e) ?? 0).toList();
 
@@ -185,13 +186,177 @@ class UpdateService extends ChangeNotifier {
       downloadProgress = 1.0;
       notifyListeners();
 
-      // Open the downloaded file
-      await _openDownloadedFile(filePath);
+      // Install and restart, or fallback to opening the file
+      if (Platform.isMacOS && filePath.endsWith('.dmg')) {
+        await _installAndRestartMacOS(filePath);
+      } else if (Platform.isWindows && filePath.endsWith('.zip')) {
+        await _installAndRestartWindows(filePath);
+      } else if (Platform.isLinux && filePath.endsWith('.tar.gz')) {
+        await _installAndRestartLinux(filePath);
+      } else {
+        await _openDownloadedFile(filePath);
+      }
     } catch (e) {
       debugPrint('Download error: $e');
     } finally {
       isDownloading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _installAndRestartMacOS(String filePath) async {
+    try {
+      // Mount the DMG
+      final mountResult = await Process.run('hdiutil', ['attach', filePath, '-nobrowse']);
+      if (mountResult.exitCode != 0) {
+        debugPrint('Failed to mount DMG: ${mountResult.stderr}');
+        await _openDownloadedFile(filePath);
+        return;
+      }
+
+      // Find the mount point from hdiutil output
+      final output = mountResult.stdout as String;
+      final lines = output.trim().split('\n');
+      String? mountPoint;
+      for (final line in lines) {
+        // hdiutil output: /dev/diskX  ... /Volumes/AppName
+        final match = RegExp(r'\t(/Volumes/.+)$').firstMatch(line);
+        if (match != null) {
+          mountPoint = match.group(1)?.trim();
+          break;
+        }
+      }
+
+      if (mountPoint == null) {
+        debugPrint('Could not find mount point');
+        await _openDownloadedFile(filePath);
+        return;
+      }
+
+      // Find the .app in the mounted DMG
+      final mountDir = Directory(mountPoint);
+      final apps = mountDir
+          .listSync()
+          .whereType<Directory>()
+          .where((d) => d.path.endsWith('.app'))
+          .toList();
+
+      if (apps.isEmpty) {
+        debugPrint('No .app found in DMG');
+        await Process.run('hdiutil', ['detach', mountPoint]);
+        await _openDownloadedFile(filePath);
+        return;
+      }
+
+      final appSource = apps.first.path;
+      final appName = appSource.split('/').last;
+      final appDest = '/Applications/$appName';
+
+      // Remove old app and copy new one
+      if (Directory(appDest).existsSync()) {
+        await Process.run('rm', ['-rf', appDest]);
+      }
+      final copyResult = await Process.run('cp', ['-R', appSource, appDest]);
+      if (copyResult.exitCode != 0) {
+        debugPrint('Failed to copy app: ${copyResult.stderr}');
+        await Process.run('hdiutil', ['detach', mountPoint]);
+        await _openDownloadedFile(filePath);
+        return;
+      }
+
+      // Detach the DMG
+      await Process.run('hdiutil', ['detach', mountPoint]);
+
+      // Relaunch the app
+      await Process.run('open', ['-n', appDest]);
+      exit(0);
+    } catch (e) {
+      debugPrint('Auto-install failed: $e');
+      await _openDownloadedFile(filePath);
+    }
+  }
+
+  Future<void> _installAndRestartWindows(String filePath) async {
+    try {
+      final appDir = File(Platform.resolvedExecutable).parent.path;
+      final tempExtractDir = '${File(filePath).parent.path}\\tunnel_pilot_update';
+
+      // Clean up previous extract if exists
+      if (Directory(tempExtractDir).existsSync()) {
+        Directory(tempExtractDir).deleteSync(recursive: true);
+      }
+
+      // Extract the zip using PowerShell
+      final extractResult = await Process.run('powershell', [
+        '-Command',
+        'Expand-Archive -Path "$filePath" -DestinationPath "$tempExtractDir" -Force',
+      ]);
+      if (extractResult.exitCode != 0) {
+        debugPrint('Failed to extract zip: ${extractResult.stderr}');
+        await _openDownloadedFile(filePath);
+        return;
+      }
+
+      // Use a batch script to replace files and restart
+      // The script waits for the current process to exit, then copies files
+      final scriptPath = '${File(filePath).parent.path}\\update.bat';
+      final script = '''
+@echo off
+timeout /t 2 /nobreak >nul
+xcopy /s /y /q "$tempExtractDir\\*" "$appDir\\"
+start "" "$appDir\\tunnel_pilot.exe"
+del "%~f0"
+''';
+      File(scriptPath).writeAsStringSync(script);
+
+      await Process.start('cmd', ['/c', scriptPath],
+          mode: ProcessStartMode.detached);
+      exit(0);
+    } catch (e) {
+      debugPrint('Auto-install failed (Windows): $e');
+      await _openDownloadedFile(filePath);
+    }
+  }
+
+  Future<void> _installAndRestartLinux(String filePath) async {
+    try {
+      final appDir = File(Platform.resolvedExecutable).parent.parent.path;
+      final tempExtractDir = '${File(filePath).parent.path}/tunnel_pilot_update';
+
+      // Clean up previous extract if exists
+      if (Directory(tempExtractDir).existsSync()) {
+        Directory(tempExtractDir).deleteSync(recursive: true);
+      }
+      Directory(tempExtractDir).createSync();
+
+      // Extract the tar.gz
+      final extractResult = await Process.run('tar', [
+        'xzf', filePath, '-C', tempExtractDir,
+      ]);
+      if (extractResult.exitCode != 0) {
+        debugPrint('Failed to extract tar.gz: ${extractResult.stderr}');
+        await _openDownloadedFile(filePath);
+        return;
+      }
+
+      // Use a shell script to replace files and restart
+      final scriptPath = '${File(filePath).parent.path}/update.sh';
+      final script = '''
+#!/bin/bash
+sleep 2
+cp -rf "$tempExtractDir"/* "$appDir/"
+"$appDir/tunnel_pilot" &
+rm -f "\$0"
+''';
+      File(scriptPath).writeAsStringSync(script);
+      await Process.run('chmod', ['+x', scriptPath]);
+
+      await Process.start('bash', [scriptPath],
+          mode: ProcessStartMode.detached);
+      exit(0);
+    } catch (e) {
+      debugPrint('Auto-install failed (Linux): $e');
+      await _openDownloadedFile(filePath);
     }
   }
 

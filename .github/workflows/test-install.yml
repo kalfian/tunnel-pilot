@@ -3,6 +3,9 @@ name: Test Install Script
 on:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ── Job 1: Unit tests (no network, no real release needed) ──────────────────
   unit-test:
