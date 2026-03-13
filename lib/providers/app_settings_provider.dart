@@ -26,6 +26,8 @@ class AppSettingsProvider extends ChangeNotifier {
   int get autoReconnectDelaySec => _settings.autoReconnectDelaySec;
   int get autoReconnectMaxRetries => _settings.autoReconnectMaxRetries;
   bool get showInDock => _settings.showInDock;
+  bool get autoCheckUpdates => _settings.autoCheckUpdates;
+  String? get lastSkippedVersion => _settings.lastSkippedVersion;
 
   ThemeMode get themeModeEnum {
     switch (_settings.themeMode) {
@@ -77,6 +79,18 @@ class AppSettingsProvider extends ChangeNotifier {
 
   Future<void> setShowInDock(bool value) async {
     _settings.showInDock = value;
+    await _storage.saveSettings(_settings);
+    notifyListeners();
+  }
+
+  Future<void> setAutoCheckUpdates(bool value) async {
+    _settings.autoCheckUpdates = value;
+    await _storage.saveSettings(_settings);
+    notifyListeners();
+  }
+
+  Future<void> setLastSkippedVersion(String? value) async {
+    _settings.lastSkippedVersion = value;
     await _storage.saveSettings(_settings);
     notifyListeners();
   }

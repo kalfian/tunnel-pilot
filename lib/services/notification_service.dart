@@ -1,24 +1,34 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:local_notifier/local_notifier.dart';
 
 class NotificationService {
+  static const _macChannel = MethodChannel('native_notifications');
+
   Future<void> init() async {
-    // No setup needed for osascript-based notifications
+    if (!Platform.isMacOS) {
+      await localNotifier.setup(appName: 'Tunnel Pilot');
+    }
   }
 
   Future<void> show(String title, String body) async {
-    if (Platform.isMacOS) {
-      try {
-        final escapedTitle = title.replaceAll('"', '\\"');
-        final escapedBody = body.replaceAll('"', '\\"');
-        await Process.run('osascript', [
-          '-e',
-          'display notification "$escapedBody" with title "$escapedTitle"',
-        ]);
-      } catch (e) {
-        debugPrint('Notification failed: $e');
+    try {
+      if (Platform.isMacOS) {
+        await _macChannel.invokeMethod('show', {
+          'title': title,
+          'body': body,
+        });
+      } else {
+        final notification = LocalNotification(
+          title: title,
+          body: body,
+        );
+        await notification.show();
       }
+    } catch (e) {
+      debugPrint('Notification failed: $e');
     }
   }
 

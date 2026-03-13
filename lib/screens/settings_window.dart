@@ -10,6 +10,8 @@ import '../widgets/backup_restore_section.dart';
 import '../widgets/forward_form_dialog.dart';
 import '../widgets/forward_list_tile.dart';
 import '../widgets/logs_section.dart';
+import '../services/update_service.dart';
+import '../widgets/update_banner.dart';
 
 class SettingsWindow extends StatefulWidget {
   const SettingsWindow({super.key});
@@ -175,6 +177,23 @@ class _SettingsWindowState extends State<SettingsWindow> {
                       : _buildSettingsTab(context),
             ),
           ),
+
+          // Version footer
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text(
+                  'v${context.watch<UpdateService>().currentVersion}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: 11,
+                    color: theme.colorScheme.outline.withValues(alpha: 0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -335,6 +354,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
       child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          UpdateBanner(),
           AppSettingsSection(),
           SizedBox(height: 24),
           BackupRestoreSection(),

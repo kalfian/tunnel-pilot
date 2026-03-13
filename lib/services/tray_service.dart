@@ -10,11 +10,13 @@ class TrayService {
   final void Function() onSettingsClicked;
   final void Function() onQuitClicked;
   final void Function(String id) onToggleForward;
+  final void Function()? onUpdateClicked;
 
   TrayService({
     required this.onSettingsClicked,
     required this.onQuitClicked,
     required this.onToggleForward,
+    this.onUpdateClicked,
   });
 
   Future<void> init() async {
@@ -81,8 +83,10 @@ class TrayService {
 
   Future<void> rebuildMenu(
     List<ForwardConfig> forwards,
-    Map<String, ForwardStatus> statuses,
-  ) async {
+    Map<String, ForwardStatus> statuses, {
+    bool updateAvailable = false,
+    String? latestVersion,
+  }) async {
     // Count active connections
     final connectedCount = statuses.values
         .where((s) => s == ForwardStatus.connected)
@@ -121,6 +125,20 @@ class TrayService {
     }
 
     menuItems.add(MenuSeparator());
+
+    if (updateAvailable && latestVersion != null) {
+      menuItems.add(MenuItemLabel(
+        label: '\u2B06\uFE0F  Update available (v$latestVersion)',
+        onClicked: (_) {
+          if (onUpdateClicked != null) {
+            onUpdateClicked!();
+          } else {
+            onSettingsClicked();
+          }
+        },
+      ));
+      menuItems.add(MenuSeparator());
+    }
 
     menuItems.add(MenuItemLabel(
       label: 'Settings...',

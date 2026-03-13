@@ -16,6 +16,7 @@ import 'services/startup_service.dart';
 import 'services/storage_service.dart';
 import 'services/single_instance_service.dart';
 import 'services/tray_service.dart';
+import 'services/update_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,6 +57,13 @@ Future<void> main() async {
   final notificationService = NotificationService();
   final startupService = StartupService();
   final logService = LogService();
+  final updateService = UpdateService();
+
+  try {
+    await updateService.init();
+  } catch (e) {
+    debugPrint('UpdateService init failed: $e');
+  }
 
   try {
     await notificationService.init();
@@ -132,25 +140,55 @@ Future<void> main() async {
     trayService = null;
   }
 
+  // Initialize update service with skipped version from settings
+  updateService.setSkippedVersion(appSettingsProvider.lastSkippedVersion);
+
   if (trayService != null) {
-    forwardProvider.addListener(() {
+    void rebuildTrayMenu() {
       trayService!.rebuildMenu(
         forwardProvider.forwards,
         {
           for (final f in forwardProvider.forwards)
             f.id: forwardProvider.getStatus(f.id),
         },
+        updateAvailable: updateService.updateAvailable,
+        latestVersion: updateService.latestVersion,
       );
-    });
+    }
 
-    await trayService.rebuildMenu(
-      forwardProvider.forwards,
-      {
-        for (final f in forwardProvider.forwards)
-          f.id: forwardProvider.getStatus(f.id),
-      },
-    );
+    forwardProvider.addListener(rebuildTrayMenu);
+    updateService.addListener(rebuildTrayMenu);
+
+    rebuildTrayMenu();
   }
+
+  // Notify user when update is available
+  updateService.addListener(() {
+    if (updateService.updateAvailable) {
+      try {
+        notificationService.show(
+          'Update Available',
+          'Tunnel Pilot v${updateService.latestVersion} is available.',
+        );
+      } catch (_) {}
+    }
+  });
+
+  // Start auto-update check if enabled
+  if (appSettingsProvider.autoCheckUpdates) {
+    updateService.checkForUpdate();
+    updateService.startPeriodicCheck();
+  }
+
+  // React to settings changes for auto-update
+  appSettingsProvider.addListener(() {
+    if (appSettingsProvider.autoCheckUpdates) {
+      updateService.startPeriodicCheck();
+    } else {
+      updateService.stopPeriodicCheck();
+    }
+    updateService.setSkippedVersion(appSettingsProvider.lastSkippedVersion);
+  });
 
   // Show settings when another instance or app reopen is detected
   Future<void> showSettings() async {
@@ -193,6 +231,7 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: forwardProvider),
         ChangeNotifierProvider.value(value: appSettingsProvider),
         ChangeNotifierProvider.value(value: logService),
+        ChangeNotifierProvider.value(value: updateService),
       ],
       child: _AppWithWindowListener(
         appSettings: appSettingsProvider,

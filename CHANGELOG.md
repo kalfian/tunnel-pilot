@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.3 (2026-03-13)
+
+### Features
+
+- **Auto Update** — App now checks for new versions via GitHub Releases API and notifies you when an update is available
+  - Configurable auto-check interval (every 6 hours)
+  - Download update directly from the app or view the release page in browser
+  - Skip version option to dismiss a specific update
+  - Platform-specific downloads: DMG (macOS), ZIP (Windows), tar.gz (Linux)
+  - System tray menu item when update is available
+- **Version Display** — Current app version shown in the bottom-right corner across all tabs
+
+### Improvements
+
+- **Native Notifications (macOS)** — Switched from `osascript` to native `UNUserNotificationCenter` API — notifications now appear as "Tunnel Pilot" instead of "Script Editor"
+- **Cross-platform Notifications** — Added `local_notifier` for Windows and Linux desktop notifications
+- **Version from pubspec.yaml** — App version is now read from `pubspec.yaml` at runtime via `package_info_plus`, no more hardcoded version constants
+
 ## 0.1.2 (2026-03-11)
 
 ### Fixes

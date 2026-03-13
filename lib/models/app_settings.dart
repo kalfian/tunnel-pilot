@@ -6,6 +6,8 @@ class AppSettings {
   int autoReconnectDelaySec;
   int autoReconnectMaxRetries;
   bool showInDock;
+  bool autoCheckUpdates;
+  String? lastSkippedVersion;
 
   AppSettings({
     this.launchAtLogin = true,
@@ -15,6 +17,8 @@ class AppSettings {
     this.autoReconnectDelaySec = 5,
     this.autoReconnectMaxRetries = 3,
     this.showInDock = false,
+    this.autoCheckUpdates = true,
+    this.lastSkippedVersion,
   });
 
   Map<String, dynamic> toJson() => {
@@ -25,6 +29,8 @@ class AppSettings {
         'autoReconnectDelaySec': autoReconnectDelaySec,
         'autoReconnectMaxRetries': autoReconnectMaxRetries,
         'showInDock': showInDock,
+        'autoCheckUpdates': autoCheckUpdates,
+        'lastSkippedVersion': lastSkippedVersion,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
@@ -35,5 +41,7 @@ class AppSettings {
         autoReconnectDelaySec: json['autoReconnectDelaySec'] as int? ?? 5,
         autoReconnectMaxRetries: json['autoReconnectMaxRetries'] as int? ?? 3,
         showInDock: json['showInDock'] as bool? ?? false,
+        autoCheckUpdates: json['autoCheckUpdates'] as bool? ?? true,
+        lastSkippedVersion: json['lastSkippedVersion'] as String?,
       );
 }

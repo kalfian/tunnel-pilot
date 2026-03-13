@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/app_settings_provider.dart';
+import '../services/update_service.dart';
 
 class AppSettingsSection extends StatelessWidget {
   const AppSettingsSection({super.key});
@@ -82,9 +83,63 @@ class AppSettingsSection extends StatelessWidget {
                 activeColor: theme.colorScheme.primary,
               ),
             ),
+            Divider(height: 1, color: theme.dividerColor),
+            _settingsRow(
+              context,
+              icon: Icons.system_update_outlined,
+              title: 'Auto Check for Updates',
+              subtitle: 'Check for new versions periodically',
+              trailing: _customToggle(
+                value: provider.autoCheckUpdates,
+                onChanged: (v) => provider.setAutoCheckUpdates(v),
+                activeColor: theme.colorScheme.primary,
+              ),
+            ),
+            Divider(height: 1, color: theme.dividerColor),
+            _updateCheckRow(context),
           ],
         ),
       ],
+    );
+  }
+
+  Widget _updateCheckRow(BuildContext context) {
+    final theme = Theme.of(context);
+    final updateService = context.watch<UpdateService>();
+
+    return _settingsRow(
+      context,
+      icon: Icons.refresh_rounded,
+      title: 'Check for Updates',
+      subtitle: 'Current version: v${updateService.currentVersion}',
+      trailing: updateService.isChecking
+          ? SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: theme.colorScheme.primary,
+              ),
+            )
+          : GestureDetector(
+              onTap: () => updateService.checkForUpdate(),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'Check',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+            ),
     );
   }
 
