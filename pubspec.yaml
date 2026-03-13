@@ -1,7 +1,7 @@
 name: tunnel_pilot
 description: "A cross-platform SSH local port forwarding manager that lives in your system tray."
 publish_to: 'none'
-version: 0.1.3
+version: 1.0.0
 
 environment:
   sdk: ^3.11.1

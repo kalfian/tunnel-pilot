@@ -10,10 +10,13 @@ class TunnelConnection {
   final SSHClient client;
   final ServerSocket serverSocket;
   final List<Socket> activeSockets = [];
-  Timer? keepAliveTimer;
-  int missedAlives = 0;
+  final void Function(ForwardStatus status, String? error) onStatus;
 
-  TunnelConnection({required this.client, required this.serverSocket});
+  TunnelConnection({
+    required this.client,
+    required this.serverSocket,
+    required this.onStatus,
+  });
 }
 
 typedef StatusCallback = void Function(
@@ -21,15 +24,82 @@ typedef StatusCallback = void Function(
 
 class SshTunnelService {
   final Map<String, TunnelConnection> _connections = {};
-  // Generation counter to invalidate stale in-flight connect callbacks
   final Map<String, int> _generation = {};
+
+  // Single global health monitor — checks ALL tunnels every 3 seconds.
+  // One Timer regardless of tunnel count. Only runs while tunnels are active.
+  Timer? _healthCheckTimer;
+  bool _healthCheckRunning = false;
+  static const _healthInterval = Duration(seconds: 3);
+  static const _pingTimeout = Duration(seconds: 3);
+
+  void _startHealthMonitor() {
+    _healthCheckTimer ??= Timer.periodic(_healthInterval, (_) => _checkAll());
+  }
+
+  void _stopHealthMonitorIfIdle() {
+    if (_connections.isEmpty) {
+      _healthCheckTimer?.cancel();
+      _healthCheckTimer = null;
+    }
+  }
+
+  Future<void> _checkAll() async {
+    if (_healthCheckRunning) return; // skip if previous check still in flight
+    _healthCheckRunning = true;
+
+    try {
+      final entries = _connections.entries.toList();
+      if (entries.isEmpty) return;
+
+      await Future.wait(entries.map((entry) async {
+        final id = entry.key;
+        final conn = entry.value;
+
+        // Already cleaned up by another path
+        if (!_connections.containsKey(id) || _connections[id] != conn) return;
+
+        if (conn.client.isClosed) {
+          _cleanupTunnel(id, conn);
+          conn.onStatus(ForwardStatus.error, 'SSH connection lost');
+          return;
+        }
+
+        try {
+          await conn.client.ping().timeout(_pingTimeout);
+        } catch (_) {
+          // Verify tunnel still belongs to this connection
+          final current = _connections[id];
+          if (current != null && current.client == conn.client) {
+            _cleanupTunnel(id, current);
+            current.onStatus(ForwardStatus.error, 'SSH connection lost');
+          }
+        }
+      }));
+    } finally {
+      _healthCheckRunning = false;
+      _stopHealthMonitorIfIdle();
+    }
+  }
+
+  void _cleanupTunnel(String id, TunnelConnection conn) {
+    _connections.remove(id);
+    for (final s in conn.activeSockets) {
+      s.destroy();
+    }
+    conn.activeSockets.clear();
+    try {
+      conn.serverSocket.close();
+    } catch (_) {}
+    try {
+      conn.client.close();
+    } catch (_) {}
+  }
 
   Future<void> connect(
     ForwardConfig config, {
     required StatusCallback onStatusChanged,
   }) async {
-    // Bump generation — any callback from a previous attempt with a lower
-    // generation will be silently dropped.
     final gen = (_generation[config.id] ?? 0) + 1;
     _generation[config.id] = gen;
 
@@ -58,12 +128,14 @@ class SshTunnelService {
           socket,
           username: config.sshUsername,
           identities: SSHKeyPair.fromPem(keyContent),
+          keepAliveInterval: null,
         );
       } else {
         client = SSHClient(
           socket,
           username: config.sshUsername,
           onPasswordRequest: () => config.sshPassword ?? '',
+          keepAliveInterval: null,
         );
       }
 
@@ -76,42 +148,20 @@ class SshTunnelService {
       final tunnel = TunnelConnection(
         client: client,
         serverSocket: serverSocket,
+        onStatus: safeCallback,
       );
       _connections[config.id] = tunnel;
 
-      // Start keep-alive timer
-      if (config.keepAliveIntervalSec > 0) {
-        tunnel.missedAlives = 0;
-        tunnel.keepAliveTimer = Timer.periodic(
-          Duration(seconds: config.keepAliveIntervalSec),
-          (_) async {
-            try {
-              await client.execute('');
-              tunnel.missedAlives = 0;
-            } catch (_) {
-              tunnel.missedAlives++;
-              if (tunnel.missedAlives >= config.keepAliveMaxCount) {
-                tunnel.keepAliveTimer?.cancel();
-                _connections.remove(config.id);
-                for (final s in tunnel.activeSockets) {
-                  s.destroy();
-                }
-                tunnel.activeSockets.clear();
-                try {
-                  await tunnel.serverSocket.close();
-                } catch (_) {}
-                try {
-                  client.close();
-                } catch (_) {}
-                safeCallback(
-                  ForwardStatus.error,
-                  'Connection lost: ${config.keepAliveMaxCount} unanswered keep-alive messages',
-                );
-              }
-            }
-          },
-        );
+      // Backup: listen for SSH transport close (fires when TCP detects closure)
+      void onConnectionLost(_) {
+        final conn = _connections[config.id];
+        if (conn == null || conn.client != client) return;
+        _cleanupTunnel(config.id, conn);
+        safeCallback(ForwardStatus.error, 'SSH connection lost');
+        _stopHealthMonitorIfIdle();
       }
+
+      client.done.then(onConnectionLost).catchError(onConnectionLost);
 
       serverSocket.listen(
         (localSocket) async {
@@ -149,13 +199,16 @@ class SshTunnelService {
         onDone: () {
           if (_connections.containsKey(config.id)) {
             final t = _connections.remove(config.id);
-            t?.keepAliveTimer?.cancel();
             safeCallback(ForwardStatus.disconnected, null);
+            _stopHealthMonitorIfIdle();
           }
         },
       );
 
       safeCallback(ForwardStatus.connected, null);
+
+      // Start the global health monitor (single timer for all tunnels)
+      _startHealthMonitor();
     } catch (e) {
       _connections.remove(config.id);
       safeCallback(ForwardStatus.error, e.toString());
@@ -163,13 +216,13 @@ class SshTunnelService {
   }
 
   Future<void> disconnect(String id) async {
-    // Invalidate any in-flight connect callback for this id
     _generation[id] = (_generation[id] ?? 0) + 1;
 
     final tunnel = _connections.remove(id);
-    if (tunnel == null) return;
-
-    tunnel.keepAliveTimer?.cancel();
+    if (tunnel == null) {
+      _generation.remove(id);
+      return;
+    }
 
     for (final socket in tunnel.activeSockets) {
       socket.destroy();
@@ -183,6 +236,8 @@ class SshTunnelService {
     try {
       tunnel.client.close();
     } catch (_) {}
+
+    _stopHealthMonitorIfIdle();
   }
 
   Future<void> disconnectAll() async {
@@ -194,14 +249,34 @@ class SshTunnelService {
 
   bool isConnected(String id) => _connections.containsKey(id);
 
-  /// Probes a tunnel's SSH connection to check if it's still alive.
-  /// Returns true if the connection responds, false if it's dead.
+  void dispose() {
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = null;
+    final ids = _connections.keys.toList();
+    for (final id in ids) {
+      final conn = _connections.remove(id);
+      if (conn != null) {
+        for (final s in conn.activeSockets) {
+          s.destroy();
+        }
+        try {
+          conn.serverSocket.close();
+        } catch (_) {}
+        try {
+          conn.client.close();
+        } catch (_) {}
+      }
+    }
+    _generation.clear();
+  }
+
   Future<bool> isAlive(String id) async {
     final tunnel = _connections[id];
     if (tunnel == null) return false;
+    if (tunnel.client.isClosed) return false;
 
     try {
-      await tunnel.client.execute('').timeout(const Duration(seconds: 5));
+      await tunnel.client.ping().timeout(_pingTimeout);
       return true;
     } catch (_) {
       return false;

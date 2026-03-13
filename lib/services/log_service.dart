@@ -3,27 +3,21 @@ import 'package:flutter/foundation.dart';
 enum LogLevel { info, warning, error }
 
 class LogEntry {
-  final DateTime timestamp;
   final LogLevel level;
   final String tunnelName;
   final String message;
+  final String formattedTime;
+  final String formattedLine;
 
   LogEntry({
-    required this.timestamp,
+    required DateTime timestamp,
     required this.level,
     required this.tunnelName,
     required this.message,
-  });
-
-  String get formattedTime {
-    final h = timestamp.hour.toString().padLeft(2, '0');
-    final m = timestamp.minute.toString().padLeft(2, '0');
-    final s = timestamp.second.toString().padLeft(2, '0');
-    return '$h:$m:$s';
-  }
-
-  String get formattedLine =>
-      '[$formattedTime] [${level.name.toUpperCase()}] [$tunnelName] $message';
+  })  : formattedTime =
+            '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}:${timestamp.second.toString().padLeft(2, '0')}',
+        formattedLine =
+            '[${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}:${timestamp.second.toString().padLeft(2, '0')}] [${level.name.toUpperCase()}] [$tunnelName] $message';
 }
 
 class LogService extends ChangeNotifier {
@@ -31,7 +25,16 @@ class LogService extends ChangeNotifier {
 
   final List<LogEntry> _logs = [];
 
-  List<LogEntry> get logs => List.unmodifiable(_logs);
+  List<LogEntry> _unmodifiableLogs = const [];
+  bool _logsDirty = true;
+
+  List<LogEntry> get logs {
+    if (_logsDirty) {
+      _unmodifiableLogs = List.unmodifiable(_logs);
+      _logsDirty = false;
+    }
+    return _unmodifiableLogs;
+  }
 
   String get allLogsText => _logs.map((l) => l.formattedLine).join('\n');
 
@@ -48,6 +51,7 @@ class LogService extends ChangeNotifier {
     if (_logs.length > maxLogs) {
       _logs.removeLast();
     }
+    _logsDirty = true;
     notifyListeners();
   }
 
@@ -62,6 +66,7 @@ class LogService extends ChangeNotifier {
 
   void clear() {
     _logs.clear();
+    _logsDirty = true;
     notifyListeners();
   }
 }

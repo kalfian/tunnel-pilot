@@ -23,8 +23,14 @@ class UpdateService extends ChangeNotifier {
   double downloadProgress = 0.0;
 
   Timer? _periodicTimer;
+  HttpClient? _httpClient;
 
   String? _lastSkippedVersion;
+
+  HttpClient get _client {
+    _httpClient ??= HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    return _httpClient!;
+  }
 
   Future<void> init() async {
     final info = await PackageInfo.fromPlatform();
@@ -46,10 +52,7 @@ class UpdateService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 10);
-
-      final request = await client.getUrl(Uri.parse(
+      final request = await _client.getUrl(Uri.parse(
         'https://api.github.com/repos/$_repoOwner/$_repoName/releases/latest',
       ));
       request.headers.set('Accept', 'application/vnd.github.v3+json');
@@ -98,7 +101,6 @@ class UpdateService extends ChangeNotifier {
 
       updateAvailable = true;
       notifyListeners();
-      client.close();
     } catch (e) {
       debugPrint('Update check error: $e');
     } finally {
@@ -150,8 +152,7 @@ class UpdateService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final client = HttpClient();
-      final request = await client.getUrl(Uri.parse(downloadUrl!));
+      final request = await _client.getUrl(Uri.parse(downloadUrl!));
       final response = await request.close();
 
       final contentLength = response.contentLength;
@@ -162,19 +163,24 @@ class UpdateService extends ChangeNotifier {
       final file = File(filePath);
       final sink = file.openWrite();
       int received = 0;
+      int lastNotifiedPercent = -1;
 
       await for (final chunk in response) {
         sink.add(chunk);
         received += chunk.length;
         if (contentLength > 0) {
           downloadProgress = received / contentLength;
-          notifyListeners();
+          // Throttle UI updates to every 2% to avoid excessive rebuilds
+          final percent = (downloadProgress * 50).floor(); // 50 steps = 2% each
+          if (percent != lastNotifiedPercent) {
+            lastNotifiedPercent = percent;
+            notifyListeners();
+          }
         }
       }
 
       await sink.flush();
       await sink.close();
-      client.close();
 
       downloadProgress = 1.0;
       notifyListeners();
@@ -233,6 +239,8 @@ class UpdateService extends ChangeNotifier {
   @override
   void dispose() {
     _periodicTimer?.cancel();
+    _httpClient?.close();
+    _httpClient = null;
     super.dispose();
   }
 }

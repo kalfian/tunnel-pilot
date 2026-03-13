@@ -7,6 +7,9 @@ import 'screens/settings_window.dart';
 class TunnelPilotApp extends StatelessWidget {
   const TunnelPilotApp({super.key});
 
+  static final ThemeData _light = _lightTheme();
+  static final ThemeData _dark = _darkTheme();
+
   @override
   Widget build(BuildContext context) {
     final themeMode = context.watch<AppSettingsProvider>().themeModeEnum;
@@ -14,14 +17,14 @@ class TunnelPilotApp extends StatelessWidget {
     return MaterialApp(
       title: 'Tunnel Pilot',
       debugShowCheckedModeBanner: false,
-      theme: _lightTheme(),
-      darkTheme: _darkTheme(),
+      theme: _light,
+      darkTheme: _dark,
       themeMode: themeMode,
       home: const SettingsWindow(),
     );
   }
 
-  ThemeData _lightTheme() {
+  static ThemeData _lightTheme() {
     const bg = Color(0xFFF8F9FB);
     const surface = Color(0xFFFFFFFF);
     const border = Color(0xFFE2E5EA);
@@ -111,7 +114,7 @@ class TunnelPilotApp extends StatelessWidget {
     );
   }
 
-  ThemeData _darkTheme() {
+  static ThemeData _darkTheme() {
     const bg = Color(0xFF111318);
     const surface = Color(0xFF1A1D24);
     const surfaceElevated = Color(0xFF22262F);

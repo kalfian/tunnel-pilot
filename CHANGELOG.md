@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0 (2026-03-13)
+
+### Improvements
+
+- **Near-Realtime Connection Loss Detection** — Replaced per-tunnel keep-alive timer (30s × 5 failures = ~150s detection) with a single global health monitor that pings every 3 seconds and reports error immediately on first failure (~6 seconds detection time)
+  - VPN drop, network loss, or server disconnect now detected within seconds
+  - Single `Timer` instance for all tunnels (instead of one per tunnel) — lower memory footprint
+  - Uses lightweight `ping()` (~20 bytes) with 3-second timeout
+  - Automatic start/stop: timer only runs while tunnels are connected
+- **Memory Optimization: Theme Caching** — Light and dark `ThemeData` objects are now created once as `static final` instead of being rebuilt on every widget build cycle
+- **Memory Optimization: Log Service** — Pre-compute formatted time and log line strings at creation time instead of on every access; cached `List.unmodifiable()` with dirty flag to avoid re-creating the list on every read
+- **Memory Optimization: HTTP Client Reuse** — Update service now reuses a single `HttpClient` instance (lazy singleton) instead of creating a new one per request, with proper cleanup on dispose
+- **Memory Optimization: Download Progress Throttling** — Update download progress notifications throttled to 2% increments instead of firing on every chunk, reducing unnecessary UI rebuilds
+- **Clean Shutdown** — Added `dispose()` method to `SshTunnelService` for proper timer and connection cleanup on app exit
+
 ## 0.1.3 (2026-03-13)
 
 ### Features
