@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0 (2026-03-14)
+
+### Improvements
+
+- **Tray Menu UI** — Replaced oversized emoji status circles with compact Unicode symbols (●, ◐, ✖, ○) and cleaner label formatting for a more native look
+
 ## 1.0.1 (2026-03-13)
 
 ### Fixes

@@ -58,26 +58,26 @@ class TrayService {
   String _statusIcon(ForwardStatus status) {
     switch (status) {
       case ForwardStatus.connected:
-        return '\u{1F7E2}'; // green circle
+        return '\u25CF'; // ● small filled circle
       case ForwardStatus.connecting:
-        return '\u{1F7E1}'; // yellow circle
+        return '\u25D0'; // ◐ half circle (in-progress)
       case ForwardStatus.error:
-        return '\u{1F534}'; // red circle
+        return '\u2716'; // ✖ heavy multiplication x
       case ForwardStatus.disconnected:
-        return '\u26AA'; // white circle
+        return '\u25CB'; // ○ small empty circle
     }
   }
 
   String _statusLabel(ForwardStatus status) {
     switch (status) {
       case ForwardStatus.connected:
-        return 'ON';
+        return 'Connected';
       case ForwardStatus.connecting:
-        return 'Connecting...';
+        return 'Connecting…';
       case ForwardStatus.error:
         return 'Error';
       case ForwardStatus.disconnected:
-        return 'OFF';
+        return 'Off';
     }
   }
 
@@ -118,7 +118,7 @@ class TrayService {
         final icon = _statusIcon(status);
         final label = _statusLabel(status);
         menuItems.add(MenuItemLabel(
-          label: '$icon  ${forward.name}  [$label]',
+          label: '$icon ${forward.name} — $label',
           onClicked: (_) => onToggleForward(forward.id),
         ));
       }
