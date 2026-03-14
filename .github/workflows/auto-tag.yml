@@ -17,41 +17,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Check version change
+      - name: Check version vs latest tag
         id: version
         run: |
           CURRENT=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          PREVIOUS=$(git show HEAD~1:pubspec.yaml | grep '^version:' | awk '{print $2}')
+          LATEST_TAG=$(git tag --sort=-v:refname | grep '^v' | head -1 || echo "")
 
-          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
+          echo "current=v$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
-          if [ "$CURRENT" != "$PREVIOUS" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Version changed: $PREVIOUS -> $CURRENT"
-          else
+          if [ "v$CURRENT" = "$LATEST_TAG" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Version unchanged: $CURRENT"
-          fi
-
-      - name: Check tag exists
-        if: steps.version.outputs.changed == 'true'
-        id: tag_check
-        run: |
-          TAG="v${{ steps.version.outputs.current }}"
-          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG already exists — skipping"
+            echo "Version v$CURRENT matches latest tag — skipping"
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version bumped: $LATEST_TAG -> v$CURRENT"
           fi
 
       - name: Create and push tag
-        if: steps.version.outputs.changed == 'true' && steps.tag_check.outputs.exists == 'false'
+        if: steps.version.outputs.changed == 'true'
         run: |
-          TAG="v${{ steps.version.outputs.current }}"
+          TAG="${{ steps.version.outputs.current }}"
           git tag "$TAG"
           git push origin "$TAG"
           echo "Created and pushed tag: $TAG"

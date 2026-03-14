@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kalfian/tunnel-pilot/actions/workflows/ci.yml"><img src="https://github.com/kalfian/tunnel-pilot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/kalfian/tunnel-pilot/releases/latest"><img src="https://img.shields.io/github/v/release/kalfian/tunnel-pilot?label=latest%20release" alt="Latest Release"></a>
   <img src="https://img.shields.io/badge/Flutter-3.11+-blue" alt="Flutter">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/macOS-tested-brightgreen?logo=apple&logoColor=white" alt="macOS">
