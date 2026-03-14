@@ -30,6 +30,8 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
   late final TextEditingController _keepAliveMaxCountController;
 
   bool _useIdentityFile = false;
+  bool _obscurePassword = true;
+  int _selectedTab = 0; // 0 = General, 1 = Advanced
 
   @override
   void initState() {
@@ -86,7 +88,14 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
   }
 
   void _submit() {
-    if (!_formKey.currentState!.validate()) return;
+    // Validate general tab fields regardless of current tab
+    if (!_formKey.currentState!.validate()) {
+      // Switch to General tab if there are validation errors there
+      if (_selectedTab != 0) {
+        setState(() => _selectedTab = 0);
+      }
+      return;
+    }
 
     final config = ForwardConfig(
       id: widget.config?.id,
@@ -120,358 +129,441 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
 
     return Dialog(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Form(
-            key: _formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Header
-                  Row(
-                    children: [
-                      Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          isEditing ? Icons.edit_rounded : Icons.add_rounded,
-                          size: 18,
-                          color: theme.colorScheme.primary,
-                        ),
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 560),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color:
+                            theme.colorScheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      const SizedBox(width: 12),
-                      Text(
-                        isEditing ? 'Edit Tunnel' : 'New Tunnel',
-                        style: theme.textTheme.titleLarge,
+                      child: Icon(
+                        isEditing ? Icons.edit_rounded : Icons.add_rounded,
+                        size: 18,
+                        color: theme.colorScheme.primary,
                       ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Name field
-                  _fieldLabel('Name'),
-                  const SizedBox(height: 6),
-                  TextFormField(
-                    controller: _nameController,
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. Production DB',
                     ),
-                    validator: _required,
-                    autofocus: true,
+                    const SizedBox(width: 12),
+                    Text(
+                      isEditing ? 'Edit Tunnel' : 'New Tunnel',
+                      style: theme.textTheme.titleLarge,
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // Tab bar
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Row(
+                  children: [
+                    _tabButton('General', 0),
+                    const SizedBox(width: 8),
+                    _tabButton('Advanced', 1),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Scrollable content area
+              Expanded(
+                child: IndexedStack(
+                  index: _selectedTab,
+                  children: [
+                    _buildGeneralTab(theme),
+                    _buildAdvancedTab(theme),
+                  ],
+                ),
+              ),
+
+              // Sticky footer with actions
+              Container(
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: theme.dividerColor),
                   ),
+                ),
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: _submit,
+                      child:
+                          Text(isEditing ? 'Save Changes' : 'Add Tunnel'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-                  const SizedBox(height: 20),
+  Widget _buildGeneralTab(ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Name field
+          _fieldLabel('Name'),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              hintText: 'e.g. Production DB',
+            ),
+            validator: _required,
+            autofocus: true,
+          ),
 
-                  // SSH Server group
-                  _groupCard(
-                    title: 'SSH Server',
-                    icon: Icons.dns_outlined,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _fieldLabel('Host'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: _sshHostController,
-                                  decoration: const InputDecoration(
-                                    hintText: 'example.com',
-                                  ),
-                                  validator: _required,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          SizedBox(
-                            width: 80,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _fieldLabel('Port'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: _sshPortController,
-                                  decoration: const InputDecoration(
-                                    hintText: '22',
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly
-                                  ],
-                                  validator: _required,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _fieldLabel('Username'),
-                      const SizedBox(height: 6),
-                      TextFormField(
-                        controller: _sshUsernameController,
-                        decoration: const InputDecoration(
-                          hintText: 'root',
-                        ),
-                        validator: _required,
-                      ),
-                    ],
-                  ),
+          const SizedBox(height: 20),
 
-                  const SizedBox(height: 16),
-
-                  // Authentication group
-                  _groupCard(
-                    title: 'Authentication',
-                    icon: Icons.lock_outline_rounded,
-                    children: [
-                      // Auth type selector
-                      Row(
-                        children: [
-                          _authTab('Password', !_useIdentityFile, () {
-                            setState(() => _useIdentityFile = false);
-                          }),
-                          const SizedBox(width: 8),
-                          _authTab('Identity File', _useIdentityFile, () {
-                            setState(() => _useIdentityFile = true);
-                          }),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      if (_useIdentityFile) ...[
-                        _fieldLabel('File Path'),
-                        const SizedBox(height: 6),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: TextFormField(
-                                controller: _identityFileController,
-                                decoration: const InputDecoration(
-                                  hintText: '~/.ssh/id_rsa',
-                                ),
-                                validator: _useIdentityFile ? _required : null,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            SizedBox(
-                              height: 38,
-                              child: OutlinedButton(
-                                onPressed: _pickIdentityFile,
-                                child: const Text('Browse'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ] else ...[
-                        _fieldLabel('Password'),
+          // SSH Server group
+          _groupCard(
+            title: 'SSH Server',
+            icon: Icons.dns_outlined,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _fieldLabel('Host'),
                         const SizedBox(height: 6),
                         TextFormField(
-                          controller: _sshPasswordController,
+                          controller: _sshHostController,
                           decoration: const InputDecoration(
-                            hintText: 'Enter password',
+                            hintText: 'example.com',
                           ),
-                          obscureText: true,
+                          validator: _required,
                         ),
                       ],
-                    ],
+                    ),
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // Port Forwarding group
-                  _groupCard(
-                    title: 'Port Forwarding',
-                    icon: Icons.swap_horiz_rounded,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Local
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('LOCAL',
-                                    style: theme.textTheme.labelSmall),
-                                const SizedBox(height: 8),
-                                _fieldLabel('Address'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: _localBindController,
-                                  decoration: const InputDecoration(
-                                    hintText: '127.0.0.1',
-                                  ),
-                                  validator: _required,
-                                ),
-                                const SizedBox(height: 8),
-                                _fieldLabel('Port'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: _localPortController,
-                                  decoration: const InputDecoration(
-                                    hintText: '3306',
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly
-                                  ],
-                                  validator: _required,
-                                ),
-                              ],
-                            ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 80,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _fieldLabel('Port'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _sshPortController,
+                          decoration: const InputDecoration(
+                            hintText: '22',
                           ),
-
-                          // Arrow
-                          Padding(
-                            padding: const EdgeInsets.only(top: 40),
-                            child: SizedBox(
-                              width: 40,
-                              child: Icon(
-                                Icons.arrow_forward_rounded,
-                                color: theme.colorScheme.outline,
-                                size: 20,
-                              ),
-                            ),
-                          ),
-
-                          // Remote
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('REMOTE',
-                                    style: theme.textTheme.labelSmall),
-                                const SizedBox(height: 8),
-                                _fieldLabel('Address'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: _remoteHostController,
-                                  decoration: const InputDecoration(
-                                    hintText: 'localhost',
-                                  ),
-                                  validator: _required,
-                                ),
-                                const SizedBox(height: 8),
-                                _fieldLabel('Port'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: _remotePortController,
-                                  decoration: const InputDecoration(
-                                    hintText: '3306',
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly
-                                  ],
-                                  validator: _required,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Advanced group (keep-alive)
-                  _groupCard(
-                    title: 'Keep Alive',
-                    icon: Icons.favorite_border_rounded,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _fieldLabel('Interval (seconds)'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: _keepAliveIntervalController,
-                                  decoration: const InputDecoration(
-                                    hintText: '30',
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _fieldLabel('Max unanswered'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                  controller: _keepAliveMaxCountController,
-                                  decoration: const InputDecoration(
-                                    hintText: '5',
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Disconnect after this many unanswered alive messages. Set interval to 0 to disable.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: theme.colorScheme.outline,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly
+                          ],
+                          validator: _required,
                         ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Actions
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Cancel'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: _submit,
-                        child: Text(isEditing ? 'Save Changes' : 'Add Tunnel'),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 12),
+              _fieldLabel('Username'),
+              const SizedBox(height: 6),
+              TextFormField(
+                controller: _sshUsernameController,
+                decoration: const InputDecoration(
+                  hintText: 'root',
+                ),
+                validator: _required,
+              ),
+            ],
           ),
-        ),
+
+          const SizedBox(height: 16),
+
+          // Authentication group
+          _groupCard(
+            title: 'Authentication',
+            icon: Icons.lock_outline_rounded,
+            children: [
+              Row(
+                children: [
+                  _authTab('Password', !_useIdentityFile, () {
+                    setState(() => _useIdentityFile = false);
+                  }),
+                  const SizedBox(width: 8),
+                  _authTab('Identity File', _useIdentityFile, () {
+                    setState(() => _useIdentityFile = true);
+                  }),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (_useIdentityFile) ...[
+                _fieldLabel('File Path'),
+                const SizedBox(height: 6),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _identityFileController,
+                        decoration: const InputDecoration(
+                          hintText: '~/.ssh/id_rsa',
+                        ),
+                        validator: _useIdentityFile ? _required : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      height: 38,
+                      child: OutlinedButton(
+                        onPressed: _pickIdentityFile,
+                        child: const Text('Browse'),
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                _fieldLabel('Password'),
+                const SizedBox(height: 6),
+                TextFormField(
+                  controller: _sshPasswordController,
+                  decoration: InputDecoration(
+                    hintText: 'Enter password',
+                    suffixIcon: GestureDetector(
+                      onTap: () {
+                        setState(
+                            () => _obscurePassword = !_obscurePassword);
+                      },
+                      child: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                    ),
+                    suffixIconConstraints: const BoxConstraints(
+                      minWidth: 36,
+                      minHeight: 0,
+                    ),
+                  ),
+                  obscureText: _obscurePassword,
+                ),
+              ],
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Port Forwarding group
+          _groupCard(
+            title: 'Port Forwarding',
+            icon: Icons.swap_horiz_rounded,
+            children: [
+              // Local side
+              Text('LOCAL', style: Theme.of(context).textTheme.labelSmall),
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextFormField(
+                      controller: _localBindController,
+                      decoration: const InputDecoration(
+                        hintText: '127.0.0.1',
+                      ),
+                      validator: _required,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      ' : ',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 80,
+                    child: TextFormField(
+                      controller: _localPortController,
+                      decoration: const InputDecoration(
+                        hintText: '3306',
+                      ),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly
+                      ],
+                      validator: _required,
+                    ),
+                  ),
+                ],
+              ),
+
+              // Arrow
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Icon(
+                    Icons.arrow_downward_rounded,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.5),
+                    size: 18,
+                  ),
+                ),
+              ),
+
+              // Remote side
+              Text('REMOTE',
+                  style: Theme.of(context).textTheme.labelSmall),
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextFormField(
+                      controller: _remoteHostController,
+                      decoration: const InputDecoration(
+                        hintText: 'localhost',
+                      ),
+                      validator: _required,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      ' : ',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 80,
+                    child: TextFormField(
+                      controller: _remotePortController,
+                      decoration: const InputDecoration(
+                        hintText: '3306',
+                      ),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly
+                      ],
+                      validator: _required,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdvancedTab(ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _groupCard(
+            title: 'Keep Alive',
+            icon: Icons.favorite_border_rounded,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _fieldLabel('Interval (sec)'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _keepAliveIntervalController,
+                          decoration: const InputDecoration(
+                            hintText: '30',
+                          ),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _fieldLabel('Max unanswered'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _keepAliveMaxCountController,
+                          decoration: const InputDecoration(
+                            hintText: '5',
+                          ),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Send a keep-alive ping at this interval. Disconnect after the specified number of unanswered pings. Set interval to 0 to disable.',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+        ],
       ),
     );
   }
@@ -524,6 +616,40 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
           const SizedBox(height: 12),
           ...children,
         ],
+      ),
+    );
+  }
+
+  Widget _tabButton(String label, int index) {
+    final theme = Theme.of(context);
+    final isSelected = _selectedTab == index;
+
+    return GestureDetector(
+      onTap: () => setState(() => _selectedTab = index),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? theme.colorScheme.primary.withValues(alpha: 0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected
+                ? theme.colorScheme.primary.withValues(alpha: 0.4)
+                : theme.dividerColor,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+            color: isSelected
+                ? theme.colorScheme.primary
+                : theme.colorScheme.outline,
+          ),
+        ),
       ),
     );
   }

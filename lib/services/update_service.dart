@@ -20,6 +20,7 @@ class UpdateService extends ChangeNotifier {
   bool isChecking = false;
   bool updateAvailable = false;
   bool isDownloading = false;
+  bool isInstalling = false;
   double downloadProgress = 0.0;
 
   Timer? _periodicTimer;
@@ -184,6 +185,8 @@ class UpdateService extends ChangeNotifier {
       await sink.close();
 
       downloadProgress = 1.0;
+      isDownloading = false;
+      isInstalling = true;
       notifyListeners();
 
       // Install and restart, or fallback to opening the file
@@ -200,6 +203,8 @@ class UpdateService extends ChangeNotifier {
       debugPrint('Download error: $e');
     } finally {
       isDownloading = false;
+      isInstalling = false;
+      downloadProgress = 0.0;
       notifyListeners();
     }
   }

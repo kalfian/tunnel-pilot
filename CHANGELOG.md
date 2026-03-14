@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0 (2026-03-14)
+
+### Improvements
+
+- **Tray Menu UI** — Native colored dot icons (green/yellow/red/grey) for tunnel status instead of Unicode characters, matching macOS native menu style (like Herd)
+- **Tray Port Info** — Each tunnel now shows port mapping (e.g. `:9201 → :443`) in the tray menu for quick reference
+- **Connect All / Disconnect All** — New tray menu actions to connect or disconnect all tunnels at once
+- **Better Tray Structure** — Cleaner menu layout with active tunnel count header, grouped sections, and streamlined footer
+
+### Fixes
+
+- **Update Stuck at 100%** — Fixed download progress bar stuck at 100% after download completes. Now shows "Installing..." state during installation, and properly resets UI if install fails
+
 ## 1.1.0 (2026-03-14)
 
 ### Improvements

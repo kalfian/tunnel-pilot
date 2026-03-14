@@ -234,6 +234,24 @@ class ForwardProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> connectAll() async {
+    for (final f in _forwards) {
+      final status = getStatus(f.id);
+      if (status == ForwardStatus.disconnected ||
+          status == ForwardStatus.error) {
+        _userDisconnected.remove(f.id);
+        _cancelReconnect(f.id);
+        _reconnectAttempts.remove(f.id);
+        await _tunnel.disconnect(f.id);
+        _statuses[f.id] = ForwardStatus.disconnected;
+        _errorMessages.remove(f.id);
+        notifyListeners();
+        await Future.delayed(const Duration(milliseconds: 300));
+        await _connectForward(f.id);
+      }
+    }
+  }
+
   Future<void> disconnectAll() async {
     for (final f in _forwards) {
       _userDisconnected.add(f.id);

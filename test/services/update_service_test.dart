@@ -56,6 +56,7 @@ void main() {
         expect(service.isChecking, isFalse);
         expect(service.updateAvailable, isFalse);
         expect(service.isDownloading, isFalse);
+        expect(service.isInstalling, isFalse);
         expect(service.downloadProgress, 0.0);
       });
 
@@ -93,6 +94,21 @@ void main() {
         await service.downloadAndInstall();
         // Should return early without changing state
         expect(service.isDownloading, isTrue);
+      });
+
+      test('isInstalling is false initially', () {
+        expect(service.isInstalling, isFalse);
+      });
+
+      test('downloadProgress resets after failed download', () async {
+        // Set up a bad URL that will fail
+        service.downloadUrl = 'https://invalid.invalid/file.dmg';
+        await service.downloadAndInstall();
+
+        // After failure, state should be fully reset
+        expect(service.isDownloading, isFalse);
+        expect(service.isInstalling, isFalse);
+        expect(service.downloadProgress, 0.0);
       });
     });
 

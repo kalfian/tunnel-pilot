@@ -46,7 +46,25 @@ class UpdateBanner extends StatelessWidget {
               ),
             ],
           ),
-          if (updateService.isDownloading) ...[
+          if (updateService.isInstalling) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                minHeight: 4,
+                backgroundColor:
+                    theme.colorScheme.primary.withValues(alpha: 0.1),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  theme.colorScheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Installing...',
+              style: theme.textTheme.bodySmall,
+            ),
+          ] else if (updateService.isDownloading) ...[
             const SizedBox(height: 10),
             ClipRRect(
               borderRadius: BorderRadius.circular(4),

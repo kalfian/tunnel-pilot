@@ -132,6 +132,12 @@ Future<void> main() async {
       onToggleForward: (id) {
         forwardProvider.toggleForward(id);
       },
+      onConnectAll: () {
+        forwardProvider.connectAll();
+      },
+      onDisconnectAll: () {
+        forwardProvider.disconnectAll();
+      },
     );
 
     await trayService.init();

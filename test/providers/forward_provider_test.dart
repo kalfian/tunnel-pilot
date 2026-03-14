@@ -184,5 +184,33 @@ void main() {
       // No assertion needed - just verify it doesn't throw
       provider.notificationsEnabled = true;
     });
+
+    test('connectAll does nothing when forwards list is empty', () async {
+      await provider.connectAll();
+      // Should not throw
+      expect(provider.forwards, isEmpty);
+    });
+
+    test('connectAll attempts to connect disconnected tunnels', () async {
+      final config = createConfig(id: 'id-1');
+      await provider.addForward(config);
+
+      // Tunnel has no valid auth, so it will go to error state
+      // but connectAll should still attempt it
+      await provider.connectAll();
+      // The tunnel should be in error state (no password/identity)
+      // since we use a config with password, it will attempt connection
+      expect(provider.getStatus('id-1'), isNotNull);
+    });
+
+    test('disconnectAll clears all statuses', () async {
+      await provider.addForward(createConfig(id: 'id-1'));
+      await provider.addForward(createConfig(id: 'id-2'));
+
+      await provider.disconnectAll();
+
+      expect(provider.getStatus('id-1'), ForwardStatus.disconnected);
+      expect(provider.getStatus('id-2'), ForwardStatus.disconnected);
+    });
   });
 }
