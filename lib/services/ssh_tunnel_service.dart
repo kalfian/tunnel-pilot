@@ -198,7 +198,7 @@ class SshTunnelService {
         },
         onDone: () {
           if (_connections.containsKey(config.id)) {
-            final t = _connections.remove(config.id);
+            // final t = _connections.remove(config.id);
             safeCallback(ForwardStatus.disconnected, null);
             _stopHealthMonitorIfIdle();
           }
