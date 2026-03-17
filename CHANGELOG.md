@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2 (2026-03-17)
+
+### Fixes
+
+- **Auto Tag Not Triggering Release** — Fixed auto-tag workflow not triggering release workflow. Tags pushed by default `GITHUB_TOKEN` don't trigger other workflows; now uses PAT token so release builds run automatically
+
 ## 1.2.1 (2026-03-17)
 
 ### Fixes
