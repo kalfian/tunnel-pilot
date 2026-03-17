@@ -12,6 +12,11 @@ class TunnelConnection {
   final List<Socket> activeSockets = [];
   final void Function(ForwardStatus status, String? error) onStatus;
 
+  /// Tracks consecutive forwardLocal failures to detect zombie connections
+  /// where SSH ping succeeds but forwarding is broken.
+  int consecutiveForwardFailures = 0;
+  static const maxForwardFailures = 3;
+
   TunnelConnection({
     required this.client,
     required this.serverSocket,
@@ -120,6 +125,10 @@ class SshTunnelService {
 
       SSHClient client;
 
+      final keepAlive = config.keepAliveIntervalSec > 0
+          ? Duration(seconds: config.keepAliveIntervalSec)
+          : null;
+
       if (config.identityFilePath != null &&
           config.identityFilePath!.isNotEmpty) {
         final keyFile = File(config.identityFilePath!);
@@ -128,14 +137,14 @@ class SshTunnelService {
           socket,
           username: config.sshUsername,
           identities: SSHKeyPair.fromPem(keyContent),
-          keepAliveInterval: null,
+          keepAliveInterval: keepAlive,
         );
       } else {
         client = SSHClient(
           socket,
           username: config.sshUsername,
           onPasswordRequest: () => config.sshPassword ?? '',
-          keepAliveInterval: null,
+          keepAliveInterval: keepAlive,
         );
       }
 
@@ -171,6 +180,8 @@ class SshTunnelService {
               config.remotePort,
             );
 
+            // Forward succeeded — reset failure counter
+            tunnel.consecutiveForwardFailures = 0;
             tunnel.activeSockets.add(localSocket);
 
             channel.stream.cast<List<int>>().listen(
@@ -191,6 +202,20 @@ class SshTunnelService {
             });
           } catch (e) {
             localSocket.destroy();
+
+            // Track consecutive forward failures — if the SSH session is alive
+            // but forwarding is broken (zombie connection), trigger reconnect.
+            final conn = _connections[config.id];
+            if (conn != null && conn.client == client) {
+              conn.consecutiveForwardFailures++;
+              if (conn.consecutiveForwardFailures >=
+                  TunnelConnection.maxForwardFailures) {
+                _cleanupTunnel(config.id, conn);
+                safeCallback(ForwardStatus.error,
+                    'Port forwarding failed ($e)');
+                _stopHealthMonitorIfIdle();
+              }
+            }
           }
         },
         onError: (error) {

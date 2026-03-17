@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 (2026-03-17)
+
+### Fixes
+
+- **Zombie Tunnel Detection** — Fixed tunnel showing "connected" but all connections through it failing silently. Enabled SSH-level keepalive (uses per-tunnel interval setting) so dead connections are detected by the SSH protocol itself, not just external health checks
+- **Forward Failure Recovery** — When port forwarding fails 3 consecutive times (e.g. zombie SSH session), the tunnel now automatically triggers error status and reconnect instead of staying stuck as "connected"
+
 ## 1.2.0 (2026-03-14)
 
 ### Improvements
