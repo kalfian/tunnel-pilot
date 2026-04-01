@@ -78,6 +78,8 @@ class ForwardProvider extends ChangeNotifier {
 
     final wasConnected = getStatus(config.id) == ForwardStatus.connected;
     if (wasConnected) {
+      _statuses[config.id] = ForwardStatus.disconnecting;
+      notifyListeners();
       await _tunnel.disconnect(config.id);
       _statuses[config.id] = ForwardStatus.disconnected;
       _logService.info(config.name, 'Disconnected (config updated)');
@@ -91,6 +93,10 @@ class ForwardProvider extends ChangeNotifier {
   Future<void> removeForward(String id) async {
     final config = _forwards.firstWhere((f) => f.id == id);
     _cancelReconnect(id);
+    if (getStatus(id) == ForwardStatus.connected) {
+      _statuses[id] = ForwardStatus.disconnecting;
+      notifyListeners();
+    }
     await _tunnel.disconnect(id);
     _forwards.removeWhere((f) => f.id == id);
     _statuses.remove(id);
@@ -114,8 +120,14 @@ class ForwardProvider extends ChangeNotifier {
 
   Future<void> toggleForward(String id) async {
     final status = getStatus(id);
-    if (status == ForwardStatus.connected ||
-        status == ForwardStatus.connecting) {
+
+    // Ignore toggle while a connection/disconnection is in progress
+    if (status == ForwardStatus.connecting ||
+        status == ForwardStatus.disconnecting) {
+      return;
+    }
+
+    if (status == ForwardStatus.connected) {
       _userDisconnected.add(id);
       _cancelReconnect(id);
       await _disconnectForward(id);
@@ -179,6 +191,7 @@ class ForwardProvider extends ChangeNotifier {
             }
             _tryAutoReconnect(id);
           case ForwardStatus.connecting:
+          case ForwardStatus.disconnecting:
             break;
         }
       },
@@ -223,9 +236,12 @@ class ForwardProvider extends ChangeNotifier {
 
   Future<void> _disconnectForward(String id) async {
     final config = _forwards.firstWhere((f) => f.id == id);
+    _statuses[id] = ForwardStatus.disconnecting;
+    _errorMessages.remove(id);
+    notifyListeners();
+
     await _tunnel.disconnect(id);
     _statuses[id] = ForwardStatus.disconnected;
-    _errorMessages.remove(id);
     _logService.info(config.name, 'Disconnected');
     notifyListeners();
 
@@ -256,7 +272,14 @@ class ForwardProvider extends ChangeNotifier {
     for (final f in _forwards) {
       _userDisconnected.add(f.id);
       _cancelReconnect(f.id);
+      final status = getStatus(f.id);
+      if (status == ForwardStatus.connected ||
+          status == ForwardStatus.connecting) {
+        _statuses[f.id] = ForwardStatus.disconnecting;
+      }
     }
+    notifyListeners();
+
     await _tunnel.disconnectAll();
     _statuses.clear();
     _errorMessages.clear();
@@ -281,6 +304,8 @@ class ForwardProvider extends ChangeNotifier {
         final config = _forwards.firstWhere((f) => f.id == id);
         _logService.warning(config.name, 'Connection lost after sleep, reconnecting...');
         // Disconnect the dead tunnel cleanly
+        _statuses[id] = ForwardStatus.disconnecting;
+        notifyListeners();
         await _tunnel.disconnect(id);
         _statuses[id] = ForwardStatus.disconnected;
         _errorMessages.remove(id);

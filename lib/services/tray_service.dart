@@ -55,6 +55,7 @@ class TrayService {
       case ForwardStatus.connected:
         return _assetPath('status_green.png');
       case ForwardStatus.connecting:
+      case ForwardStatus.disconnecting:
         return _assetPath('status_yellow.png');
       case ForwardStatus.error:
         return _assetPath('status_red.png');
@@ -147,7 +148,9 @@ class TrayService {
       final hasDisconnected = statuses.values.any((s) =>
           s == ForwardStatus.disconnected || s == ForwardStatus.error);
       final hasConnected = statuses.values.any((s) =>
-          s == ForwardStatus.connected || s == ForwardStatus.connecting);
+          s == ForwardStatus.connected ||
+          s == ForwardStatus.connecting ||
+          s == ForwardStatus.disconnecting);
 
       if (hasDisconnected && onConnectAll != null) {
         menuItems.add(MenuItemLabel(

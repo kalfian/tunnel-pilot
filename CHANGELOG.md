@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.3 (2026-04-01)
+
+### Fixes
+
+- **Connect/Disconnect Race Condition** — Fixed race condition where rapidly toggling a tunnel could cause overlapping connect/disconnect operations. Added `disconnecting` status so the toggle is ignored while a connection or disconnection is in progress
+- **Realtime Status Indicators** — Tunnel list now shows a spinner on the status dot during connecting and disconnecting states, with the toggle visually dimmed to indicate it's temporarily disabled. All operations (update, remove, reconnect after sleep, disconnect all) now reflect the `disconnecting` state in realtime before performing the actual disconnect
+
 ## 1.2.2 (2026-03-17)
 
 ### Fixes

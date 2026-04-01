@@ -43,6 +43,7 @@ class _ForwardListTileState extends State<ForwardListTile> {
       case ForwardStatus.connected:
         return const Color(0xFF22C55E);
       case ForwardStatus.connecting:
+      case ForwardStatus.disconnecting:
         return const Color(0xFFF59E0B);
       case ForwardStatus.error:
         return const Color(0xFFEF4444);
@@ -119,8 +120,9 @@ class _ForwardListTileState extends State<ForwardListTile> {
     final isDark = theme.brightness == Brightness.dark;
     final hasError =
         widget.status == ForwardStatus.error && widget.errorMessage != null;
-    final isActive = widget.status == ForwardStatus.connected ||
-        widget.status == ForwardStatus.connecting;
+    final isTransitioning = widget.status == ForwardStatus.connecting ||
+        widget.status == ForwardStatus.disconnecting;
+    final isActive = widget.status == ForwardStatus.connected || isTransitioning;
     final color = _statusColor();
     final borderColor = theme.dividerColor;
 
@@ -156,22 +158,32 @@ class _ForwardListTileState extends State<ForwardListTile> {
         child: Row(
           children: [
             // Status indicator
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 7,
-              height: 7,
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-                boxShadow: isActive
-                    ? [
-                        BoxShadow(
-                            color: color.withValues(alpha: 0.5),
-                            blurRadius: 6)
-                      ]
-                    : null,
+            if (isTransitioning)
+              SizedBox(
+                width: 7,
+                height: 7,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: color,
+                ),
+              )
+            else
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  boxShadow: isActive
+                      ? [
+                          BoxShadow(
+                              color: color.withValues(alpha: 0.5),
+                              blurRadius: 6)
+                        ]
+                      : null,
+                ),
               ),
-            ),
             const SizedBox(width: 12),
 
             // Info
@@ -226,8 +238,11 @@ class _ForwardListTileState extends State<ForwardListTile> {
 
             // Custom toggle
             GestureDetector(
-              onTap: widget.onToggle,
-              child: AnimatedContainer(
+              onTap: isTransitioning ? null : widget.onToggle,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                opacity: isTransitioning ? 0.5 : 1.0,
+                child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 width: 36,
                 height: 20,
@@ -258,6 +273,7 @@ class _ForwardListTileState extends State<ForwardListTile> {
                     ),
                   ),
                 ),
+              ),
               ),
             ),
           ],
