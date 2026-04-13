@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.7 (2026-04-13)
+
+### Fixes
+
+- **Update Flow Stuck** — Fixed update getting stuck at 100% during download/install. Added timeouts to all install operations (prevents indefinite hangs), visible error messages when install fails (instead of silently resetting), status messages during each install step ("Mounting disk image...", "Copying to Applications..."), and a cancel button during download. Also fixed fragile hdiutil mount point parsing
+
 ## 1.2.6 (2026-04-13)
 
 ### Improvements
