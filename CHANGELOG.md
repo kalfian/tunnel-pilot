@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.4 (2026-04-13)
+
+### Improvements
+
+- **Connecting State in Tray** — Tray icon count and tooltip now include tunnels in "connecting" state, not just connected ones. Tooltip shows separate counts (e.g. "2 active, 1 connecting...") and tray menu displays a "connecting" status line
+
+### Fixes
+
+- **Release Dispatch** — Fixed release workflow dispatch configuration
+
 ## 1.2.3 (2026-04-01)
 
 ### Fixes
