@@ -2,8 +2,9 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [master]
+    paths:
+      - pubspec.yaml
   workflow_dispatch:
     inputs:
       tag:
@@ -12,15 +13,67 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
-  test:
-    runs-on: macos-latest
+  auto-tag:
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.tag }}
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.current }}
+      changed: ${{ steps.version.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Check version vs latest tag
+        id: version
+        run: |
+          CURRENT=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          LATEST_TAG=$(git tag --sort=-v:refname | grep '^v' | head -1 || echo "")
+
+          echo "current=v$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+          if [ "v$CURRENT" = "$LATEST_TAG" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version v$CURRENT matches latest tag — skipping"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version bumped: $LATEST_TAG -> v$CURRENT"
+          fi
+
+      - name: Create and push tag
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          TAG="${{ steps.version.outputs.current }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Pushed tag $TAG"
+
+  resolve-tag:
+    runs-on: ubuntu-latest
+    needs: [auto-tag]
+    if: ${{ always() && (inputs.tag || needs.auto-tag.outputs.changed == 'true') }}
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve release tag
+        id: resolve
+        run: |
+          TAG="${{ inputs.tag || needs.auto-tag.outputs.tag }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
+
+  test:
+    runs-on: macos-latest
+    needs: [resolve-tag]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.release_tag }}
 
       - uses: subosito/flutter-action@v2
         with:
@@ -31,11 +84,11 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
-    needs: test
+    needs: [resolve-tag, test]
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.resolve-tag.outputs.release_tag }}
 
       - uses: subosito/flutter-action@v2
         with:
@@ -50,7 +103,7 @@ jobs:
       - name: Create DMG
         run: |
           APP_PATH="build/macos/Build/Products/Release/Tunnel Pilot.app"
-          DMG_NAME="TunnelPilot-${{ env.RELEASE_TAG }}-macos"
+          DMG_NAME="TunnelPilot-${{ needs.resolve-tag.outputs.release_tag }}-macos"
           BG_IMG="assets/dmg/background.png"
 
           mkdir -p dmg_stage/.background
@@ -97,15 +150,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: TunnelPilot-${{ env.RELEASE_TAG }}-macos.dmg
+          path: TunnelPilot-${{ needs.resolve-tag.outputs.release_tag }}-macos.dmg
 
   build-windows:
     runs-on: windows-latest
-    needs: test
+    needs: [resolve-tag, test]
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.resolve-tag.outputs.release_tag }}
 
       - uses: subosito/flutter-action@v2
         with:
@@ -118,22 +171,22 @@ jobs:
         shell: pwsh
         run: |
           $src = "build\windows\x64\runner\Release"
-          $zip = "TunnelPilot-${{ env.RELEASE_TAG }}-windows.zip"
+          $zip = "TunnelPilot-${{ needs.resolve-tag.outputs.release_tag }}-windows.zip"
           Compress-Archive -Path "$src\*" -DestinationPath $zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-zip
-          path: TunnelPilot-${{ env.RELEASE_TAG }}-windows.zip
+          path: TunnelPilot-${{ needs.resolve-tag.outputs.release_tag }}-windows.zip
 
   build-linux:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [resolve-tag, test]
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.resolve-tag.outputs.release_tag }}
 
       - name: Install Linux dependencies
         run: |
@@ -159,28 +212,29 @@ jobs:
       - name: Create tar.gz
         run: |
           cd build/linux/x64/release/bundle
-          tar -czf ../../../../../TunnelPilot-${{ env.RELEASE_TAG }}-linux.tar.gz .
+          tar -czf ../../../../../TunnelPilot-${{ needs.resolve-tag.outputs.release_tag }}-linux.tar.gz .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-tar
-          path: TunnelPilot-${{ env.RELEASE_TAG }}-linux.tar.gz
+          path: TunnelPilot-${{ needs.resolve-tag.outputs.release_tag }}-linux.tar.gz
 
   release:
     runs-on: ubuntu-latest
-    needs: [build-macos, build-windows, build-linux]
+    needs: [resolve-tag, build-macos, build-windows, build-linux]
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.resolve-tag.outputs.release_tag }}
 
       - name: Extract changelog for tag
         id: changelog
         run: |
-          VERSION="${RELEASE_TAG#v}"
+          TAG="${{ needs.resolve-tag.outputs.release_tag }}"
+          VERSION="${TAG#v}"
           NOTES=$(awk "/^## ${VERSION} /{found=1; next} /^## /{if(found) exit} found" CHANGELOG.md)
           echo "$NOTES" > release_notes.md
 
@@ -193,11 +247,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: Tunnel Pilot ${{ env.RELEASE_TAG }}
+          tag_name: ${{ needs.resolve-tag.outputs.release_tag }}
+          name: Tunnel Pilot ${{ needs.resolve-tag.outputs.release_tag }}
           body_path: release_notes.md
           draft: false
-          prerelease: ${{ contains(env.RELEASE_TAG, 'beta') || contains(env.RELEASE_TAG, 'alpha') }}
+          prerelease: ${{ contains(needs.resolve-tag.outputs.release_tag, 'beta') || contains(needs.resolve-tag.outputs.release_tag, 'alpha') }}
           files: |
             artifacts/*.dmg
             artifacts/*.zip
@@ -213,7 +267,7 @@ jobs:
             exit 0
           fi
 
-          VERSION="${{ env.RELEASE_TAG }}"
+          VERSION="${{ needs.resolve-tag.outputs.release_tag }}"
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${VERSION}"
           NOTES=$(cat release_notes.md | head -50)
 
