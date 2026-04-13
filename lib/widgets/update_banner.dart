@@ -18,10 +18,14 @@ class UpdateBanner extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.primary.withValues(alpha: 0.08),
+        color: updateService.errorMessage != null
+            ? theme.colorScheme.error.withValues(alpha: 0.08)
+            : theme.colorScheme.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.2),
+          color: updateService.errorMessage != null
+              ? theme.colorScheme.error.withValues(alpha: 0.2)
+              : theme.colorScheme.primary.withValues(alpha: 0.2),
         ),
       ),
       child: Column(
@@ -30,9 +34,13 @@ class UpdateBanner extends StatelessWidget {
           Row(
             children: [
               Icon(
-                Icons.system_update_outlined,
+                updateService.errorMessage != null
+                    ? Icons.error_outline
+                    : Icons.system_update_outlined,
                 size: 18,
-                color: theme.colorScheme.primary,
+                color: updateService.errorMessage != null
+                    ? theme.colorScheme.error
+                    : theme.colorScheme.primary,
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -40,13 +48,53 @@ class UpdateBanner extends StatelessWidget {
                   'Update available: v${updateService.latestVersion}',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.primary,
+                    color: updateService.errorMessage != null
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.primary,
                   ),
                 ),
               ),
             ],
           ),
-          if (updateService.isInstalling) ...[
+          if (updateService.errorMessage != null &&
+              !updateService.isDownloading &&
+              !updateService.isInstalling) ...[
+            const SizedBox(height: 8),
+            Text(
+              updateService.errorMessage!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (updateService.downloadUrl != null)
+                  _actionButton(
+                    context,
+                    label: 'Retry',
+                    primary: true,
+                    isError: true,
+                    onPressed: () => updateService.downloadAndInstall(),
+                  ),
+                if (updateService.downloadUrl != null)
+                  const SizedBox(width: 8),
+                _actionButton(
+                  context,
+                  label: 'View Release',
+                  isError: true,
+                  onPressed: () => updateService.openReleasePage(),
+                ),
+                const SizedBox(width: 8),
+                _actionButton(
+                  context,
+                  label: 'Dismiss',
+                  isError: true,
+                  onPressed: () => updateService.dismissUpdate(),
+                ),
+              ],
+            ),
+          ] else if (updateService.isInstalling) ...[
             const SizedBox(height: 10),
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
@@ -61,7 +109,7 @@ class UpdateBanner extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Installing...',
+              updateService.statusMessage ?? 'Installing...',
               style: theme.textTheme.bodySmall,
             ),
           ] else if (updateService.isDownloading) ...[
@@ -81,9 +129,27 @@ class UpdateBanner extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            Text(
-              '${(updateService.downloadProgress * 100).toInt()}%',
-              style: theme.textTheme.bodySmall,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    updateService.downloadProgress > 0
+                        ? '${(updateService.downloadProgress * 100).toInt()}%'
+                        : 'Downloading...',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => updateService.cancelUpdate(),
+                  child: Text(
+                    'Cancel',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ] else ...[
             const SizedBox(height: 10),
@@ -139,17 +205,17 @@ class UpdateBanner extends StatelessWidget {
     required String label,
     required VoidCallback onPressed,
     bool primary = false,
+    bool isError = false,
   }) {
     final theme = Theme.of(context);
+    final color = isError ? theme.colorScheme.error : theme.colorScheme.primary;
 
     return GestureDetector(
       onTap: onPressed,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: primary
-              ? theme.colorScheme.primary
-              : theme.colorScheme.primary.withValues(alpha: 0.1),
+          color: primary ? color : color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
@@ -157,7 +223,7 @@ class UpdateBanner extends StatelessWidget {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w500,
-            color: primary ? Colors.white : theme.colorScheme.primary,
+            color: primary ? Colors.white : color,
           ),
         ),
       ),

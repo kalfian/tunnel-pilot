@@ -58,6 +58,8 @@ void main() {
         expect(service.isDownloading, isFalse);
         expect(service.isInstalling, isFalse);
         expect(service.downloadProgress, 0.0);
+        expect(service.errorMessage, isNull);
+        expect(service.statusMessage, isNull);
       });
 
       test('dismissUpdate sets updateAvailable to false', () {
@@ -71,6 +73,42 @@ void main() {
         service.addListener(() => notifyCount++);
 
         service.dismissUpdate();
+        expect(notifyCount, 1);
+      });
+
+      test('dismissUpdate clears error and status', () {
+        service.errorMessage = 'some error';
+        service.statusMessage = 'some status';
+        service.updateAvailable = true;
+
+        service.dismissUpdate();
+
+        expect(service.updateAvailable, isFalse);
+        expect(service.errorMessage, isNull);
+        expect(service.statusMessage, isNull);
+      });
+
+      test('cancelUpdate resets all download state', () {
+        service.isDownloading = true;
+        service.isInstalling = true;
+        service.downloadProgress = 0.5;
+        service.statusMessage = 'Downloading...';
+        service.errorMessage = 'previous error';
+
+        service.cancelUpdate();
+
+        expect(service.isDownloading, isFalse);
+        expect(service.isInstalling, isFalse);
+        expect(service.downloadProgress, 0.0);
+        expect(service.statusMessage, isNull);
+        expect(service.errorMessage, isNull);
+      });
+
+      test('cancelUpdate notifies listeners', () {
+        int notifyCount = 0;
+        service.addListener(() => notifyCount++);
+
+        service.cancelUpdate();
         expect(notifyCount, 1);
       });
 
@@ -109,6 +147,9 @@ void main() {
         expect(service.isDownloading, isFalse);
         expect(service.isInstalling, isFalse);
         expect(service.downloadProgress, 0.0);
+        expect(service.statusMessage, isNull);
+        // Error message should be set after failure
+        expect(service.errorMessage, isNotNull);
       });
     });
 

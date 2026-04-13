@@ -23,6 +23,10 @@ class UpdateService extends ChangeNotifier {
   bool isInstalling = false;
   double downloadProgress = 0.0;
 
+  String? errorMessage;
+  String? statusMessage;
+  bool _cancelRequested = false;
+
   Timer? _periodicTimer;
   HttpClient? _httpClient;
 
@@ -40,6 +44,29 @@ class UpdateService extends ChangeNotifier {
 
   void setSkippedVersion(String? version) {
     _lastSkippedVersion = version;
+  }
+
+  void cancelUpdate() {
+    _cancelRequested = true;
+    isDownloading = false;
+    isInstalling = false;
+    downloadProgress = 0.0;
+    statusMessage = null;
+    errorMessage = null;
+    notifyListeners();
+  }
+
+  Future<ProcessResult> _runWithTimeout(
+    String executable,
+    List<String> arguments, {
+    Duration timeout = const Duration(seconds: 60),
+  }) {
+    return Process.run(executable, arguments).timeout(
+      timeout,
+      onTimeout: () => throw TimeoutException(
+        '$executable timed out after ${timeout.inSeconds}s',
+      ),
+    );
   }
 
   Future<void> checkForUpdate() async {
@@ -149,6 +176,9 @@ class UpdateService extends ChangeNotifier {
   Future<void> downloadAndInstall() async {
     if (downloadUrl == null || isDownloading) return;
 
+    _cancelRequested = false;
+    errorMessage = null;
+    statusMessage = null;
     isDownloading = true;
     downloadProgress = 0.0;
     notifyListeners();
@@ -168,6 +198,11 @@ class UpdateService extends ChangeNotifier {
       int lastNotifiedPercent = -1;
 
       await for (final chunk in response) {
+        if (_cancelRequested) {
+          await sink.close();
+          await file.delete().catchError((_) => file);
+          return;
+        }
         sink.add(chunk);
         received += chunk.length;
         if (contentLength > 0) {
@@ -179,6 +214,12 @@ class UpdateService extends ChangeNotifier {
             notifyListeners();
           }
         }
+      }
+
+      if (_cancelRequested) {
+        await sink.close();
+        await file.delete().catchError((_) => file);
+        return;
       }
 
       await sink.flush();
@@ -200,21 +241,32 @@ class UpdateService extends ChangeNotifier {
         await _openDownloadedFile(filePath);
       }
     } catch (e) {
-      debugPrint('Download error: $e');
+      debugPrint('Download/install error: $e');
+      errorMessage = e is TimeoutException
+          ? 'Update timed out. Please try again or download manually.'
+          : 'Update failed. Please try again or download manually.';
     } finally {
       isDownloading = false;
       isInstalling = false;
       downloadProgress = 0.0;
+      statusMessage = null;
       notifyListeners();
     }
   }
 
   Future<void> _installAndRestartMacOS(String filePath) async {
+    String? mountPoint;
     try {
       // Mount the DMG
-      final mountResult = await Process.run('hdiutil', ['attach', filePath, '-nobrowse']);
+      statusMessage = 'Mounting disk image...';
+      notifyListeners();
+      final mountResult = await _runWithTimeout(
+        'hdiutil', ['attach', filePath, '-nobrowse'],
+        timeout: const Duration(seconds: 60),
+      );
       if (mountResult.exitCode != 0) {
         debugPrint('Failed to mount DMG: ${mountResult.stderr}');
+        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
@@ -222,10 +274,9 @@ class UpdateService extends ChangeNotifier {
       // Find the mount point from hdiutil output
       final output = mountResult.stdout as String;
       final lines = output.trim().split('\n');
-      String? mountPoint;
       for (final line in lines) {
         // hdiutil output: /dev/diskX  ... /Volumes/AppName
-        final match = RegExp(r'\t(/Volumes/.+)$').firstMatch(line);
+        final match = RegExp(r'\s(/Volumes/.+)$').firstMatch(line);
         if (match != null) {
           mountPoint = match.group(1)?.trim();
           break;
@@ -234,6 +285,7 @@ class UpdateService extends ChangeNotifier {
 
       if (mountPoint == null) {
         debugPrint('Could not find mount point');
+        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
@@ -248,7 +300,9 @@ class UpdateService extends ChangeNotifier {
 
       if (apps.isEmpty) {
         debugPrint('No .app found in DMG');
-        await Process.run('hdiutil', ['detach', mountPoint]);
+        await _runWithTimeout('hdiutil', ['detach', mountPoint],
+            timeout: const Duration(seconds: 30));
+        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
@@ -258,25 +312,42 @@ class UpdateService extends ChangeNotifier {
       final appDest = '/Applications/$appName';
 
       // Remove old app and copy new one
+      statusMessage = 'Copying to Applications...';
+      notifyListeners();
       if (Directory(appDest).existsSync()) {
-        await Process.run('rm', ['-rf', appDest]);
+        await _runWithTimeout('rm', ['-rf', appDest],
+            timeout: const Duration(seconds: 30));
       }
-      final copyResult = await Process.run('cp', ['-R', appSource, appDest]);
+      final copyResult = await _runWithTimeout('cp', ['-R', appSource, appDest],
+          timeout: const Duration(seconds: 120));
       if (copyResult.exitCode != 0) {
         debugPrint('Failed to copy app: ${copyResult.stderr}');
-        await Process.run('hdiutil', ['detach', mountPoint]);
+        await _runWithTimeout('hdiutil', ['detach', mountPoint],
+            timeout: const Duration(seconds: 30));
+        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
 
       // Detach the DMG
-      await Process.run('hdiutil', ['detach', mountPoint]);
+      statusMessage = 'Cleaning up...';
+      notifyListeners();
+      await _runWithTimeout('hdiutil', ['detach', mountPoint],
+          timeout: const Duration(seconds: 30));
 
       // Relaunch the app
+      statusMessage = 'Restarting app...';
+      notifyListeners();
       await Process.run('open', ['-n', appDest]);
       exit(0);
     } catch (e) {
       debugPrint('Auto-install failed: $e');
+      if (mountPoint != null) {
+        try {
+          await Process.run('hdiutil', ['detach', mountPoint]);
+        } catch (_) {}
+      }
+      errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
       await _openDownloadedFile(filePath);
     }
   }
@@ -292,18 +363,22 @@ class UpdateService extends ChangeNotifier {
       }
 
       // Extract the zip using PowerShell
-      final extractResult = await Process.run('powershell', [
+      statusMessage = 'Extracting update...';
+      notifyListeners();
+      final extractResult = await _runWithTimeout('powershell', [
         '-Command',
         'Expand-Archive -Path "$filePath" -DestinationPath "$tempExtractDir" -Force',
-      ]);
+      ], timeout: const Duration(seconds: 120));
       if (extractResult.exitCode != 0) {
         debugPrint('Failed to extract zip: ${extractResult.stderr}');
+        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
 
       // Use a batch script to replace files and restart
-      // The script waits for the current process to exit, then copies files
+      statusMessage = 'Applying update...';
+      notifyListeners();
       final scriptPath = '${File(filePath).parent.path}\\update.bat';
       final script = '''
 @echo off
@@ -314,11 +389,14 @@ del "%~f0"
 ''';
       File(scriptPath).writeAsStringSync(script);
 
+      statusMessage = 'Restarting app...';
+      notifyListeners();
       await Process.start('cmd', ['/c', scriptPath],
           mode: ProcessStartMode.detached);
       exit(0);
     } catch (e) {
       debugPrint('Auto-install failed (Windows): $e');
+      errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
       await _openDownloadedFile(filePath);
     }
   }
@@ -335,16 +413,21 @@ del "%~f0"
       Directory(tempExtractDir).createSync();
 
       // Extract the tar.gz
-      final extractResult = await Process.run('tar', [
+      statusMessage = 'Extracting update...';
+      notifyListeners();
+      final extractResult = await _runWithTimeout('tar', [
         'xzf', filePath, '-C', tempExtractDir,
-      ]);
+      ], timeout: const Duration(seconds: 120));
       if (extractResult.exitCode != 0) {
         debugPrint('Failed to extract tar.gz: ${extractResult.stderr}');
+        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
 
       // Use a shell script to replace files and restart
+      statusMessage = 'Applying update...';
+      notifyListeners();
       final scriptPath = '${File(filePath).parent.path}/update.sh';
       final script = '''
 #!/bin/bash
@@ -354,13 +437,17 @@ cp -rf "$tempExtractDir"/* "$appDir/"
 rm -f "\$0"
 ''';
       File(scriptPath).writeAsStringSync(script);
-      await Process.run('chmod', ['+x', scriptPath]);
+      await _runWithTimeout('chmod', ['+x', scriptPath],
+          timeout: const Duration(seconds: 10));
 
+      statusMessage = 'Restarting app...';
+      notifyListeners();
       await Process.start('bash', [scriptPath],
           mode: ProcessStartMode.detached);
       exit(0);
     } catch (e) {
       debugPrint('Auto-install failed (Linux): $e');
+      errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
       await _openDownloadedFile(filePath);
     }
   }
@@ -403,6 +490,8 @@ rm -f "\$0"
 
   void dismissUpdate() {
     updateAvailable = false;
+    errorMessage = null;
+    statusMessage = null;
     notifyListeners();
   }
 
