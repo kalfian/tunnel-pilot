@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.6 (2026-04-13)
+
+### Improvements
+
+- **Unified Release Workflow** — Merged auto-tag and release into a single GitHub Actions workflow, removing PAT token dependency. Release now triggers automatically when pubspec.yaml version is bumped on master
+
 ## 1.2.5 (2026-04-13)
 
 ### Fixes
