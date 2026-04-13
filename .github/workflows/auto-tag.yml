@@ -45,10 +45,27 @@ jobs:
           git tag "$TAG"
 
           if [ -n "$PAT_TOKEN" ]; then
-            # Push with PAT so the tag triggers release.yml
             git push "https://x-access-token:${PAT_TOKEN}@github.com/${{ github.repository }}.git" "$TAG"
-            echo "Pushed tag $TAG with PAT (will trigger release workflow)"
+            echo "Pushed tag $TAG with PAT"
           else
             git push origin "$TAG"
-            echo "::warning::PAT_TOKEN not set — tag pushed with GITHUB_TOKEN, release workflow will NOT be triggered. Add a PAT_TOKEN secret to enable auto-release."
+            echo "::warning::PAT_TOKEN not set — tag pushed with GITHUB_TOKEN"
+          fi
+
+      - name: Trigger release workflow
+        if: steps.version.outputs.changed == 'true'
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.current }}"
+
+          if [ -n "$PAT_TOKEN" ]; then
+            curl -fsSL -X POST \
+              -H "Authorization: token ${PAT_TOKEN}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/release.yml/dispatches" \
+              -d "{\"ref\":\"$TAG\",\"inputs\":{\"tag\":\"$TAG\"}}"
+            echo "Triggered release workflow for $TAG via workflow_dispatch"
+          else
+            echo "::warning::PAT_TOKEN not set — cannot trigger release workflow. Push tag with PAT or run release manually."
           fi
