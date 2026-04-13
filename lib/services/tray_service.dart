@@ -82,16 +82,30 @@ class TrayService {
     bool updateAvailable = false,
     String? latestVersion,
   }) async {
-    // Count active connections
+    // Count active and connecting tunnels
     final connectedCount = statuses.values
         .where((s) => s == ForwardStatus.connected)
         .length;
+    final connectingCount = statuses.values
+        .where((s) => s == ForwardStatus.connecting)
+        .length;
+    final iconCount = connectedCount + connectingCount;
 
-    // Update tray icon based on connection count
-    await _systemTray.setImage(_iconPath(connectedCount));
-    await _systemTray.setToolTip(connectedCount > 0
-        ? 'Tunnel Pilot - $connectedCount active'
-        : 'Tunnel Pilot - No active tunnels');
+    // Update tray icon based on connection count (includes connecting)
+    await _systemTray.setImage(_iconPath(iconCount));
+
+    // Build tooltip with connecting state
+    String tooltip;
+    if (connectedCount > 0 && connectingCount > 0) {
+      tooltip = 'Tunnel Pilot - $connectedCount active, $connectingCount connecting...';
+    } else if (connectingCount > 0) {
+      tooltip = 'Tunnel Pilot - $connectingCount connecting...';
+    } else if (connectedCount > 0) {
+      tooltip = 'Tunnel Pilot - $connectedCount active';
+    } else {
+      tooltip = 'Tunnel Pilot - No active tunnels';
+    }
+    await _systemTray.setToolTip(tooltip);
 
     final List<MenuItemBase> menuItems = [];
 
@@ -104,6 +118,12 @@ class TrayService {
     if (connectedCount > 0) {
       menuItems.add(MenuItemLabel(
         label: '$connectedCount tunnel${connectedCount > 1 ? 's' : ''} active',
+        enabled: false,
+      ));
+    }
+    if (connectingCount > 0) {
+      menuItems.add(MenuItemLabel(
+        label: '$connectingCount tunnel${connectingCount > 1 ? 's' : ''} connecting...',
         enabled: false,
       ));
     }
