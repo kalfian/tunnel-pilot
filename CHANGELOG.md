@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.5 (2026-04-13)
+
+### Fixes
+
+- **Auto-Tag Release Trigger** — Fixed auto-tag workflow not triggering the release build. Now explicitly dispatches release workflow via GitHub API instead of relying on tag push events
+
 ## 1.2.4 (2026-04-13)
 
 ### Improvements
