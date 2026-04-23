@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.8 (2026-04-23)
+
+### Features
+
+- **Copy SSH Command** — Right-click a tunnel in the list and choose "Copy SSH Command" to copy an equivalent `ssh -N -L ...` command to the clipboard. The command includes the configured bind address, identity file path (quoted if it contains spaces), and SSH port
+
 ## 1.2.7 (2026-04-13)
 
 ### Fixes
