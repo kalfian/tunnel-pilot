@@ -104,15 +104,19 @@ class _ForwardListTileState extends State<ForwardListTile> {
           value: 'delete',
           height: 36,
           child: Row(
-            children: [
-              Icon(Icons.delete_outline_rounded, size: 16, color: Colors.red.shade400),
-              const SizedBox(width: 8),
-              Text('Delete', style: TextStyle(fontSize: 13, color: Colors.red.shade400)),
+            children: const [
+              Icon(Icons.delete_outline_rounded,
+                  size: 16, color: Color(0xFFEF4444)),
+              SizedBox(width: 8),
+              Text('Delete',
+                  style: TextStyle(fontSize: 13, color: Color(0xFFEF4444))),
             ],
           ),
         ),
       ],
     );
+
+    if (!context.mounted) return;
 
     switch (result) {
       case 'edit':
@@ -253,9 +257,9 @@ class _ForwardListTileState extends State<ForwardListTile> {
                     const SizedBox(height: 2),
                     Text(
                       widget.errorMessage!,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 11,
-                        color: Colors.red.shade400,
+                        color: Color(0xFFEF4444),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

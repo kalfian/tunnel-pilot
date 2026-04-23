@@ -120,7 +120,9 @@ Future<void> main() async {
           await windowManager.focus();
           return;
         }
-        await windowManager.setSkipTaskbar(false);
+        if (appSettingsProvider.showInDock) {
+          await windowManager.setSkipTaskbar(false);
+        }
         await windowManager.show();
         await windowManager.focus();
       },
@@ -225,7 +227,8 @@ Future<void> main() async {
     singleInstance.onSecondInstance = showSettings;
   }
 
-  appSettingsProvider.addListener(() {
+  bool lastShowInDock = appSettingsProvider.showInDock;
+  appSettingsProvider.addListener(() async {
     forwardProvider.notificationsEnabled =
         appSettingsProvider.showNotifications;
     forwardProvider.autoReconnect = appSettingsProvider.autoReconnect;
@@ -233,6 +236,13 @@ Future<void> main() async {
         appSettingsProvider.autoReconnectDelaySec;
     forwardProvider.autoReconnectMaxRetries =
         appSettingsProvider.autoReconnectMaxRetries;
+
+    if (appSettingsProvider.showInDock != lastShowInDock) {
+      lastShowInDock = appSettingsProvider.showInDock;
+      if (await windowManager.isVisible()) {
+        await windowManager.setSkipTaskbar(!appSettingsProvider.showInDock);
+      }
+    }
   });
 
   runApp(
