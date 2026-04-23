@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.9 (2026-04-23)
+
+### Improvements
+
+- **SSH Tunnel Lifecycle Hardening** — ServerSocket listen subscription is now stored and cancelled explicitly during cleanup/disconnect/dispose to prevent listener leaks. `keepAliveMaxCount` now controls ping failure tolerance (default: 5 × 3s interval ≈ 15s), so a single network hiccup no longer drops the tunnel. `forwardLocal` now has a 10-second timeout; channels that resolve after the timeout are closed so the SSH session does not leak orphaned channels
+- **Dock Visibility Consistency** — The tray "Settings..." entry now respects the `showInDock` setting instead of unconditionally showing the Dock icon. Toggling `showInDock` while the window is open now applies immediately instead of waiting for the next close/open cycle
+- **Semver-Compliant Version Comparison** — Update check now handles pre-release suffixes (`-beta`, `-rc.1`) and build metadata (`+sha.abc`) per semver. `1.2.7-beta` is correctly ordered below `1.2.7`, so dev builds get offered the stable release
+- **Backup Import Validation** — Backup files are now validated before replacing local configs. Malformed JSON, missing `forwards` field, malformed entries, and backups from newer app versions produce a clear error message instead of a generic cast error
+- **Port Range Validation** — The tunnel form now rejects port values outside 1–65535 at submit time rather than failing at connect time
+
+### Fixes
+
+- **Update Download Cleanup** — Partial download files are deleted and response streams drained on both error and cancel paths, preventing HTTP socket leaks and orphaned files in the temp directory
+
 ## 1.2.8 (2026-04-23)
 
 ### Features
