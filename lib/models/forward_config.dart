@@ -112,4 +112,25 @@ class ForwardConfig {
   bool get needsPassword =>
       sshPassword == null &&
       (identityFilePath == null || identityFilePath!.isEmpty);
+
+  String toSshCommand() {
+    final parts = <String>['ssh', '-N'];
+
+    final bindPrefix =
+        localBindAddress == '127.0.0.1' ? '' : '$localBindAddress:';
+    parts.add('-L');
+    parts.add('$bindPrefix$localPort:$remoteHost:$remotePort');
+
+    parts.add('-p');
+    parts.add(sshPort.toString());
+
+    if (identityFilePath != null && identityFilePath!.isNotEmpty) {
+      parts.add('-i');
+      final path = identityFilePath!;
+      parts.add(path.contains(' ') ? '"$path"' : path);
+    }
+
+    parts.add('$sshUsername@$sshHost');
+    return parts.join(' ');
+  }
 }

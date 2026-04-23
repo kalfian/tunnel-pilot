@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/forward_config.dart';
 import '../models/forward_status.dart';
@@ -86,6 +87,18 @@ class _ForwardListTileState extends State<ForwardListTile> {
             ],
           ),
         ),
+        PopupMenuItem(
+          value: 'copy_ssh',
+          height: 36,
+          child: Row(
+            children: [
+              Icon(Icons.terminal_rounded,
+                  size: 16, color: theme.colorScheme.onSurface),
+              const SizedBox(width: 8),
+              const Text('Copy SSH Command', style: TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
         const PopupMenuDivider(height: 8),
         PopupMenuItem(
           value: 'delete',
@@ -108,10 +121,28 @@ class _ForwardListTileState extends State<ForwardListTile> {
       case 'duplicate':
         widget.onDuplicate();
         break;
+      case 'copy_ssh':
+        await _copySshCommand(context);
+        break;
       case 'delete':
         widget.onDelete();
         break;
     }
+  }
+
+  Future<void> _copySshCommand(BuildContext context) async {
+    final command = widget.config.toSshCommand();
+    await Clipboard.setData(ClipboardData(text: command));
+    if (!context.mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(
+      SnackBar(
+        content: const Text('SSH command copied to clipboard'),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override

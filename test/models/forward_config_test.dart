@@ -281,6 +281,75 @@ void main() {
       });
     });
 
+    group('toSshCommand', () {
+      test('generates command with default bind and no identity', () {
+        final config = createSample();
+        expect(
+          config.toSshCommand(),
+          'ssh -N -L 3306:db.internal:3306 -p 22 admin@192.168.1.100',
+        );
+      });
+
+      test('includes bind address when not 127.0.0.1', () {
+        final config = ForwardConfig(
+          id: 'x',
+          name: 'X',
+          sshHost: 'host',
+          sshUsername: 'user',
+          localBindAddress: '0.0.0.0',
+          localPort: 8080,
+          remoteHost: 'remote',
+          remotePort: 80,
+        );
+        expect(
+          config.toSshCommand(),
+          'ssh -N -L 0.0.0.0:8080:remote:80 -p 22 user@host',
+        );
+      });
+
+      test('includes identity file flag when set', () {
+        final config = createSample(identityFilePath: '/home/u/.ssh/id_rsa');
+        expect(
+          config.toSshCommand(),
+          'ssh -N -L 3306:db.internal:3306 -p 22 -i /home/u/.ssh/id_rsa admin@192.168.1.100',
+        );
+      });
+
+      test('quotes identity path containing spaces', () {
+        final config =
+            createSample(identityFilePath: '/Users/my user/.ssh/id_rsa');
+        expect(
+          config.toSshCommand(),
+          'ssh -N -L 3306:db.internal:3306 -p 22 -i "/Users/my user/.ssh/id_rsa" admin@192.168.1.100',
+        );
+      });
+
+      test('omits identity flag when path is empty', () {
+        final config = createSample(identityFilePath: '');
+        expect(
+          config.toSshCommand(),
+          'ssh -N -L 3306:db.internal:3306 -p 22 admin@192.168.1.100',
+        );
+      });
+
+      test('uses custom sshPort when non-default', () {
+        final config = ForwardConfig(
+          id: 'x',
+          name: 'X',
+          sshHost: 'host',
+          sshPort: 2222,
+          sshUsername: 'user',
+          localPort: 8080,
+          remoteHost: 'remote',
+          remotePort: 80,
+        );
+        expect(
+          config.toSshCommand(),
+          'ssh -N -L 8080:remote:80 -p 2222 user@host',
+        );
+      });
+    });
+
     group('needsPassword', () {
       test('returns true when no password and no identity file', () {
         final config = createSample();
