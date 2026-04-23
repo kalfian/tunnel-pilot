@@ -11,16 +11,24 @@ class TunnelConnection {
   final ServerSocket serverSocket;
   final List<Socket> activeSockets = [];
   final void Function(ForwardStatus status, String? error) onStatus;
+  final int keepAliveMaxFailures;
+  StreamSubscription<Socket>? serverSubscription;
 
   /// Tracks consecutive forwardLocal failures to detect zombie connections
   /// where SSH ping succeeds but forwarding is broken.
   int consecutiveForwardFailures = 0;
+
+  /// Tracks consecutive ping timeouts. Tolerance prevents single network
+  /// hiccups from dropping the tunnel — must exceed keepAliveMaxFailures.
+  int consecutivePingFailures = 0;
+
   static const maxForwardFailures = 3;
 
   TunnelConnection({
     required this.client,
     required this.serverSocket,
     required this.onStatus,
+    required this.keepAliveMaxFailures,
   });
 }
 
@@ -72,10 +80,12 @@ class SshTunnelService {
 
         try {
           await conn.client.ping().timeout(_pingTimeout);
+          conn.consecutivePingFailures = 0;
         } catch (_) {
-          // Verify tunnel still belongs to this connection
           final current = _connections[id];
-          if (current != null && current.client == conn.client) {
+          if (current == null || current.client != conn.client) return;
+          current.consecutivePingFailures++;
+          if (current.consecutivePingFailures >= current.keepAliveMaxFailures) {
             _cleanupTunnel(id, current);
             current.onStatus(ForwardStatus.error, 'SSH connection lost');
           }
@@ -89,6 +99,8 @@ class SshTunnelService {
 
   void _cleanupTunnel(String id, TunnelConnection conn) {
     _connections.remove(id);
+    conn.serverSubscription?.cancel();
+    conn.serverSubscription = null;
     for (final s in conn.activeSockets) {
       s.destroy();
     }
@@ -158,6 +170,8 @@ class SshTunnelService {
         client: client,
         serverSocket: serverSocket,
         onStatus: safeCallback,
+        keepAliveMaxFailures:
+            config.keepAliveMaxCount > 0 ? config.keepAliveMaxCount : 5,
       );
       _connections[config.id] = tunnel;
 
@@ -172,13 +186,15 @@ class SshTunnelService {
 
       client.done.then(onConnectionLost).catchError(onConnectionLost);
 
-      serverSocket.listen(
+      tunnel.serverSubscription = serverSocket.listen(
         (localSocket) async {
+          final channelFuture = client.forwardLocal(
+            config.remoteHost,
+            config.remotePort,
+          );
           try {
-            final channel = await client.forwardLocal(
-              config.remoteHost,
-              config.remotePort,
-            );
+            final channel = await channelFuture
+                .timeout(const Duration(seconds: 10));
 
             // Forward succeeded — reset failure counter
             tunnel.consecutiveForwardFailures = 0;
@@ -201,6 +217,15 @@ class SshTunnelService {
               tunnel.activeSockets.remove(localSocket);
             });
           } catch (e) {
+            // On timeout the underlying channel may still resolve — close it
+            // when it arrives to avoid leaking SSH session resources.
+            if (e is TimeoutException) {
+              channelFuture.then((ch) {
+                try {
+                  ch.sink.close();
+                } catch (_) {}
+              }).catchError((_) {});
+            }
             localSocket.destroy();
 
             // Track consecutive forward failures — if the SSH session is alive
@@ -223,7 +248,6 @@ class SshTunnelService {
         },
         onDone: () {
           if (_connections.containsKey(config.id)) {
-            // final t = _connections.remove(config.id);
             safeCallback(ForwardStatus.disconnected, null);
             _stopHealthMonitorIfIdle();
           }
@@ -248,6 +272,9 @@ class SshTunnelService {
       _generation.remove(id);
       return;
     }
+
+    await tunnel.serverSubscription?.cancel();
+    tunnel.serverSubscription = null;
 
     for (final socket in tunnel.activeSockets) {
       socket.destroy();
@@ -281,6 +308,8 @@ class SshTunnelService {
     for (final id in ids) {
       final conn = _connections.remove(id);
       if (conn != null) {
+        conn.serverSubscription?.cancel();
+        conn.serverSubscription = null;
         for (final s in conn.activeSockets) {
           s.destroy();
         }
