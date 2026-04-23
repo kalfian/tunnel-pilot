@@ -156,6 +156,93 @@ void main() {
 
       expect(imported, isEmpty);
     });
+
+    test('importFromFile throws BackupImportException for missing file',
+        () async {
+      final service = StorageService();
+      expect(
+        () => service.importFromFile('${tempDir.path}/does_not_exist.json'),
+        throwsA(isA<BackupImportException>()),
+      );
+    });
+
+    test('importFromFile throws BackupImportException for malformed JSON',
+        () async {
+      final service = StorageService();
+      final path = '${tempDir.path}/broken.json';
+      await File(path).writeAsString('{not valid json');
+
+      expect(
+        () => service.importFromFile(path),
+        throwsA(isA<BackupImportException>()),
+      );
+    });
+
+    test('importFromFile throws when root is not an object', () async {
+      final service = StorageService();
+      final path = '${tempDir.path}/array.json';
+      await File(path).writeAsString('[1, 2, 3]');
+
+      expect(
+        () => service.importFromFile(path),
+        throwsA(isA<BackupImportException>()),
+      );
+    });
+
+    test('importFromFile throws when forwards field missing', () async {
+      final service = StorageService();
+      final path = '${tempDir.path}/no_forwards.json';
+      await File(path).writeAsString('{"version": 1}');
+
+      expect(
+        () => service.importFromFile(path),
+        throwsA(isA<BackupImportException>()),
+      );
+    });
+
+    test('importFromFile throws when forwards is not a list', () async {
+      final service = StorageService();
+      final path = '${tempDir.path}/bad_forwards.json';
+      await File(path).writeAsString('{"version": 1, "forwards": "nope"}');
+
+      expect(
+        () => service.importFromFile(path),
+        throwsA(isA<BackupImportException>()),
+      );
+    });
+
+    test('importFromFile throws when forward entry is malformed', () async {
+      final service = StorageService();
+      final path = '${tempDir.path}/bad_entry.json';
+      await File(path).writeAsString(
+          '{"version": 1, "forwards": [{"name": "missing required fields"}]}');
+
+      expect(
+        () => service.importFromFile(path),
+        throwsA(isA<BackupImportException>()),
+      );
+    });
+
+    test('importFromFile throws when version is from future', () async {
+      final service = StorageService();
+      final path = '${tempDir.path}/future.json';
+      await File(path).writeAsString('{"version": 99, "forwards": []}');
+
+      expect(
+        () => service.importFromFile(path),
+        throwsA(isA<BackupImportException>()),
+      );
+    });
+
+    test('importFromFile accepts backup without version field', () async {
+      // Backwards compatibility: older backups or third-party exports
+      final service = StorageService();
+      final path = '${tempDir.path}/no_version.json';
+      await File(path).writeAsString('{"forwards": []}');
+
+      final imported = await service.importFromFile(path);
+      expect(imported, isEmpty);
+    });
   });
 
   group('StorageService - config file operations', () {

@@ -47,6 +47,9 @@ class ForwardConfig {
         'keepAliveMaxCount': keepAliveMaxCount,
       };
 
+  /// Same as [toJson] but strips [sshPassword]. Backup files are meant to be
+  /// portable and may be shared across machines or checked into source control —
+  /// passwords stay in the local app config only.
   Map<String, dynamic> toJsonForBackup() => {
         'id': id,
         'name': name,

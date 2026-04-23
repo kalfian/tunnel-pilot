@@ -44,6 +44,28 @@ void main() {
         expect(service.compareVersions('0.0.1', '1.0.0'), isNegative);
         expect(service.compareVersions('9.9.9', '10.0.0'), isNegative);
       });
+
+      test('pre-release is lower than release with same core', () {
+        expect(service.compareVersions('1.2.7-beta', '1.2.7'), isNegative);
+        expect(service.compareVersions('1.2.7', '1.2.7-beta'), isPositive);
+      });
+
+      test('compares two pre-releases lexicographically', () {
+        expect(service.compareVersions('1.2.7-alpha', '1.2.7-beta'), isNegative);
+        expect(service.compareVersions('1.2.7-rc.1', '1.2.7-rc.2'), isNegative);
+        expect(service.compareVersions('1.2.7-beta', '1.2.7-beta'), 0);
+      });
+
+      test('ignores build metadata', () {
+        expect(service.compareVersions('1.2.7+build.1', '1.2.7'), 0);
+        expect(service.compareVersions('1.2.7+a', '1.2.7+b'), 0);
+        expect(service.compareVersions('1.2.7-beta+a', '1.2.7-beta+b'), 0);
+      });
+
+      test('core version wins over pre-release suffix', () {
+        expect(service.compareVersions('1.2.8-beta', '1.2.7'), isPositive);
+        expect(service.compareVersions('1.2.7', '1.2.8-beta'), isNegative);
+      });
     });
 
     group('state management', () {

@@ -6,8 +6,16 @@ import 'package:path_provider/path_provider.dart';
 import '../models/app_settings.dart';
 import '../models/forward_config.dart';
 
+class BackupImportException implements Exception {
+  final String message;
+  BackupImportException(this.message);
+  @override
+  String toString() => message;
+}
+
 class StorageService {
   static const _configFileName = 'tunnel_pilot_config.json';
+  static const _currentBackupVersion = 1;
 
   File? _configFile;
 
@@ -75,7 +83,7 @@ class StorageService {
 
   Future<void> exportToFile(String path, List<ForwardConfig> forwards) async {
     final backup = {
-      'version': 1,
+      'version': _currentBackupVersion,
       'exportedAt': DateTime.now().toIso8601String(),
       'forwards': forwards.map((f) => f.toJsonForBackup()).toList(),
     };
@@ -85,13 +93,52 @@ class StorageService {
 
   Future<List<ForwardConfig>> importFromFile(String path) async {
     final file = File(path);
+    if (!await file.exists()) {
+      throw BackupImportException('Backup file not found: $path');
+    }
+
     final content = await file.readAsString();
-    final json = jsonDecode(content) as Map<String, dynamic>;
 
-    final forwards = (json['forwards'] as List<dynamic>)
-        .map((e) => ForwardConfig.fromJson(e as Map<String, dynamic>))
-        .toList();
+    Map<String, dynamic> json;
+    try {
+      final decoded = jsonDecode(content);
+      if (decoded is! Map<String, dynamic>) {
+        throw BackupImportException(
+            'Invalid backup: root is not a JSON object');
+      }
+      json = decoded;
+    } on FormatException catch (e) {
+      throw BackupImportException('Invalid backup: malformed JSON (${e.message})');
+    }
 
-    return forwards;
+    final version = json['version'];
+    if (version is int && version > _currentBackupVersion) {
+      throw BackupImportException(
+          'Backup version $version is newer than this app supports '
+          '(max v$_currentBackupVersion). Please update Tunnel Pilot.');
+    }
+
+    final rawForwards = json['forwards'];
+    if (rawForwards is! List) {
+      throw BackupImportException(
+          'Invalid backup: missing or invalid "forwards" field');
+    }
+
+    final result = <ForwardConfig>[];
+    for (var i = 0; i < rawForwards.length; i++) {
+      final entry = rawForwards[i];
+      if (entry is! Map<String, dynamic>) {
+        throw BackupImportException(
+            'Invalid backup: entry #${i + 1} is not an object');
+      }
+      try {
+        result.add(ForwardConfig.fromJson(entry));
+      } catch (e) {
+        throw BackupImportException(
+            'Invalid backup: entry #${i + 1} is malformed ($e)');
+      }
+    }
+
+    return result;
   }
 }

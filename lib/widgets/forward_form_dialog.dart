@@ -122,6 +122,14 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
   String? _required(String? v) =>
       v == null || v.trim().isEmpty ? 'Required' : null;
 
+  String? _port(String? v) {
+    if (v == null || v.trim().isEmpty) return 'Required';
+    final n = int.tryParse(v.trim());
+    if (n == null) return 'Must be a number';
+    if (n < 1 || n > 65535) return '1–65535';
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.config != null;
@@ -283,7 +291,7 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly
                           ],
-                          validator: _required,
+                          validator: _port,
                         ),
                       ],
                     ),
@@ -423,7 +431,7 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
                       inputFormatters: [
                         FilteringTextInputFormatter.digitsOnly
                       ],
-                      validator: _required,
+                      validator: _port,
                     ),
                   ),
                 ],
@@ -483,7 +491,7 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
                       inputFormatters: [
                         FilteringTextInputFormatter.digitsOnly
                       ],
-                      validator: _required,
+                      validator: _port,
                     ),
                   ),
                 ],

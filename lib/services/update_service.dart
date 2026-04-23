@@ -159,10 +159,24 @@ class UpdateService extends ChangeNotifier {
   }
 
   /// Compare two semver strings. Returns negative if a < b, 0 if equal, positive if a > b.
+  /// Handles pre-release suffixes (`-beta`, `-rc.1`) and build metadata (`+sha.abc`).
+  /// Per semver: pre-release versions are ordered below the matching release
+  /// (e.g. `1.2.7-beta` < `1.2.7`). Build metadata is ignored in comparisons.
   @visibleForTesting
   int compareVersions(String a, String b) {
-    final aParts = a.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-    final bParts = b.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final aNoBuild = a.split('+').first;
+    final bNoBuild = b.split('+').first;
+
+    final aDash = aNoBuild.indexOf('-');
+    final bDash = bNoBuild.indexOf('-');
+
+    final aCore = aDash == -1 ? aNoBuild : aNoBuild.substring(0, aDash);
+    final bCore = bDash == -1 ? bNoBuild : bNoBuild.substring(0, bDash);
+    final aPre = aDash == -1 ? '' : aNoBuild.substring(aDash + 1);
+    final bPre = bDash == -1 ? '' : bNoBuild.substring(bDash + 1);
+
+    final aParts = aCore.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final bParts = bCore.split('.').map((e) => int.tryParse(e) ?? 0).toList();
 
     final len = aParts.length > bParts.length ? aParts.length : bParts.length;
     for (int i = 0; i < len; i++) {
@@ -170,7 +184,11 @@ class UpdateService extends ChangeNotifier {
       final bVal = i < bParts.length ? bParts[i] : 0;
       if (aVal != bVal) return aVal - bVal;
     }
-    return 0;
+
+    if (aPre.isEmpty && bPre.isEmpty) return 0;
+    if (aPre.isEmpty) return 1;
+    if (bPre.isEmpty) return -1;
+    return aPre.compareTo(bPre);
   }
 
   Future<void> downloadAndInstall() async {
@@ -183,32 +201,35 @@ class UpdateService extends ChangeNotifier {
     downloadProgress = 0.0;
     notifyListeners();
 
+    HttpClientResponse? response;
+    IOSink? sink;
+    // Non-null only while the file is still being written. Set to null once
+    // the download finishes successfully so the finally block does not delete
+    // a valid, complete file.
+    File? partialFile;
+
     try {
       final request = await _client.getUrl(Uri.parse(downloadUrl!));
-      final response = await request.close();
+      response = await request.close();
 
       final contentLength = response.contentLength;
       final tempDir = await getTemporaryDirectory();
       final fileName = downloadUrl!.split('/').last;
       final filePath = '${tempDir.path}/$fileName';
 
-      final file = File(filePath);
-      final sink = file.openWrite();
+      partialFile = File(filePath);
+      sink = partialFile.openWrite();
       int received = 0;
       int lastNotifiedPercent = -1;
 
       await for (final chunk in response) {
-        if (_cancelRequested) {
-          await sink.close();
-          await file.delete().catchError((_) => file);
-          return;
-        }
+        if (_cancelRequested) return;
         sink.add(chunk);
         received += chunk.length;
         if (contentLength > 0) {
           downloadProgress = received / contentLength;
           // Throttle UI updates to every 2% to avoid excessive rebuilds
-          final percent = (downloadProgress * 50).floor(); // 50 steps = 2% each
+          final percent = (downloadProgress * 50).floor();
           if (percent != lastNotifiedPercent) {
             lastNotifiedPercent = percent;
             notifyListeners();
@@ -216,14 +237,15 @@ class UpdateService extends ChangeNotifier {
         }
       }
 
-      if (_cancelRequested) {
-        await sink.close();
-        await file.delete().catchError((_) => file);
-        return;
-      }
+      if (_cancelRequested) return;
 
       await sink.flush();
       await sink.close();
+      sink = null;
+      // Stream fully consumed — no need to drain in finally
+      response = null;
+      // File written successfully — hand ownership to the installer
+      partialFile = null;
 
       downloadProgress = 1.0;
       isDownloading = false;
@@ -246,6 +268,22 @@ class UpdateService extends ChangeNotifier {
           ? 'Update timed out. Please try again or download manually.'
           : 'Update failed. Please try again or download manually.';
     } finally {
+      if (sink != null) {
+        try {
+          await sink.close();
+        } catch (_) {}
+      }
+      if (response != null) {
+        try {
+          await response.drain<void>();
+        } catch (_) {}
+      }
+      if (partialFile != null) {
+        try {
+          await partialFile.delete();
+        } catch (_) {}
+      }
+
       isDownloading = false;
       isInstalling = false;
       downloadProgress = 0.0;

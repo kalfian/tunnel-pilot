@@ -363,33 +363,6 @@ class _SettingsWindowState extends State<SettingsWindow> {
     );
   }
 
-  // Widget _closeButton(ThemeData theme) {
-  //   return MouseRegion(
-  //     cursor: SystemMouseCursors.click,
-  //     child: GestureDetector(
-  //       onTap: () async {
-  //         await windowManager.hide();
-  //         final showInDock = context.read<AppSettingsProvider>().showInDock;
-  //         if (!showInDock) {
-  //           await windowManager.setSkipTaskbar(true);
-  //         }
-  //       },
-  //       child: Container(
-  //         width: 28,
-  //         height: 28,
-  //         decoration: BoxDecoration(
-  //           borderRadius: BorderRadius.circular(6),
-  //         ),
-  //         child: Icon(
-  //           Icons.close_rounded,
-  //           size: 16,
-  //           color: theme.colorScheme.outline,
-  //         ),
-  //       ),
-  //     ),
-  //   );
-  // }
-
   Widget _toolbarAction(
     IconData icon,
     String label, {
