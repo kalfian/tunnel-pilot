@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.25 (2026-05-09)
+
+### Improvements
+
+- Version bump to verify in-app update from v1.2.24 (RandomAccessFile fix)
+
 ## 1.2.24 (2026-05-09)
 
 ### Fixes
