@@ -17,7 +17,6 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    if: ${{ !inputs.tag }}
     permissions:
       contents: write
     outputs:
@@ -31,6 +30,14 @@ jobs:
       - name: Check version and tag
         id: version
         run: |
+          # If a tag is manually provided, we use it and mark as changed
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "current=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Manual tag provided: ${{ inputs.tag }}"
+            exit 0
+          fi
+
           CURRENT=$(grep '^version:' pubspec.yaml | awk '{print $2}')
           LATEST_TAG=$(git tag --sort=-v:refname | grep '^v' | head -1 || echo "")
 
@@ -51,16 +58,12 @@ jobs:
   resolve-tag:
     runs-on: ubuntu-latest
     needs: [prepare]
-    if: ${{ always() && (inputs.tag || needs.prepare.outputs.changed == 'true') }}
+    if: ${{ needs.prepare.outputs.changed == 'true' }}
     outputs:
-      release_tag: ${{ steps.resolve.outputs.tag }}
+      release_tag: ${{ needs.prepare.outputs.release_tag }}
     steps:
-      - name: Resolve release tag
-        id: resolve
-        run: |
-          TAG="${{ inputs.tag || needs.prepare.outputs.release_tag }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Releasing $TAG"
+      - name: Acknowledge tag
+        run: echo "Releasing ${{ needs.prepare.outputs.release_tag }}"
 
   test:
     runs-on: ubuntu-latest
