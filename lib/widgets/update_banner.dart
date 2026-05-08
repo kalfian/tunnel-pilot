@@ -13,11 +13,22 @@ class UpdateBanner extends StatefulWidget {
 
 class _UpdateBannerState extends State<UpdateBanner> {
   bool _notesExpanded = false;
+  bool _dialogShown = false;
 
   @override
   Widget build(BuildContext context) {
     final updateService = context.watch<UpdateService>();
     final theme = Theme.of(context);
+
+    if (updateService.readyToInstall && !_dialogShown) {
+      _dialogShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showInstallDialog(context);
+      });
+    }
+    if (!updateService.readyToInstall) {
+      _dialogShown = false;
+    }
 
     if (!updateService.updateAvailable) return const SizedBox.shrink();
 
@@ -36,7 +47,6 @@ class _UpdateBannerState extends State<UpdateBanner> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Row(
             children: [
               Icon(
@@ -60,7 +70,8 @@ class _UpdateBannerState extends State<UpdateBanner> {
           // Error state
           if (hasError &&
               !updateService.isDownloading &&
-              !updateService.isInstalling) ...[
+              !updateService.isInstalling &&
+              !updateService.readyToInstall) ...[
             const SizedBox(height: 8),
             Text(
               updateService.errorMessage!,
@@ -91,7 +102,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
             ),
           ]
 
-          // Installing state
+          // Installing state (brief — app exits soon)
           else if (updateService.isInstalling) ...[
             const SizedBox(height: 10),
             ClipRRect(
@@ -146,9 +157,30 @@ class _UpdateBannerState extends State<UpdateBanner> {
             ),
           ]
 
+          // Ready to install state
+          else if (updateService.readyToInstall) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Download complete. Ready to install.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _actionButton(context,
+                    label: 'Install & Restart',
+                    primary: true,
+                    onPressed: () => _showInstallDialog(context)),
+                const SizedBox(width: 8),
+                _actionButton(context,
+                    label: 'Later',
+                    onPressed: () => updateService.dismissUpdate()),
+              ],
+            ),
+          ]
+
           // Idle state — show release notes + actions
           else ...[
-            // Release notes (collapsible)
             if (updateService.releaseNotes != null &&
                 updateService.releaseNotes!.trim().isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -245,13 +277,56 @@ class _UpdateBannerState extends State<UpdateBanner> {
     );
   }
 
+  void _showInstallDialog(BuildContext context) {
+    final updateService = context.read<UpdateService>();
+    final theme = Theme.of(context);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Row(
+          children: [
+            Icon(Icons.system_update_outlined,
+                size: 22, color: theme.colorScheme.primary),
+            const SizedBox(width: 10),
+            const Text('Ready to Install'),
+          ],
+        ),
+        content: Text(
+          'Tunnel Pilot v${updateService.latestVersion} has been downloaded.\n\n'
+          'The app will close and restart automatically after the update is installed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _dialogShown = false;
+            },
+            child: const Text('Later'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              updateService.proceedWithInstall();
+            },
+            child: const Text('Install & Restart'),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _downloadStatusText(UpdateService service) {
     final sizeText = service.downloadSizeText;
     if (service.downloadProgress > 0) {
       final pct = '${(service.downloadProgress * 100).toInt()}%';
       return sizeText.isNotEmpty ? '$pct  ·  $sizeText' : pct;
     }
-    return sizeText.isNotEmpty ? 'Downloading...  ·  $sizeText' : 'Downloading...';
+    return sizeText.isNotEmpty
+        ? 'Downloading...  ·  $sizeText'
+        : 'Downloading...';
   }
 
   Widget _actionButton(

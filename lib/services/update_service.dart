@@ -21,10 +21,12 @@ class UpdateService extends ChangeNotifier {
   bool _isUpToDate = false;
   bool _isDownloading = false;
   bool _isInstalling = false;
+  bool _readyToInstall = false;
   double _downloadProgress = 0.0;
   int _downloadedBytes = 0;
   int _totalBytes = 0;
 
+  String? _downloadedFilePath;
   String? _errorMessage;
   String? _checkError;
   String? _statusMessage;
@@ -46,6 +48,7 @@ class UpdateService extends ChangeNotifier {
   bool get isUpToDate => _isUpToDate;
   bool get isDownloading => _isDownloading;
   bool get isInstalling => _isInstalling;
+  bool get readyToInstall => _readyToInstall;
   double get downloadProgress => _downloadProgress;
   int get downloadedBytes => _downloadedBytes;
   int get totalBytes => _totalBytes;
@@ -59,6 +62,8 @@ class UpdateService extends ChangeNotifier {
   set isDownloading(bool v) => _isDownloading = v;
   @visibleForTesting
   set isInstalling(bool v) => _isInstalling = v;
+  @visibleForTesting
+  set readyToInstall(bool v) => _readyToInstall = v;
   @visibleForTesting
   set downloadProgress(double v) => _downloadProgress = v;
   @visibleForTesting
@@ -91,8 +96,11 @@ class UpdateService extends ChangeNotifier {
       _downloadClient?.close(force: true);
     } catch (_) {}
     _downloadClient = null;
+    _cleanupDownloadedFile();
     _isDownloading = false;
     _isInstalling = false;
+    _readyToInstall = false;
+    _downloadedFilePath = null;
     _downloadProgress = 0.0;
     _downloadedBytes = 0;
     _totalBytes = 0;
@@ -101,17 +109,13 @@ class UpdateService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ProcessResult> _runWithTimeout(
-    String executable,
-    List<String> arguments, {
-    Duration timeout = const Duration(seconds: 60),
-  }) {
-    return Process.run(executable, arguments).timeout(
-      timeout,
-      onTimeout: () => throw TimeoutException(
-        '$executable timed out after ${timeout.inSeconds}s',
-      ),
-    );
+  void _cleanupDownloadedFile() {
+    if (_downloadedFilePath != null) {
+      try {
+        File(_downloadedFilePath!).deleteSync();
+      } catch (_) {}
+      _downloadedFilePath = null;
+    }
   }
 
   Future<void> checkForUpdate() async {
@@ -318,7 +322,6 @@ class UpdateService extends ChangeNotifier {
       sink = null;
       response = null;
 
-      // Verify file integrity — size must match Content-Length
       if (contentLength > 0) {
         final fileSize = await partialFile.length();
         if (fileSize != contentLength) {
@@ -332,24 +335,15 @@ class UpdateService extends ChangeNotifier {
 
       _downloadProgress = 1.0;
       _isDownloading = false;
-      _isInstalling = true;
+      _readyToInstall = true;
+      _downloadedFilePath = filePath;
       notifyListeners();
-
-      if (Platform.isMacOS && filePath.endsWith('.dmg')) {
-        await _installAndRestartMacOS(filePath);
-      } else if (Platform.isWindows && filePath.endsWith('.zip')) {
-        await _installAndRestartWindows(filePath);
-      } else if (Platform.isLinux && filePath.endsWith('.tar.gz')) {
-        await _installAndRestartLinux(filePath);
-      } else {
-        await _openDownloadedFile(filePath);
-      }
     } catch (e) {
       if (_cancelRequested) return;
-      debugPrint('Download/install error: $e');
+      debugPrint('Download error: $e');
       _errorMessage = e is TimeoutException
-          ? 'Update timed out. Please try again or download manually.'
-          : 'Update failed. Please try again or download manually.';
+          ? 'Download timed out. Please try again.'
+          : 'Download failed. Please try again.';
     } finally {
       if (sink != null) {
         try {
@@ -371,249 +365,174 @@ class UpdateService extends ChangeNotifier {
       } catch (_) {}
       _downloadClient = null;
 
-      _isDownloading = false;
+      if (!_readyToInstall) {
+        _isDownloading = false;
+        _downloadProgress = 0.0;
+        _downloadedBytes = 0;
+        _totalBytes = 0;
+        _statusMessage = null;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> proceedWithInstall() async {
+    if (_downloadedFilePath == null) return;
+
+    _readyToInstall = false;
+    _isInstalling = true;
+    _statusMessage = 'Preparing update...';
+    notifyListeners();
+
+    try {
+      final filePath = _downloadedFilePath!;
+      if (Platform.isMacOS && filePath.endsWith('.dmg')) {
+        await _installDetachedMacOS(filePath);
+      } else if (Platform.isWindows && filePath.endsWith('.zip')) {
+        await _installDetachedWindows(filePath);
+      } else if (Platform.isLinux && filePath.endsWith('.tar.gz')) {
+        await _installDetachedLinux(filePath);
+      } else {
+        await _openDownloadedFile(filePath);
+        _isInstalling = false;
+        _statusMessage = null;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Install failed: $e');
+      _errorMessage =
+          'Install failed. Please try again or install manually.';
       _isInstalling = false;
-      _downloadProgress = 0.0;
-      _downloadedBytes = 0;
-      _totalBytes = 0;
+      _downloadedFilePath = null;
       _statusMessage = null;
       notifyListeners();
     }
   }
 
-  Future<void> _installAndRestartMacOS(String filePath) async {
-    String? mountPoint;
-    try {
-      _statusMessage = 'Mounting disk image...';
-      notifyListeners();
-      final mountResult = await _runWithTimeout(
-        'hdiutil',
-        ['attach', filePath, '-nobrowse'],
-        timeout: const Duration(seconds: 60),
-      );
-      if (mountResult.exitCode != 0) {
-        debugPrint('Failed to mount DMG: ${mountResult.stderr}');
-        _errorMessage =
-            'Auto-install failed. The file has been opened — please install manually.';
-        await _openDownloadedFile(filePath);
-        return;
-      }
+  Future<void> _installDetachedMacOS(String dmgPath) async {
+    final currentPid = pid;
+    final tempDir = await getTemporaryDirectory();
+    final scriptPath = '${tempDir.path}/tunnel_pilot_update.sh';
 
-      final output = mountResult.stdout as String;
-      final lines = output.trim().split('\n');
-      for (final line in lines) {
-        final match = RegExp(r'\s(/Volumes/.+)$').firstMatch(line);
-        if (match != null) {
-          mountPoint = match.group(1)?.trim();
-          break;
-        }
-      }
+    final script = '''#!/bin/bash
+while kill -0 $currentPid 2>/dev/null; do sleep 0.5; done
+sleep 1
 
-      if (mountPoint == null) {
-        debugPrint('Could not find mount point');
-        _errorMessage =
-            'Auto-install failed. The file has been opened — please install manually.';
-        await _openDownloadedFile(filePath);
-        return;
-      }
+MOUNT_OUTPUT=\$(hdiutil attach "$dmgPath" -nobrowse 2>&1)
+MOUNT_POINT=\$(echo "\$MOUNT_OUTPUT" | sed -n 's/.*\\(\\/Volumes\\/.*\\)/\\1/p' | sed 's/[[:space:]]*\$//' | head -1)
 
-      final mountDir = Directory(mountPoint);
-      final apps = mountDir
-          .listSync()
-          .whereType<Directory>()
-          .where((d) => d.path.endsWith('.app'))
-          .toList();
+if [ -z "\$MOUNT_POINT" ]; then
+  open "$dmgPath"
+  rm -f "\$0"
+  exit 1
+fi
 
-      if (apps.isEmpty) {
-        debugPrint('No .app found in DMG');
-        await _runWithTimeout('hdiutil', ['detach', mountPoint],
-            timeout: const Duration(seconds: 30));
-        _errorMessage =
-            'Auto-install failed. The file has been opened — please install manually.';
-        await _openDownloadedFile(filePath);
-        return;
-      }
+APP_SOURCE=\$(find "\$MOUNT_POINT" -maxdepth 1 -name "*.app" -print -quit)
+if [ -z "\$APP_SOURCE" ]; then
+  hdiutil detach "\$MOUNT_POINT" -quiet 2>/dev/null
+  open "$dmgPath"
+  rm -f "\$0"
+  exit 1
+fi
 
-      final appSource = apps.first.path;
-      final appName = appSource.split('/').last;
-      final appDest = '/Applications/$appName';
-      final appBackup = '/Applications/.$appName.bak';
+APP_NAME=\$(basename "\$APP_SOURCE")
+APP_DEST="/Applications/\$APP_NAME"
+APP_BAK="/Applications/.\$APP_NAME.bak"
 
-      _statusMessage = 'Installing update...';
-      notifyListeners();
+rm -rf "\$APP_BAK"
+if [ -d "\$APP_DEST" ]; then
+  mv "\$APP_DEST" "\$APP_BAK"
+fi
 
-      // Safe install: backup old → copy new → remove backup
-      // If copy fails, old app is still available in backup
-      if (Directory(appDest).existsSync()) {
-        if (Directory(appBackup).existsSync()) {
-          await _runWithTimeout('rm', ['-rf', appBackup],
-              timeout: const Duration(seconds: 30));
-        }
-        final mvResult = await _runWithTimeout('mv', [appDest, appBackup],
-            timeout: const Duration(seconds: 30));
-        if (mvResult.exitCode != 0) {
-          debugPrint('Failed to backup old app: ${mvResult.stderr}');
-          await _runWithTimeout('hdiutil', ['detach', mountPoint],
-              timeout: const Duration(seconds: 30));
-          _errorMessage =
-              'Auto-install failed. The file has been opened — please install manually.';
-          await _openDownloadedFile(filePath);
-          return;
-        }
-      }
+if cp -R "\$APP_SOURCE" "\$APP_DEST"; then
+  rm -rf "\$APP_BAK"
+else
+  if [ -d "\$APP_BAK" ]; then
+    mv "\$APP_BAK" "\$APP_DEST"
+  fi
+fi
 
-      final copyResult = await _runWithTimeout(
-        'cp',
-        ['-R', appSource, appDest],
-        timeout: const Duration(seconds: 120),
-      );
-      if (copyResult.exitCode != 0) {
-        debugPrint('Failed to copy app: ${copyResult.stderr}');
-        // Restore backup
-        if (Directory(appBackup).existsSync()) {
-          await _runWithTimeout('mv', [appBackup, appDest],
-              timeout: const Duration(seconds: 30));
-        }
-        await _runWithTimeout('hdiutil', ['detach', mountPoint],
-            timeout: const Duration(seconds: 30));
-        _errorMessage =
-            'Auto-install failed. The file has been opened — please install manually.';
-        await _openDownloadedFile(filePath);
-        return;
-      }
+hdiutil detach "\$MOUNT_POINT" -quiet 2>/dev/null
+rm -f "$dmgPath"
+open "\$APP_DEST"
+rm -f "\$0"
+''';
 
-      // Copy succeeded — remove backup
-      if (Directory(appBackup).existsSync()) {
-        await _runWithTimeout('rm', ['-rf', appBackup],
-            timeout: const Duration(seconds: 30));
-      }
+    File(scriptPath).writeAsStringSync(script);
+    await Process.run('chmod', ['+x', scriptPath]);
 
-      _statusMessage = 'Cleaning up...';
-      notifyListeners();
-      await _runWithTimeout('hdiutil', ['detach', mountPoint],
-          timeout: const Duration(seconds: 30));
+    _statusMessage = 'Closing app to install update...';
+    notifyListeners();
+    await Future.delayed(const Duration(milliseconds: 500));
 
-      _statusMessage = 'Restarting app...';
-      notifyListeners();
-      await Process.run('open', ['-n', appDest]);
-      exit(0);
-    } catch (e) {
-      debugPrint('Auto-install failed: $e');
-      if (mountPoint != null) {
-        try {
-          await Process.run('hdiutil', ['detach', mountPoint]);
-        } catch (_) {}
-      }
-      _errorMessage =
-          'Auto-install failed. The file has been opened — please install manually.';
-      await _openDownloadedFile(filePath);
-    }
+    await Process.start('bash', [scriptPath],
+        mode: ProcessStartMode.detached);
+    exit(0);
   }
 
-  Future<void> _installAndRestartWindows(String filePath) async {
-    try {
-      final appDir = File(Platform.resolvedExecutable).parent.path;
-      final tempExtractDir =
-          '${File(filePath).parent.path}\\tunnel_pilot_update';
+  Future<void> _installDetachedWindows(String zipPath) async {
+    final currentPid = pid;
+    final appDir = File(Platform.resolvedExecutable).parent.path;
+    final tempDir = File(zipPath).parent.path;
+    final extractDir = '$tempDir\\tunnel_pilot_update';
+    final scriptPath = '$tempDir\\tunnel_pilot_update.bat';
 
-      if (Directory(tempExtractDir).existsSync()) {
-        Directory(tempExtractDir).deleteSync(recursive: true);
-      }
-
-      _statusMessage = 'Extracting update...';
-      notifyListeners();
-      final extractResult = await _runWithTimeout(
-        'powershell',
-        [
-          '-Command',
-          'Expand-Archive -Path "$filePath" -DestinationPath "$tempExtractDir" -Force',
-        ],
-        timeout: const Duration(seconds: 120),
-      );
-      if (extractResult.exitCode != 0) {
-        debugPrint('Failed to extract zip: ${extractResult.stderr}');
-        _errorMessage =
-            'Auto-install failed. The file has been opened — please install manually.';
-        await _openDownloadedFile(filePath);
-        return;
-      }
-
-      _statusMessage = 'Applying update...';
-      notifyListeners();
-      final scriptPath = '${File(filePath).parent.path}\\update.bat';
-      final script = '''
-@echo off
-timeout /t 2 /nobreak >nul
-xcopy /s /y /q "$tempExtractDir\\*" "$appDir\\"
+    final script = '''@echo off
+:wait
+tasklist /FI "PID eq $currentPid" 2>nul | find "$currentPid" >nul
+if not errorlevel 1 (
+  timeout /t 1 /nobreak >nul
+  goto wait
+)
+timeout /t 1 /nobreak >nul
+powershell -Command "Expand-Archive -Path '$zipPath' -DestinationPath '$extractDir' -Force"
+xcopy /s /y /q "$extractDir\\*" "$appDir\\"
 start "" "$appDir\\tunnel_pilot.exe"
+rmdir /s /q "$extractDir"
+del "$zipPath"
 del "%~f0"
 ''';
-      File(scriptPath).writeAsStringSync(script);
 
-      _statusMessage = 'Restarting app...';
-      notifyListeners();
-      await Process.start('cmd', ['/c', scriptPath],
-          mode: ProcessStartMode.detached);
-      exit(0);
-    } catch (e) {
-      debugPrint('Auto-install failed (Windows): $e');
-      _errorMessage =
-          'Auto-install failed. The file has been opened — please install manually.';
-      await _openDownloadedFile(filePath);
-    }
+    File(scriptPath).writeAsStringSync(script);
+
+    _statusMessage = 'Closing app to install update...';
+    notifyListeners();
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    await Process.start('cmd', ['/c', scriptPath],
+        mode: ProcessStartMode.detached);
+    exit(0);
   }
 
-  Future<void> _installAndRestartLinux(String filePath) async {
-    try {
-      final appDir = File(Platform.resolvedExecutable).parent.parent.path;
-      final tempExtractDir =
-          '${File(filePath).parent.path}/tunnel_pilot_update';
+  Future<void> _installDetachedLinux(String tarPath) async {
+    final currentPid = pid;
+    final appDir = File(Platform.resolvedExecutable).parent.parent.path;
+    final tempDir = File(tarPath).parent.path;
+    final extractDir = '$tempDir/tunnel_pilot_update';
+    final scriptPath = '$tempDir/tunnel_pilot_update.sh';
 
-      if (Directory(tempExtractDir).existsSync()) {
-        Directory(tempExtractDir).deleteSync(recursive: true);
-      }
-      Directory(tempExtractDir).createSync();
-
-      _statusMessage = 'Extracting update...';
-      notifyListeners();
-      final extractResult = await _runWithTimeout(
-        'tar',
-        ['xzf', filePath, '-C', tempExtractDir],
-        timeout: const Duration(seconds: 120),
-      );
-      if (extractResult.exitCode != 0) {
-        debugPrint('Failed to extract tar.gz: ${extractResult.stderr}');
-        _errorMessage =
-            'Auto-install failed. The file has been opened — please install manually.';
-        await _openDownloadedFile(filePath);
-        return;
-      }
-
-      _statusMessage = 'Applying update...';
-      notifyListeners();
-      final scriptPath = '${File(filePath).parent.path}/update.sh';
-      final script = '''
-#!/bin/bash
-sleep 2
-cp -rf "$tempExtractDir"/* "$appDir/"
+    final script = '''#!/bin/bash
+while kill -0 $currentPid 2>/dev/null; do sleep 0.5; done
+sleep 1
+mkdir -p "$extractDir"
+tar xzf "$tarPath" -C "$extractDir"
+cp -rf "$extractDir"/* "$appDir/"
+rm -rf "$extractDir"
+rm -f "$tarPath"
 "$appDir/tunnel_pilot" &
 rm -f "\$0"
 ''';
-      File(scriptPath).writeAsStringSync(script);
-      await _runWithTimeout('chmod', ['+x', scriptPath],
-          timeout: const Duration(seconds: 10));
 
-      _statusMessage = 'Restarting app...';
-      notifyListeners();
-      await Process.start('bash', [scriptPath],
-          mode: ProcessStartMode.detached);
-      exit(0);
-    } catch (e) {
-      debugPrint('Auto-install failed (Linux): $e');
-      _errorMessage =
-          'Auto-install failed. The file has been opened — please install manually.';
-      await _openDownloadedFile(filePath);
-    }
+    File(scriptPath).writeAsStringSync(script);
+    await Process.run('chmod', ['+x', scriptPath]);
+
+    _statusMessage = 'Closing app to install update...';
+    notifyListeners();
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    await Process.start('bash', [scriptPath],
+        mode: ProcessStartMode.detached);
+    exit(0);
   }
 
   Future<void> _openDownloadedFile(String filePath) async {
@@ -651,7 +570,9 @@ rm -f "\$0"
   }
 
   void dismissUpdate() {
+    _cleanupDownloadedFile();
     _updateAvailable = false;
+    _readyToInstall = false;
     _errorMessage = null;
     _statusMessage = null;
     notifyListeners();

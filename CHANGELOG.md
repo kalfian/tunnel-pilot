@@ -1,6 +1,11 @@
 # Changelog
 
-## 1.2.11 (2026-05-08)
+## 1.2.12 (2026-05-08)
+
+### Fixes
+
+- **Update Install No Longer Hangs** — Replaced inline install (mount/copy/restart in-process) with detached shell script approach. After download completes, a confirmation dialog appears. Clicking "Install & Restart" exits the app, a background script handles the install, and the app relaunches automatically
+- **Safe Install with Rollback** — macOS install script backs up the old app before copying; restores it if copy fails
 
 ### Improvements
 
