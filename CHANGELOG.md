@@ -1,45 +1,21 @@
 # Changelog
 
-## 1.2.15 (2026-05-08)
-
-### Improvements
-
-- Version bump to test in-app update from v1.2.14 (which has the download completion fix)
-
-## 1.2.14 (2026-05-08)
-
-### Improvements
-
-- Version bump to verify in-app update flow from v1.2.12
+## 1.2.16 (2026-05-08)
 
 ### Fixes
 
-- **Update Download No Longer Hangs at 100%** — Added HTTP status validation, stream idle timeout, and deterministic completion when received bytes reach Content-Length
-- **Second Update Path (Manual Install)** — Added "Install Manually" action in the update banner/dialog to open the downloaded installer (or release page fallback) when direct install is not desired
-
-## 1.2.12 (2026-05-08)
-
-### Fixes
-
-- **Update Install No Longer Hangs** — Replaced inline install (mount/copy/restart in-process) with detached shell script approach. After download completes, a confirmation dialog appears. Clicking "Install & Restart" exits the app, a background script handles the install, and the app relaunches automatically
-- **Safe Install with Rollback** — macOS install script backs up the old app before copying; restores it if copy fails
+- **Update Download No Longer Hangs at 100%** — Replaced `await for` + `break` download loop with explicit stream subscription. The original pattern awaited `subscription.cancel()` on break, which could hang indefinitely when the HTTPS TLS close handshake stalled. Also added HTTP status validation, stream idle timeout (60s), and deterministic completion at Content-Length
+- **Detached Install (No More Freeze)** — Install now runs as a detached shell script after the app exits, instead of inline. Prevents UI freeze from `hdiutil`/`cp` operations. Confirmation dialog appears after download; clicking "Install & Restart" exits the app, script handles mount/copy/unmount, and relaunches automatically
+- **Safe Install with Rollback** — macOS install script backs up the old `.app` before copying; restores automatically if copy fails
 
 ### Improvements
 
-- **Version Label in Settings** — App version now displayed at the bottom of the General settings section for easy identification
-
-## 1.2.10 (2026-05-08)
-
-### Improvements
-
-- **Encapsulated Update State** — All UpdateService fields are now private with controlled access, preventing accidental external mutation
-- **Rate Limit Handling** — Update checks now detect GitHub API rate limits (403/429) and show the reset time instead of a generic error
-- **Safe macOS Install** — Replaced destructive `rm -rf` with backup-first strategy: move old app to `.bak`, copy new, remove backup — restores automatically if copy fails
-- **Real Download Cancel** — Dedicated HttpClient per download enables actual connection termination instead of just ignoring the response
-- **Download Size Progress** — Banner now shows byte progress (e.g. "45% · 12.5 MB / 45.2 MB") instead of just a percentage
-- **File Integrity Check** — Downloaded file size is verified against Content-Length header before install
-- **Check Feedback in Settings** — "Check for Updates" row now shows green "You're up to date!" or red error text with details
-- **Collapsible Release Notes** — Update banner includes expandable release notes section
+- **Encapsulated Update State** — All UpdateService fields are now private with controlled getters and `@visibleForTesting` setters
+- **Rate Limit Handling** — Update checks detect GitHub API rate limits (403/429) and show reset time
+- **Download Size Progress** — Banner shows byte progress (e.g. "45% · 12.5 MB / 45.2 MB") with collapsible release notes
+- **Check Feedback in Settings** — Shows green "You're up to date!" or red error text with details
+- **Manual Install Fallback** — "Install Manually" action opens the downloaded file or release page when auto-install is not desired
+- **Version Label in Settings** — App version displayed at the bottom of General settings section
 
 ## 1.2.9 (2026-04-23)
 

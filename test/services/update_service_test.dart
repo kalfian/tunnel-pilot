@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnel_pilot/services/update_service.dart';
 
@@ -296,6 +298,98 @@ void main() {
         service.updateAvailable = true;
         service.notifyListeners();
         expect(notificationCount, 0);
+      });
+    });
+
+    group('download integration', () {
+      late HttpServer server;
+      late Directory tmpDir;
+
+      setUp(() {
+        tmpDir = Directory.systemTemp.createTempSync('update_test_');
+        service.tempDirOverride = tmpDir.path;
+      });
+
+      tearDown(() async {
+        await server.close(force: true);
+        try {
+          tmpDir.deleteSync(recursive: true);
+        } catch (_) {}
+      });
+
+      test('completes when server closes connection after all data', () async {
+        final testData = List.filled(10240, 0x42);
+
+        server = await HttpServer.bind('localhost', 0);
+        server.listen((request) {
+          request.response
+            ..statusCode = 200
+            ..contentLength = testData.length
+            ..add(testData)
+            ..close();
+        });
+
+        service.downloadUrl = 'http://localhost:${server.port}/test.dmg';
+
+        await service.downloadAndInstall().timeout(
+              const Duration(seconds: 5),
+              onTimeout: () =>
+                  fail('STUCK: downloadAndInstall never completed '
+                      '(server closes connection)'),
+            );
+
+        expect(service.readyToInstall, isTrue);
+        expect(service.isDownloading, isFalse);
+      });
+
+      test('completes when server keeps connection open (keep-alive)',
+          () async {
+        final testData = List.filled(10240, 0x42);
+
+        server = await HttpServer.bind('localhost', 0);
+        server.listen((request) {
+          request.response
+            ..statusCode = 200
+            ..contentLength = testData.length
+            ..add(testData);
+          // NOT calling close() — simulates keep-alive / CDN behavior
+        });
+
+        service.downloadUrl = 'http://localhost:${server.port}/test.dmg';
+
+        await service.downloadAndInstall().timeout(
+              const Duration(seconds: 5),
+              onTimeout: () =>
+                  fail('STUCK: downloadAndInstall never completed '
+                      '(server keeps connection open)'),
+            );
+
+        expect(service.readyToInstall, isTrue);
+        expect(service.isDownloading, isFalse);
+      });
+
+      test('completes with chunked transfer (no content-length)', () async {
+        final testData = List.filled(10240, 0x42);
+
+        server = await HttpServer.bind('localhost', 0);
+        server.listen((request) {
+          request.response
+            ..statusCode = 200
+            ..add(testData)
+            ..close();
+        });
+
+        service.downloadUrl = 'http://localhost:${server.port}/test.dmg';
+
+        await service.downloadAndInstall().timeout(
+              const Duration(seconds: 5),
+              onTimeout: () =>
+                  fail('STUCK: downloadAndInstall never completed '
+                      '(chunked transfer)'),
+            );
+
+        expect(service.readyToInstall, isTrue);
+        expect(service.isDownloading, isFalse);
       });
     });
   });

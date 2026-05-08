@@ -76,6 +76,9 @@ class UpdateService extends ChangeNotifier {
   @visibleForTesting
   set latestVersion(String? v) => _latestVersion = v;
 
+  @visibleForTesting
+  String? tempDirOverride;
+
   HttpClient get _client {
     _httpClient ??= HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
@@ -297,44 +300,63 @@ class UpdateService extends ChangeNotifier {
 
       final contentLength = response.contentLength;
       _totalBytes = contentLength > 0 ? contentLength : 0;
-      final tempDir = await getTemporaryDirectory();
+      final tempPath =
+          tempDirOverride ?? (await getTemporaryDirectory()).path;
       final fileName = _downloadUrl!.split('/').last;
-      final filePath = '${tempDir.path}/$fileName';
+      final filePath = '$tempPath/$fileName';
 
       partialFile = File(filePath);
       sink = partialFile.openWrite();
       int received = 0;
       int lastNotifiedPercent = -1;
 
-      await for (final chunk in response.timeout(_downloadIdleTimeout)) {
-        if (_cancelRequested) return;
-        var bytesToWrite = chunk.length;
-        if (contentLength > 0) {
-          final remaining = contentLength - received;
-          if (remaining <= 0) {
-            break;
+      // Use explicit subscription instead of `await for` + `break`.
+      // `await for` awaits subscription.cancel() on break, which can
+      // hang if the HTTPS TLS close handshake stalls.
+      final downloadDone = Completer<void>();
+      final downloadSub = response.timeout(_downloadIdleTimeout).listen(
+        (chunk) {
+          if (_cancelRequested || downloadDone.isCompleted) return;
+
+          var bytesToWrite = chunk.length;
+          if (contentLength > 0) {
+            final remaining = contentLength - received;
+            if (remaining <= 0) {
+              downloadDone.complete();
+              return;
+            }
+            if (bytesToWrite > remaining) bytesToWrite = remaining;
           }
-          if (bytesToWrite > remaining) {
-            bytesToWrite = remaining;
+          if (bytesToWrite > 0) {
+            sink!.add(chunk.sublist(0, bytesToWrite));
+            received += bytesToWrite;
           }
-        }
-        if (bytesToWrite > 0) {
-          sink.add(chunk.sublist(0, bytesToWrite));
-          received += bytesToWrite;
-        }
-        _downloadedBytes = received;
-        if (contentLength > 0) {
-          _downloadProgress = received / contentLength;
-          final percent = (_downloadProgress * 100).floor();
-          if (percent != lastNotifiedPercent) {
-            lastNotifiedPercent = percent;
-            notifyListeners();
+          _downloadedBytes = received;
+          if (contentLength > 0) {
+            _downloadProgress = received / contentLength;
+            final percent = (_downloadProgress * 100).floor();
+            if (percent != lastNotifiedPercent) {
+              lastNotifiedPercent = percent;
+              notifyListeners();
+            }
+            if (received >= contentLength) {
+              downloadDone.complete();
+              return;
+            }
           }
-          if (received >= contentLength) {
-            break;
-          }
-        }
-      }
+        },
+        onDone: () {
+          if (!downloadDone.isCompleted) downloadDone.complete();
+        },
+        onError: (Object e) {
+          if (!downloadDone.isCompleted) downloadDone.completeError(e);
+        },
+        cancelOnError: true,
+      );
+
+      await downloadDone.future;
+      // Fire-and-forget: don't await cancel (TLS close can hang)
+      downloadSub.cancel();
 
       if (_cancelRequested) return;
 
