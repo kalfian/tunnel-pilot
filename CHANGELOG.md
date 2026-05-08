@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.0 (2026-05-09)
+
+### Features
+
+- **Mature Port Forwarding** — Significant stability improvements and real-time monitoring.
+- **Real-time Tunnel Stats** — Live tracking of active connections, uptime, and data throughput (↑Up / ↓Down bytes) for every tunnel.
+- **Modernized Tray UI** — Redesigned system tray menu with a cleaner layout, combined status headers, Unicode status indicators (●, ○, ×), and intuitive emojis for better visual navigation.
+- **Performance Optimizations** — Efficient UI rendering using granular state management (`Selector`/`context.select`), reducing CPU usage during active traffic.
+- **Hardened Resilience** — Robust error handling for corrupted configuration files and improved resource cleanup to prevent memory leaks during SSH lifecycle.
+
+### Improvements
+
+- **SSH Transport Update** — Upgraded `dartssh2` to v2.17.1 for enhanced connectivity and security.
+- **Health Monitoring** — Improved ping-based health check for faster detection of dead SSH sessions.
+
 ## 1.2.25 (2026-05-09)
 
 ### Improvements
