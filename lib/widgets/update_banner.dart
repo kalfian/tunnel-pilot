@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/app_settings_provider.dart';
@@ -78,8 +79,28 @@ class _UpdateBannerState extends State<UpdateBanner> {
               child: SingleChildScrollView(
                 child: Text(
                   updateService.errorMessage!,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.error),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                    fontFamily:
+                        'JetBrains Mono, SF Mono, Menlo, monospace',
+                    fontSize: 10,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: () {
+                Clipboard.setData(
+                    ClipboardData(text: updateService.errorMessage!));
+              },
+              child: Text(
+                'Copy diagnostic',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.w500,
+                  decoration: TextDecoration.underline,
                 ),
               ),
             ),

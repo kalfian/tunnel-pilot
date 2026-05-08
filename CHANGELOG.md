@@ -1,6 +1,13 @@
 # Changelog
 
-## 1.2.23 (2026-05-08)
+## 1.2.24 (2026-05-09)
+
+### Fixes
+
+- **Download Actually Writes to Disk** — Replaced `IOSink` (async buffered writes) with `RandomAccessFile.writeFromSync()`. The old IOSink buffered all 21MB in memory and hung on `flush()` in release builds, resulting in no file on disk. Sync writes go directly to the filesystem per-chunk — no flush needed, no hang possible
+- **Copy Diagnostic** — Error banner now has a "Copy diagnostic" link for easy sharing of the full download trace
+
+## 1.2.23 (2026-05-09)
 
 ### Improvements
 

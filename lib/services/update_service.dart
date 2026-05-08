@@ -303,7 +303,7 @@ class UpdateService extends ChangeNotifier {
       ..connectionTimeout = const Duration(seconds: 15);
 
     HttpClientResponse? response;
-    IOSink? sink;
+    RandomAccessFile? raf;
     File? partialFile;
 
     try {
@@ -325,10 +325,12 @@ class UpdateService extends ChangeNotifier {
           tempDirOverride ?? (await getTemporaryDirectory()).path;
       final fileName = _downloadUrl!.split('/').last;
       final filePath = '$tempPath/$fileName';
-      _logDiag('Writing to: $filePath');
 
       partialFile = File(filePath);
-      sink = partialFile.openWrite();
+      partialFile.parent.createSync(recursive: true);
+      raf = partialFile.openSync(mode: FileMode.write);
+      _logDiag('File opened: $filePath');
+
       int received = 0;
       int lastNotifiedPercent = -1;
 
@@ -348,7 +350,7 @@ class UpdateService extends ChangeNotifier {
             if (bytesToWrite > remaining) bytesToWrite = remaining;
           }
           if (bytesToWrite > 0) {
-            sink!.add(chunk.sublist(0, bytesToWrite));
+            raf!.writeFromSync(chunk, 0, bytesToWrite);
             received += bytesToWrite;
           }
           _downloadedBytes = received;
@@ -382,29 +384,13 @@ class UpdateService extends ChangeNotifier {
 
       if (_cancelRequested) return;
 
-      const postTimeout = Duration(seconds: 10);
-
-      _logDiag('Flushing...', notify: true);
-      try {
-        await sink.flush().timeout(postTimeout);
-        _logDiag('Flush OK');
-      } catch (e) {
-        _logDiag('Flush failed: $e');
-      }
-
-      _logDiag('Closing file...', notify: true);
-      try {
-        await sink.close().timeout(postTimeout);
-        _logDiag('Close OK');
-      } catch (e) {
-        _logDiag('Close failed: $e');
-      }
-      sink = null;
+      raf.flushSync();
+      final fileSize = raf.lengthSync();
+      raf.closeSync();
+      raf = null;
       response = null;
+      _logDiag('File closed: ${_formatBytes(fileSize)} (expected: ${contentLength > 0 ? _formatBytes(contentLength) : "unknown"})');
 
-      _logDiag('Checking file size...', notify: true);
-      final fileSize = partialFile.lengthSync();
-      _logDiag('File size: ${_formatBytes(fileSize)} (expected: ${contentLength > 0 ? _formatBytes(contentLength) : "unknown"})');
       if (contentLength > 0 && fileSize != contentLength) {
         _errorMessage =
             'Download corrupted (${_formatBytes(fileSize)} of ${_formatBytes(contentLength)}). Try again.';
@@ -419,7 +405,6 @@ class UpdateService extends ChangeNotifier {
 
       partialFile = null;
 
-      _logDiag('Finalizing...');
       _downloadProgress = 1.0;
       _isDownloading = false;
       _readyToInstall = true;
@@ -429,35 +414,27 @@ class UpdateService extends ChangeNotifier {
     } catch (e) {
       _logDiag('CATCH: $e');
       if (_cancelRequested) return;
-      _errorMessage = e is TimeoutException
-          ? 'Download stalled. Diagnostic:\n${_downloadDiag.join("\n")}'
-          : 'Download failed. Diagnostic:\n${_downloadDiag.join("\n")}';
+      _errorMessage = 'Download failed. Diagnostic:\n${_downloadDiag.join("\n")}';
     } finally {
-      _logDiag('FINALLY block entered');
-      if (sink != null) {
-        _logDiag('Finally: closing sink');
+      if (raf != null) {
         try {
-          await sink.close().timeout(const Duration(seconds: 5));
+          raf.closeSync();
         } catch (_) {}
       }
       if (response != null) {
-        _logDiag('Finally: draining response');
         try {
           await response.drain<void>().timeout(const Duration(seconds: 5));
         } catch (_) {}
       }
       if (partialFile != null) {
-        _logDiag('Finally: deleting partial file');
         try {
-          await partialFile.delete();
+          partialFile.deleteSync();
         } catch (_) {}
       }
-      _logDiag('Finally: closing downloadClient');
       try {
         _downloadClient?.close(force: true);
       } catch (_) {}
       _downloadClient = null;
-      _logDiag('Finally: cleanup done');
 
       if (!_readyToInstall) {
         _isDownloading = false;
