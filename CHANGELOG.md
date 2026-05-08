@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-05-09
+
+### Fixed
+- **Manual Disconnect**: Fixed issue where tunnels could get stuck in 'connecting' or 'reconnecting' states; clicking the toggle now reliably forces a disconnect from any active or error state.
+- **VPN Detection**: Improved detection of silent connection losses (e.g., when a VPN is disabled) by reducing default heartbeat intervals and ping failure thresholds.
+
 ## [1.3.5] - 2026-05-09
 
 ### Improved

@@ -162,7 +162,7 @@ class SshTunnelService {
 
       final keepAlive = config.keepAliveIntervalSec > 0
           ? Duration(seconds: config.keepAliveIntervalSec)
-          : null;
+          : const Duration(seconds: 10); // Default to 10s for faster VPN detection
 
       if (config.identityFilePath != null &&
           config.identityFilePath!.isNotEmpty) {
@@ -194,7 +194,7 @@ class SshTunnelService {
         serverSocket: serverSocket,
         onStatus: safeCallback,
         keepAliveMaxFailures:
-            config.keepAliveMaxCount > 0 ? config.keepAliveMaxCount : 5,
+            config.keepAliveMaxCount > 0 ? config.keepAliveMaxCount : 3, // Faster detection
       );
       _connections[config.id] = tunnel;
 

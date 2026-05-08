@@ -135,17 +135,24 @@ class ForwardProvider extends ChangeNotifier {
 
   Future<void> toggleForward(String id) async {
     final status = getStatus(id);
+    final isReconnecting = _reconnectTimers.containsKey(id);
 
-    if (status == ForwardStatus.connecting ||
-        status == ForwardStatus.disconnecting) {
+    // If it's already disconnecting, ignore clicks to avoid race conditions
+    if (status == ForwardStatus.disconnecting) {
       return;
     }
 
-    if (status == ForwardStatus.connected) {
+    // If active, connecting, in error state, or has a pending reconnect timer:
+    // Manual click should FORCE DISCONNECT
+    if (status == ForwardStatus.connected ||
+        status == ForwardStatus.connecting ||
+        status == ForwardStatus.error ||
+        isReconnecting) {
       _userDisconnected.add(id);
       _cancelReconnect(id);
       await _disconnectForward(id);
     } else {
+      // It's strictly disconnected, so let's start it
       _userDisconnected.remove(id);
       _cancelReconnect(id);
       _reconnectAttempts.remove(id);
