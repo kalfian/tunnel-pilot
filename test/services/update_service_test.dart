@@ -51,8 +51,10 @@ void main() {
       });
 
       test('compares two pre-releases lexicographically', () {
-        expect(service.compareVersions('1.2.7-alpha', '1.2.7-beta'), isNegative);
-        expect(service.compareVersions('1.2.7-rc.1', '1.2.7-rc.2'), isNegative);
+        expect(
+            service.compareVersions('1.2.7-alpha', '1.2.7-beta'), isNegative);
+        expect(
+            service.compareVersions('1.2.7-rc.1', '1.2.7-rc.2'), isNegative);
         expect(service.compareVersions('1.2.7-beta', '1.2.7-beta'), 0);
       });
 
@@ -77,10 +79,14 @@ void main() {
         expect(service.htmlUrl, isNull);
         expect(service.isChecking, isFalse);
         expect(service.updateAvailable, isFalse);
+        expect(service.isUpToDate, isFalse);
         expect(service.isDownloading, isFalse);
         expect(service.isInstalling, isFalse);
         expect(service.downloadProgress, 0.0);
+        expect(service.downloadedBytes, 0);
+        expect(service.totalBytes, 0);
         expect(service.errorMessage, isNull);
+        expect(service.checkError, isNull);
         expect(service.statusMessage, isNull);
       });
 
@@ -135,9 +141,6 @@ void main() {
       });
 
       test('setSkippedVersion stores version', () {
-        // Verify indirectly: after setting skipped version,
-        // the service should track it (no public getter, but we can
-        // verify it doesn't crash)
         service.setSkippedVersion('1.2.3');
         service.setSkippedVersion(null);
       });
@@ -152,7 +155,6 @@ void main() {
         service.isDownloading = true;
         service.downloadUrl = 'https://example.com/file.dmg';
         await service.downloadAndInstall();
-        // Should return early without changing state
         expect(service.isDownloading, isTrue);
       });
 
@@ -161,34 +163,38 @@ void main() {
       });
 
       test('downloadProgress resets after failed download', () async {
-        // Set up a bad URL that will fail
         service.downloadUrl = 'https://invalid.invalid/file.dmg';
         await service.downloadAndInstall();
 
-        // After failure, state should be fully reset
         expect(service.isDownloading, isFalse);
         expect(service.isInstalling, isFalse);
         expect(service.downloadProgress, 0.0);
+        expect(service.downloadedBytes, 0);
+        expect(service.totalBytes, 0);
         expect(service.statusMessage, isNull);
-        // Error message should be set after failure
         expect(service.errorMessage, isNotNull);
+      });
+
+      test('clearCheckStatus resets check feedback', () {
+        service.clearCheckStatus();
+        expect(service.isUpToDate, isFalse);
+        expect(service.checkError, isNull);
+      });
+
+      test('downloadSizeText returns empty when totalBytes is 0', () {
+        expect(service.downloadSizeText, '');
       });
     });
 
     group('periodic check', () {
       test('startPeriodicCheck and stopPeriodicCheck', () {
-        service.startPeriodicCheck(
-            interval: const Duration(hours: 1));
-        // Should not throw
+        service.startPeriodicCheck(interval: const Duration(hours: 1));
         service.stopPeriodicCheck();
       });
 
       test('startPeriodicCheck replaces previous timer', () {
-        service.startPeriodicCheck(
-            interval: const Duration(hours: 1));
-        service.startPeriodicCheck(
-            interval: const Duration(hours: 2));
-        // Should not throw or leak timers
+        service.startPeriodicCheck(interval: const Duration(hours: 1));
+        service.startPeriodicCheck(interval: const Duration(hours: 2));
         service.stopPeriodicCheck();
       });
 
@@ -197,13 +203,11 @@ void main() {
         disposableService.startPeriodicCheck(
             interval: const Duration(hours: 1));
         disposableService.dispose();
-        // Should not throw
       });
     });
 
     group('notification spam prevention', () {
       test('listener fires only once per version', () {
-        // Simulate the pattern used in main.dart
         int notificationCount = 0;
         String? lastNotifiedVersion;
 
@@ -216,18 +220,15 @@ void main() {
           }
         });
 
-        // Simulate update found: multiple notifyListeners calls happen
         service.latestVersion = '2.0.0';
         service.updateAvailable = true;
 
-        // First notify — should trigger notification
-        service.dismissUpdate(); // resets updateAvailable, calls notifyListeners
+        service.dismissUpdate();
         service.updateAvailable = true;
-        service.notifyListeners(); // this one should trigger
+        service.notifyListeners();
 
         expect(notificationCount, 1);
 
-        // Additional notifyListeners with same version — should NOT trigger
         service.notifyListeners();
         service.notifyListeners();
         expect(notificationCount, 1);
@@ -246,17 +247,14 @@ void main() {
           }
         });
 
-        // First version
         service.latestVersion = '2.0.0';
         service.updateAvailable = true;
         service.notifyListeners();
         expect(notificationCount, 1);
 
-        // Same version — no new notification
         service.notifyListeners();
         expect(notificationCount, 1);
 
-        // New version — should trigger again
         service.latestVersion = '3.0.0';
         service.notifyListeners();
         expect(notificationCount, 2);

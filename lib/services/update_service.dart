@@ -10,36 +10,75 @@ class UpdateService extends ChangeNotifier {
   static const String _repoOwner = 'kalfian';
   static const String _repoName = 'tunnel-pilot';
 
-  String currentVersion = '';
+  String _currentVersion = '';
+  String? _latestVersion;
+  String? _downloadUrl;
+  String? _releaseNotes;
+  String? _htmlUrl;
 
-  String? latestVersion;
-  String? downloadUrl;
-  String? releaseNotes;
-  String? htmlUrl;
+  bool _isChecking = false;
+  bool _updateAvailable = false;
+  bool _isUpToDate = false;
+  bool _isDownloading = false;
+  bool _isInstalling = false;
+  double _downloadProgress = 0.0;
+  int _downloadedBytes = 0;
+  int _totalBytes = 0;
 
-  bool isChecking = false;
-  bool updateAvailable = false;
-  bool isDownloading = false;
-  bool isInstalling = false;
-  double downloadProgress = 0.0;
-
-  String? errorMessage;
-  String? statusMessage;
+  String? _errorMessage;
+  String? _checkError;
+  String? _statusMessage;
   bool _cancelRequested = false;
 
   Timer? _periodicTimer;
   HttpClient? _httpClient;
+  HttpClient? _downloadClient;
 
   String? _lastSkippedVersion;
 
+  String get currentVersion => _currentVersion;
+  String? get latestVersion => _latestVersion;
+  String? get downloadUrl => _downloadUrl;
+  String? get releaseNotes => _releaseNotes;
+  String? get htmlUrl => _htmlUrl;
+  bool get isChecking => _isChecking;
+  bool get updateAvailable => _updateAvailable;
+  bool get isUpToDate => _isUpToDate;
+  bool get isDownloading => _isDownloading;
+  bool get isInstalling => _isInstalling;
+  double get downloadProgress => _downloadProgress;
+  int get downloadedBytes => _downloadedBytes;
+  int get totalBytes => _totalBytes;
+  String? get errorMessage => _errorMessage;
+  String? get checkError => _checkError;
+  String? get statusMessage => _statusMessage;
+
+  @visibleForTesting
+  set updateAvailable(bool v) => _updateAvailable = v;
+  @visibleForTesting
+  set isDownloading(bool v) => _isDownloading = v;
+  @visibleForTesting
+  set isInstalling(bool v) => _isInstalling = v;
+  @visibleForTesting
+  set downloadProgress(double v) => _downloadProgress = v;
+  @visibleForTesting
+  set errorMessage(String? v) => _errorMessage = v;
+  @visibleForTesting
+  set statusMessage(String? v) => _statusMessage = v;
+  @visibleForTesting
+  set downloadUrl(String? v) => _downloadUrl = v;
+  @visibleForTesting
+  set latestVersion(String? v) => _latestVersion = v;
+
   HttpClient get _client {
-    _httpClient ??= HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    _httpClient ??= HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
     return _httpClient!;
   }
 
   Future<void> init() async {
     final info = await PackageInfo.fromPlatform();
-    currentVersion = info.version;
+    _currentVersion = info.version;
   }
 
   void setSkippedVersion(String? version) {
@@ -48,11 +87,17 @@ class UpdateService extends ChangeNotifier {
 
   void cancelUpdate() {
     _cancelRequested = true;
-    isDownloading = false;
-    isInstalling = false;
-    downloadProgress = 0.0;
-    statusMessage = null;
-    errorMessage = null;
+    try {
+      _downloadClient?.close(force: true);
+    } catch (_) {}
+    _downloadClient = null;
+    _isDownloading = false;
+    _isInstalling = false;
+    _downloadProgress = 0.0;
+    _downloadedBytes = 0;
+    _totalBytes = 0;
+    _statusMessage = null;
+    _errorMessage = null;
     notifyListeners();
   }
 
@@ -70,13 +115,15 @@ class UpdateService extends ChangeNotifier {
   }
 
   Future<void> checkForUpdate() async {
-    if (isChecking) return;
+    if (_isChecking) return;
 
-    if (currentVersion.isEmpty) {
+    if (_currentVersion.isEmpty) {
       await init();
     }
 
-    isChecking = true;
+    _isChecking = true;
+    _checkError = null;
+    _isUpToDate = false;
     notifyListeners();
 
     try {
@@ -84,13 +131,31 @@ class UpdateService extends ChangeNotifier {
         'https://api.github.com/repos/$_repoOwner/$_repoName/releases/latest',
       ));
       request.headers.set('Accept', 'application/vnd.github.v3+json');
-      request.headers.set('User-Agent', 'TunnelPilot/$currentVersion');
+      request.headers.set('User-Agent', 'TunnelPilot/$_currentVersion');
 
       final response = await request.close();
 
-      if (response.statusCode != 200) {
-        debugPrint('Update check failed: HTTP ${response.statusCode}');
+      if (response.statusCode == 403 || response.statusCode == 429) {
+        final resetHeader = response.headers.value('x-ratelimit-reset');
         await response.drain();
+        if (resetHeader != null) {
+          final resetTime = DateTime.fromMillisecondsSinceEpoch(
+            int.parse(resetHeader) * 1000,
+          );
+          final waitMinutes =
+              resetTime.difference(DateTime.now()).inMinutes.clamp(1, 60);
+          _checkError = 'GitHub rate limited. Try again in ${waitMinutes}m.';
+        } else {
+          _checkError = 'GitHub rate limited. Try again later.';
+        }
+        notifyListeners();
+        return;
+      }
+
+      if (response.statusCode != 200) {
+        await response.drain();
+        _checkError = 'Check failed (HTTP ${response.statusCode})';
+        notifyListeners();
         return;
       }
 
@@ -98,41 +163,50 @@ class UpdateService extends ChangeNotifier {
       final json = jsonDecode(body) as Map<String, dynamic>;
 
       final tagName = json['tag_name'] as String? ?? '';
-      final version = tagName.startsWith('v') ? tagName.substring(1) : tagName;
+      final version =
+          tagName.startsWith('v') ? tagName.substring(1) : tagName;
 
-      if (version.isEmpty) return;
-
-      // Skip pre-release
-      if (json['prerelease'] == true) return;
-
-      if (compareVersions(currentVersion, version) >= 0) {
-        // Current version is up to date
-        updateAvailable = false;
+      if (version.isEmpty) {
+        _checkError = 'Could not parse version from release.';
         notifyListeners();
         return;
       }
 
-      // Skip if user chose to skip this version
+      if (json['prerelease'] == true) {
+        _isUpToDate = true;
+        _updateAvailable = false;
+        notifyListeners();
+        return;
+      }
+
+      if (compareVersions(_currentVersion, version) >= 0) {
+        _isUpToDate = true;
+        _updateAvailable = false;
+        notifyListeners();
+        return;
+      }
+
       if (_lastSkippedVersion == version) {
-        updateAvailable = false;
+        _updateAvailable = false;
         notifyListeners();
         return;
       }
 
-      latestVersion = version;
-      releaseNotes = json['body'] as String?;
-      htmlUrl = json['html_url'] as String?;
+      _latestVersion = version;
+      _releaseNotes = json['body'] as String?;
+      _htmlUrl = json['html_url'] as String?;
 
-      // Find platform-specific asset
       final assets = json['assets'] as List<dynamic>? ?? [];
-      downloadUrl = _findPlatformAsset(assets);
+      _downloadUrl = _findPlatformAsset(assets);
 
-      updateAvailable = true;
+      _updateAvailable = true;
       notifyListeners();
     } catch (e) {
       debugPrint('Update check error: $e');
+      _checkError = 'Network error. Check your connection.';
+      notifyListeners();
     } finally {
-      isChecking = false;
+      _isChecking = false;
       notifyListeners();
     }
   }
@@ -158,10 +232,6 @@ class UpdateService extends ChangeNotifier {
     return null;
   }
 
-  /// Compare two semver strings. Returns negative if a < b, 0 if equal, positive if a > b.
-  /// Handles pre-release suffixes (`-beta`, `-rc.1`) and build metadata (`+sha.abc`).
-  /// Per semver: pre-release versions are ordered below the matching release
-  /// (e.g. `1.2.7-beta` < `1.2.7`). Build metadata is ignored in comparisons.
   @visibleForTesting
   int compareVersions(String a, String b) {
     final aNoBuild = a.split('+').first;
@@ -178,7 +248,8 @@ class UpdateService extends ChangeNotifier {
     final aParts = aCore.split('.').map((e) => int.tryParse(e) ?? 0).toList();
     final bParts = bCore.split('.').map((e) => int.tryParse(e) ?? 0).toList();
 
-    final len = aParts.length > bParts.length ? aParts.length : bParts.length;
+    final len =
+        aParts.length > bParts.length ? aParts.length : bParts.length;
     for (int i = 0; i < len; i++) {
       final aVal = i < aParts.length ? aParts[i] : 0;
       final bVal = i < bParts.length ? bParts[i] : 0;
@@ -192,29 +263,32 @@ class UpdateService extends ChangeNotifier {
   }
 
   Future<void> downloadAndInstall() async {
-    if (downloadUrl == null || isDownloading) return;
+    if (_downloadUrl == null || _isDownloading) return;
 
     _cancelRequested = false;
-    errorMessage = null;
-    statusMessage = null;
-    isDownloading = true;
-    downloadProgress = 0.0;
+    _errorMessage = null;
+    _statusMessage = null;
+    _isDownloading = true;
+    _downloadProgress = 0.0;
+    _downloadedBytes = 0;
+    _totalBytes = 0;
     notifyListeners();
+
+    _downloadClient = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
 
     HttpClientResponse? response;
     IOSink? sink;
-    // Non-null only while the file is still being written. Set to null once
-    // the download finishes successfully so the finally block does not delete
-    // a valid, complete file.
     File? partialFile;
 
     try {
-      final request = await _client.getUrl(Uri.parse(downloadUrl!));
+      final request = await _downloadClient!.getUrl(Uri.parse(_downloadUrl!));
       response = await request.close();
 
       final contentLength = response.contentLength;
+      _totalBytes = contentLength > 0 ? contentLength : 0;
       final tempDir = await getTemporaryDirectory();
-      final fileName = downloadUrl!.split('/').last;
+      final fileName = _downloadUrl!.split('/').last;
       final filePath = '${tempDir.path}/$fileName';
 
       partialFile = File(filePath);
@@ -226,10 +300,10 @@ class UpdateService extends ChangeNotifier {
         if (_cancelRequested) return;
         sink.add(chunk);
         received += chunk.length;
+        _downloadedBytes = received;
         if (contentLength > 0) {
-          downloadProgress = received / contentLength;
-          // Throttle UI updates to every 2% to avoid excessive rebuilds
-          final percent = (downloadProgress * 50).floor();
+          _downloadProgress = received / contentLength;
+          final percent = (_downloadProgress * 50).floor();
           if (percent != lastNotifiedPercent) {
             lastNotifiedPercent = percent;
             notifyListeners();
@@ -242,17 +316,25 @@ class UpdateService extends ChangeNotifier {
       await sink.flush();
       await sink.close();
       sink = null;
-      // Stream fully consumed — no need to drain in finally
       response = null;
-      // File written successfully — hand ownership to the installer
+
+      // Verify file integrity — size must match Content-Length
+      if (contentLength > 0) {
+        final fileSize = await partialFile.length();
+        if (fileSize != contentLength) {
+          _errorMessage =
+              'Download corrupted (${_formatBytes(fileSize)} of ${_formatBytes(contentLength)}). Try again.';
+          return;
+        }
+      }
+
       partialFile = null;
 
-      downloadProgress = 1.0;
-      isDownloading = false;
-      isInstalling = true;
+      _downloadProgress = 1.0;
+      _isDownloading = false;
+      _isInstalling = true;
       notifyListeners();
 
-      // Install and restart, or fallback to opening the file
       if (Platform.isMacOS && filePath.endsWith('.dmg')) {
         await _installAndRestartMacOS(filePath);
       } else if (Platform.isWindows && filePath.endsWith('.zip')) {
@@ -263,8 +345,9 @@ class UpdateService extends ChangeNotifier {
         await _openDownloadedFile(filePath);
       }
     } catch (e) {
+      if (_cancelRequested) return;
       debugPrint('Download/install error: $e');
-      errorMessage = e is TimeoutException
+      _errorMessage = e is TimeoutException
           ? 'Update timed out. Please try again or download manually.'
           : 'Update failed. Please try again or download manually.';
     } finally {
@@ -283,11 +366,17 @@ class UpdateService extends ChangeNotifier {
           await partialFile.delete();
         } catch (_) {}
       }
+      try {
+        _downloadClient?.close();
+      } catch (_) {}
+      _downloadClient = null;
 
-      isDownloading = false;
-      isInstalling = false;
-      downloadProgress = 0.0;
-      statusMessage = null;
+      _isDownloading = false;
+      _isInstalling = false;
+      _downloadProgress = 0.0;
+      _downloadedBytes = 0;
+      _totalBytes = 0;
+      _statusMessage = null;
       notifyListeners();
     }
   }
@@ -295,25 +384,24 @@ class UpdateService extends ChangeNotifier {
   Future<void> _installAndRestartMacOS(String filePath) async {
     String? mountPoint;
     try {
-      // Mount the DMG
-      statusMessage = 'Mounting disk image...';
+      _statusMessage = 'Mounting disk image...';
       notifyListeners();
       final mountResult = await _runWithTimeout(
-        'hdiutil', ['attach', filePath, '-nobrowse'],
+        'hdiutil',
+        ['attach', filePath, '-nobrowse'],
         timeout: const Duration(seconds: 60),
       );
       if (mountResult.exitCode != 0) {
         debugPrint('Failed to mount DMG: ${mountResult.stderr}');
-        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
+        _errorMessage =
+            'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
 
-      // Find the mount point from hdiutil output
       final output = mountResult.stdout as String;
       final lines = output.trim().split('\n');
       for (final line in lines) {
-        // hdiutil output: /dev/diskX  ... /Volumes/AppName
         final match = RegExp(r'\s(/Volumes/.+)$').firstMatch(line);
         if (match != null) {
           mountPoint = match.group(1)?.trim();
@@ -323,12 +411,12 @@ class UpdateService extends ChangeNotifier {
 
       if (mountPoint == null) {
         debugPrint('Could not find mount point');
-        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
+        _errorMessage =
+            'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
 
-      // Find the .app in the mounted DMG
       final mountDir = Directory(mountPoint);
       final apps = mountDir
           .listSync()
@@ -340,7 +428,8 @@ class UpdateService extends ChangeNotifier {
         debugPrint('No .app found in DMG');
         await _runWithTimeout('hdiutil', ['detach', mountPoint],
             timeout: const Duration(seconds: 30));
-        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
+        _errorMessage =
+            'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
@@ -348,33 +437,63 @@ class UpdateService extends ChangeNotifier {
       final appSource = apps.first.path;
       final appName = appSource.split('/').last;
       final appDest = '/Applications/$appName';
+      final appBackup = '/Applications/.$appName.bak';
 
-      // Remove old app and copy new one
-      statusMessage = 'Copying to Applications...';
+      _statusMessage = 'Installing update...';
       notifyListeners();
+
+      // Safe install: backup old → copy new → remove backup
+      // If copy fails, old app is still available in backup
       if (Directory(appDest).existsSync()) {
-        await _runWithTimeout('rm', ['-rf', appDest],
+        if (Directory(appBackup).existsSync()) {
+          await _runWithTimeout('rm', ['-rf', appBackup],
+              timeout: const Duration(seconds: 30));
+        }
+        final mvResult = await _runWithTimeout('mv', [appDest, appBackup],
             timeout: const Duration(seconds: 30));
+        if (mvResult.exitCode != 0) {
+          debugPrint('Failed to backup old app: ${mvResult.stderr}');
+          await _runWithTimeout('hdiutil', ['detach', mountPoint],
+              timeout: const Duration(seconds: 30));
+          _errorMessage =
+              'Auto-install failed. The file has been opened — please install manually.';
+          await _openDownloadedFile(filePath);
+          return;
+        }
       }
-      final copyResult = await _runWithTimeout('cp', ['-R', appSource, appDest],
-          timeout: const Duration(seconds: 120));
+
+      final copyResult = await _runWithTimeout(
+        'cp',
+        ['-R', appSource, appDest],
+        timeout: const Duration(seconds: 120),
+      );
       if (copyResult.exitCode != 0) {
         debugPrint('Failed to copy app: ${copyResult.stderr}');
+        // Restore backup
+        if (Directory(appBackup).existsSync()) {
+          await _runWithTimeout('mv', [appBackup, appDest],
+              timeout: const Duration(seconds: 30));
+        }
         await _runWithTimeout('hdiutil', ['detach', mountPoint],
             timeout: const Duration(seconds: 30));
-        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
+        _errorMessage =
+            'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
 
-      // Detach the DMG
-      statusMessage = 'Cleaning up...';
+      // Copy succeeded — remove backup
+      if (Directory(appBackup).existsSync()) {
+        await _runWithTimeout('rm', ['-rf', appBackup],
+            timeout: const Duration(seconds: 30));
+      }
+
+      _statusMessage = 'Cleaning up...';
       notifyListeners();
       await _runWithTimeout('hdiutil', ['detach', mountPoint],
           timeout: const Duration(seconds: 30));
 
-      // Relaunch the app
-      statusMessage = 'Restarting app...';
+      _statusMessage = 'Restarting app...';
       notifyListeners();
       await Process.run('open', ['-n', appDest]);
       exit(0);
@@ -385,7 +504,8 @@ class UpdateService extends ChangeNotifier {
           await Process.run('hdiutil', ['detach', mountPoint]);
         } catch (_) {}
       }
-      errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
+      _errorMessage =
+          'Auto-install failed. The file has been opened — please install manually.';
       await _openDownloadedFile(filePath);
     }
   }
@@ -393,29 +513,32 @@ class UpdateService extends ChangeNotifier {
   Future<void> _installAndRestartWindows(String filePath) async {
     try {
       final appDir = File(Platform.resolvedExecutable).parent.path;
-      final tempExtractDir = '${File(filePath).parent.path}\\tunnel_pilot_update';
+      final tempExtractDir =
+          '${File(filePath).parent.path}\\tunnel_pilot_update';
 
-      // Clean up previous extract if exists
       if (Directory(tempExtractDir).existsSync()) {
         Directory(tempExtractDir).deleteSync(recursive: true);
       }
 
-      // Extract the zip using PowerShell
-      statusMessage = 'Extracting update...';
+      _statusMessage = 'Extracting update...';
       notifyListeners();
-      final extractResult = await _runWithTimeout('powershell', [
-        '-Command',
-        'Expand-Archive -Path "$filePath" -DestinationPath "$tempExtractDir" -Force',
-      ], timeout: const Duration(seconds: 120));
+      final extractResult = await _runWithTimeout(
+        'powershell',
+        [
+          '-Command',
+          'Expand-Archive -Path "$filePath" -DestinationPath "$tempExtractDir" -Force',
+        ],
+        timeout: const Duration(seconds: 120),
+      );
       if (extractResult.exitCode != 0) {
         debugPrint('Failed to extract zip: ${extractResult.stderr}');
-        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
+        _errorMessage =
+            'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
 
-      // Use a batch script to replace files and restart
-      statusMessage = 'Applying update...';
+      _statusMessage = 'Applying update...';
       notifyListeners();
       final scriptPath = '${File(filePath).parent.path}\\update.bat';
       final script = '''
@@ -427,14 +550,15 @@ del "%~f0"
 ''';
       File(scriptPath).writeAsStringSync(script);
 
-      statusMessage = 'Restarting app...';
+      _statusMessage = 'Restarting app...';
       notifyListeners();
       await Process.start('cmd', ['/c', scriptPath],
           mode: ProcessStartMode.detached);
       exit(0);
     } catch (e) {
       debugPrint('Auto-install failed (Windows): $e');
-      errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
+      _errorMessage =
+          'Auto-install failed. The file has been opened — please install manually.';
       await _openDownloadedFile(filePath);
     }
   }
@@ -442,29 +566,30 @@ del "%~f0"
   Future<void> _installAndRestartLinux(String filePath) async {
     try {
       final appDir = File(Platform.resolvedExecutable).parent.parent.path;
-      final tempExtractDir = '${File(filePath).parent.path}/tunnel_pilot_update';
+      final tempExtractDir =
+          '${File(filePath).parent.path}/tunnel_pilot_update';
 
-      // Clean up previous extract if exists
       if (Directory(tempExtractDir).existsSync()) {
         Directory(tempExtractDir).deleteSync(recursive: true);
       }
       Directory(tempExtractDir).createSync();
 
-      // Extract the tar.gz
-      statusMessage = 'Extracting update...';
+      _statusMessage = 'Extracting update...';
       notifyListeners();
-      final extractResult = await _runWithTimeout('tar', [
-        'xzf', filePath, '-C', tempExtractDir,
-      ], timeout: const Duration(seconds: 120));
+      final extractResult = await _runWithTimeout(
+        'tar',
+        ['xzf', filePath, '-C', tempExtractDir],
+        timeout: const Duration(seconds: 120),
+      );
       if (extractResult.exitCode != 0) {
         debugPrint('Failed to extract tar.gz: ${extractResult.stderr}');
-        errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
+        _errorMessage =
+            'Auto-install failed. The file has been opened — please install manually.';
         await _openDownloadedFile(filePath);
         return;
       }
 
-      // Use a shell script to replace files and restart
-      statusMessage = 'Applying update...';
+      _statusMessage = 'Applying update...';
       notifyListeners();
       final scriptPath = '${File(filePath).parent.path}/update.sh';
       final script = '''
@@ -478,14 +603,15 @@ rm -f "\$0"
       await _runWithTimeout('chmod', ['+x', scriptPath],
           timeout: const Duration(seconds: 10));
 
-      statusMessage = 'Restarting app...';
+      _statusMessage = 'Restarting app...';
       notifyListeners();
       await Process.start('bash', [scriptPath],
           mode: ProcessStartMode.detached);
       exit(0);
     } catch (e) {
       debugPrint('Auto-install failed (Linux): $e');
-      errorMessage = 'Auto-install failed. The file has been opened — please install manually.';
+      _errorMessage =
+          'Auto-install failed. The file has been opened — please install manually.';
       await _openDownloadedFile(filePath);
     }
   }
@@ -494,17 +620,15 @@ rm -f "\$0"
     if (Platform.isMacOS) {
       await Process.run('open', [filePath]);
     } else if (Platform.isWindows) {
-      // Open Explorer with the file selected
       await Process.run('explorer.exe', ['/select,', filePath]);
     } else if (Platform.isLinux) {
-      // Open the containing folder
       final dir = File(filePath).parent.path;
       await Process.run('xdg-open', [dir]);
     }
   }
 
   Future<void> openReleasePage() async {
-    final url = htmlUrl;
+    final url = _htmlUrl;
     if (url == null) return;
 
     if (Platform.isMacOS) {
@@ -527,10 +651,30 @@ rm -f "\$0"
   }
 
   void dismissUpdate() {
-    updateAvailable = false;
-    errorMessage = null;
-    statusMessage = null;
+    _updateAvailable = false;
+    _errorMessage = null;
+    _statusMessage = null;
     notifyListeners();
+  }
+
+  void clearCheckStatus() {
+    _isUpToDate = false;
+    _checkError = null;
+    notifyListeners();
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  String get downloadSizeText {
+    if (_totalBytes <= 0) return '';
+    return '${_formatBytes(_downloadedBytes)} / ${_formatBytes(_totalBytes)}';
   }
 
   @override
@@ -538,6 +682,8 @@ rm -f "\$0"
     _periodicTimer?.cancel();
     _httpClient?.close();
     _httpClient = null;
+    _downloadClient?.close();
+    _downloadClient = null;
     super.dispose();
   }
 }

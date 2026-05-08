@@ -107,11 +107,23 @@ class AppSettingsSection extends StatelessWidget {
     final theme = Theme.of(context);
     final updateService = context.watch<UpdateService>();
 
+    String subtitle = 'Current version: v${updateService.currentVersion}';
+    Color? subtitleColor;
+
+    if (updateService.isUpToDate) {
+      subtitle = 'You\'re up to date! (v${updateService.currentVersion})';
+      subtitleColor = const Color(0xFF22C55E);
+    } else if (updateService.checkError != null) {
+      subtitle = updateService.checkError!;
+      subtitleColor = theme.colorScheme.error;
+    }
+
     return _settingsRow(
       context,
       icon: Icons.refresh_rounded,
       title: 'Check for Updates',
-      subtitle: 'Current version: v${updateService.currentVersion}',
+      subtitle: subtitle,
+      subtitleColor: subtitleColor,
       trailing: updateService.isChecking
           ? SizedBox(
               width: 20,
@@ -122,7 +134,10 @@ class AppSettingsSection extends StatelessWidget {
               ),
             )
           : GestureDetector(
-              onTap: () => updateService.checkForUpdate(),
+              onTap: () {
+                updateService.clearCheckStatus();
+                updateService.checkForUpdate();
+              },
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -213,6 +228,7 @@ class AppSettingsSection extends StatelessWidget {
     required IconData icon,
     required String title,
     String? subtitle,
+    Color? subtitleColor,
     required Widget trailing,
   }) {
     final theme = Theme.of(context);
@@ -230,7 +246,13 @@ class AppSettingsSection extends StatelessWidget {
                 Text(title, style: theme.textTheme.bodyMedium),
                 if (subtitle != null) ...[
                   const SizedBox(height: 1),
-                  Text(subtitle, style: theme.textTheme.bodySmall),
+                  Text(
+                    subtitle,
+                    style: subtitleColor != null
+                        ? theme.textTheme.bodySmall
+                            ?.copyWith(color: subtitleColor)
+                        : theme.textTheme.bodySmall,
+                  ),
                 ],
               ],
             ),
