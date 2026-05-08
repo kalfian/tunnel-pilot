@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 (2026-05-09)
+
+### Improvements
+
+- **Refined Tray UI** — Removed duplicate Unicode status indicators to focus on clean, colored status icons.
+- **Better Labeling** — Improved port mapping display and bulk action labels in the tray menu for better clarity.
+
 ## 1.3.0 (2026-05-09)
 
 ### Features

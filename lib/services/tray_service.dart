@@ -151,28 +151,10 @@ class TrayService {
         final status = statuses[forward.id] ?? ForwardStatus.disconnected;
         
         // Compact port info
-        final portLabel = 'L:${forward.localPort} → R:${forward.remotePort}';
-        
-        // Add a small indicator prefix in the text for extra clarity
-        String statusPrefix = '';
-        switch (status) {
-          case ForwardStatus.connected:
-            statusPrefix = '● ';
-            break;
-          case ForwardStatus.connecting:
-          case ForwardStatus.disconnecting:
-            statusPrefix = '○ ';
-            break;
-          case ForwardStatus.error:
-            statusPrefix = '× ';
-            break;
-          case ForwardStatus.disconnected:
-            statusPrefix = '  ';
-            break;
-        }
+        final portLabel = ':${forward.localPort} → ${forward.remoteHost}:${forward.remotePort}';
 
         menuItems.add(MenuItemLabel(
-          label: '$statusPrefix${forward.name} ($portLabel)',
+          label: '${forward.name}  ($portLabel)',
           image: _statusImagePath(status),
           onClicked: (_) => onToggleForward(forward.id),
         ));
@@ -189,13 +171,13 @@ class TrayService {
 
       if (hasDisconnected && onConnectAll != null) {
         menuItems.add(MenuItemLabel(
-          label: '⚡ Connect All',
+          label: '⚡ Start All Tunnels',
           onClicked: (_) => onConnectAll!(),
         ));
       }
       if (hasConnected && onDisconnectAll != null) {
         menuItems.add(MenuItemLabel(
-          label: '🔌 Disconnect All',
+          label: '🔌 Stop All Tunnels',
           onClicked: (_) => onDisconnectAll!(),
         ));
       }
