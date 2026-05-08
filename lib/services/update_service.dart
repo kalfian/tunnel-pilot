@@ -308,10 +308,19 @@ class UpdateService extends ChangeNotifier {
 
       await for (final chunk in response.timeout(_downloadIdleTimeout)) {
         if (_cancelRequested) return;
-        sink.add(chunk);
-        received += chunk.length;
-        if (contentLength > 0 && received > contentLength) {
-          received = contentLength;
+        var bytesToWrite = chunk.length;
+        if (contentLength > 0) {
+          final remaining = contentLength - received;
+          if (remaining <= 0) {
+            break;
+          }
+          if (bytesToWrite > remaining) {
+            bytesToWrite = remaining;
+          }
+        }
+        if (bytesToWrite > 0) {
+          sink.add(chunk.sublist(0, bytesToWrite));
+          received += bytesToWrite;
         }
         _downloadedBytes = received;
         if (contentLength > 0) {
