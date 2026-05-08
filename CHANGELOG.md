@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.15 (2026-05-08)
+
+### Improvements
+
+- Version bump to test in-app update from v1.2.14 (which has the download completion fix)
+
 ## 1.2.14 (2026-05-08)
 
 ### Improvements
