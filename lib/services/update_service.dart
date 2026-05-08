@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 class UpdateService extends ChangeNotifier {
   static const String _repoOwner = 'kalfian';
   static const String _repoName = 'tunnel-pilot';
+  static const Duration _downloadIdleTimeout = Duration(seconds: 60);
 
   String _currentVersion = '';
   String? _latestVersion;
@@ -288,6 +289,11 @@ class UpdateService extends ChangeNotifier {
     try {
       final request = await _downloadClient!.getUrl(Uri.parse(_downloadUrl!));
       response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        await response.drain<void>();
+        _errorMessage = 'Download failed (HTTP ${response.statusCode}).';
+        return;
+      }
 
       final contentLength = response.contentLength;
       _totalBytes = contentLength > 0 ? contentLength : 0;
@@ -300,17 +306,32 @@ class UpdateService extends ChangeNotifier {
       int received = 0;
       int lastNotifiedPercent = -1;
 
-      await for (final chunk in response) {
+      await for (final chunk in response.timeout(_downloadIdleTimeout)) {
         if (_cancelRequested) return;
-        sink.add(chunk);
-        received += chunk.length;
+        var bytesToWrite = chunk.length;
+        if (contentLength > 0) {
+          final remaining = contentLength - received;
+          if (remaining <= 0) {
+            break;
+          }
+          if (bytesToWrite > remaining) {
+            bytesToWrite = remaining;
+          }
+        }
+        if (bytesToWrite > 0) {
+          sink.add(chunk.sublist(0, bytesToWrite));
+          received += bytesToWrite;
+        }
         _downloadedBytes = received;
         if (contentLength > 0) {
           _downloadProgress = received / contentLength;
-          final percent = (_downloadProgress * 50).floor();
+          final percent = (_downloadProgress * 100).floor();
           if (percent != lastNotifiedPercent) {
             lastNotifiedPercent = percent;
             notifyListeners();
+          }
+          if (received >= contentLength) {
+            break;
           }
         }
       }
@@ -342,7 +363,7 @@ class UpdateService extends ChangeNotifier {
       if (_cancelRequested) return;
       debugPrint('Download error: $e');
       _errorMessage = e is TimeoutException
-          ? 'Download timed out. Please try again.'
+          ? 'Download stalled due to inactivity. Please try again.'
           : 'Download failed. Please try again.';
     } finally {
       if (sink != null) {
@@ -373,6 +394,22 @@ class UpdateService extends ChangeNotifier {
         _statusMessage = null;
         notifyListeners();
       }
+    }
+  }
+
+  Future<void> installManually() async {
+    try {
+      final filePath = _downloadedFilePath;
+      if (filePath != null) {
+        await _openDownloadedFile(filePath);
+        return;
+      }
+      await openReleasePage();
+    } catch (e) {
+      debugPrint('Manual install error: $e');
+      _errorMessage =
+          'Could not open installer automatically. Please open the GitHub releases page to install manually.';
+      notifyListeners();
     }
   }
 
