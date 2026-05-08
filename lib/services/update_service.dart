@@ -9,7 +9,7 @@ import 'package:path_provider/path_provider.dart';
 class UpdateService extends ChangeNotifier {
   static const String _repoOwner = 'kalfian';
   static const String _repoName = 'tunnel-pilot';
-  static const Duration _downloadIdleTimeout = Duration(seconds: 20);
+  static const Duration _downloadIdleTimeout = Duration(seconds: 60);
 
   String _currentVersion = '';
   String? _latestVersion;
