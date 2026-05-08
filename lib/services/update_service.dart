@@ -363,7 +363,7 @@ class UpdateService extends ChangeNotifier {
       if (_cancelRequested) return;
       debugPrint('Download error: $e');
       _errorMessage = e is TimeoutException
-          ? 'Download stalled. Please try again.'
+          ? 'Download stalled due to inactivity. Please try again.'
           : 'Download failed. Please try again.';
     } finally {
       if (sink != null) {
@@ -405,7 +405,8 @@ class UpdateService extends ChangeNotifier {
         return;
       }
       await openReleasePage();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Manual install error: $e');
       _errorMessage =
           'Could not open installer automatically. Please open the GitHub releases page to install manually.';
       notifyListeners();
