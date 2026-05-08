@@ -18,6 +18,7 @@ class MockStorageService extends StorageService {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('ForwardProvider', () {
     late MockStorageService mockStorage;
     late SshTunnelService tunnelService;
@@ -144,6 +145,10 @@ void main() {
 
     test('getErrorMessage returns null for unknown id', () {
       expect(provider.getErrorMessage('unknown'), isNull);
+    });
+
+    test('getStats returns null for unknown id', () {
+      expect(provider.getStats('unknown'), isNull);
     });
 
     test('toggleForward sets error when no password or identity file', () async {

@@ -37,7 +37,17 @@ class StorageService {
       return (forwards: <ForwardConfig>[], settings: AppSettings());
     }
 
-    final json = jsonDecode(content) as Map<String, dynamic>;
+    Map<String, dynamic> json;
+    try {
+      json = jsonDecode(content) as Map<String, dynamic>;
+    } catch (e) {
+      // If config is corrupted, start fresh but preserve the old file
+      final backupFile = File('${file.path}.corrupted');
+      if (!await backupFile.exists()) {
+        await file.copy(backupFile.path);
+      }
+      return (forwards: <ForwardConfig>[], settings: AppSettings());
+    }
 
     final forwards = (json['forwards'] as List<dynamic>?)
             ?.map((e) => ForwardConfig.fromJson(e as Map<String, dynamic>))
@@ -58,7 +68,11 @@ class StorageService {
     if (await file.exists()) {
       final content = await file.readAsString();
       if (content.isNotEmpty) {
-        json = jsonDecode(content) as Map<String, dynamic>;
+        try {
+          json = jsonDecode(content) as Map<String, dynamic>;
+        } catch (_) {
+          // Ignore corrupted content, will be overwritten
+        }
       }
     }
 
@@ -73,7 +87,11 @@ class StorageService {
     if (await file.exists()) {
       final content = await file.readAsString();
       if (content.isNotEmpty) {
-        json = jsonDecode(content) as Map<String, dynamic>;
+        try {
+          json = jsonDecode(content) as Map<String, dynamic>;
+        } catch (_) {
+          // Ignore corrupted content, will be overwritten
+        }
       }
     }
 
