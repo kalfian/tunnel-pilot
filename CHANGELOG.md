@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.11 (2026-05-08)
+
+### Improvements
+
+- **Version Label in Settings** — App version now displayed at the bottom of the General settings section for easy identification
+
 ## 1.2.10 (2026-05-08)
 
 ### Improvements

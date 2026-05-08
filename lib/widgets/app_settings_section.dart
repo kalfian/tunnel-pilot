@@ -99,6 +99,16 @@ class AppSettingsSection extends StatelessWidget {
             _updateCheckRow(context),
           ],
         ),
+        const SizedBox(height: 12),
+        Center(
+          child: Text(
+            'Tunnel Pilot v${context.read<UpdateService>().currentVersion}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.outline.withValues(alpha: 0.6),
+              fontSize: 11,
+            ),
+          ),
+        ),
       ],
     );
   }
