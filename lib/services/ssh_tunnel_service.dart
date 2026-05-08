@@ -150,6 +150,15 @@ class SshTunnelService {
       await disconnect(config.id);
     }
 
+    // Release any other tunnel occupying the same local port
+    final conflicting = _connections.entries
+        .where((e) => e.value.serverSocket.port == config.localPort)
+        .map((e) => e.key)
+        .toList();
+    for (final cid in conflicting) {
+      await disconnect(cid);
+    }
+
     void safeCallback(ForwardStatus status, String? error) {
       if ((_generation[config.id] ?? 0) != gen) return;
       onStatusChanged(config.id, status, error);
@@ -158,8 +167,6 @@ class SshTunnelService {
     safeCallback(ForwardStatus.connecting, null);
 
     try {
-      // 1. Robust binding with retry to handle OS race conditions (e.g. TIME_WAIT)
-      // We bind FIRST to reserve the port before wasting time on SSH handshake
       ServerSocket? serverSocket;
       Object? bindError;
       for (var i = 0; i < 5; i++) {
@@ -173,10 +180,12 @@ class SshTunnelService {
         } catch (e) {
           bindError = e;
           final errorStr = e.toString().toLowerCase();
-          final isAddrInUse = errorStr.contains('address already in use') || 
-                             errorStr.contains('eaddrinuse') ||
-                             errorStr.contains('shared flag') ||
-                             (e is SocketException && (e.osError?.errorCode == 48 || e.osError?.errorCode == 98));
+          final isAddrInUse = errorStr.contains('address already in use') ||
+              errorStr.contains('eaddrinuse') ||
+              errorStr.contains('shared flag') ||
+              (e is SocketException &&
+                  (e.osError?.errorCode == 48 ||
+                      e.osError?.errorCode == 98));
 
           if (isAddrInUse && i < 4) {
             await Future.delayed(const Duration(milliseconds: 500));

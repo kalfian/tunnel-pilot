@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.8] - 2026-05-09
+
+### Fixed
+- **Port Conflict Resolution**: Automatically release ports occupied by other active tunnels before connecting, preventing "Address already in use (errno = 48)" errors when switching tunnels on the same port.
+
 ## [1.3.7] - 2026-05-09
 
 ### Fixed
