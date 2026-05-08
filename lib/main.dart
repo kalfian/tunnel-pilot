@@ -120,9 +120,7 @@ Future<void> main() async {
           await windowManager.focus();
           return;
         }
-        if (appSettingsProvider.showInDock) {
-          await windowManager.setSkipTaskbar(false);
-        }
+        await windowManager.setSkipTaskbar(false);
         await windowManager.show();
         await windowManager.focus();
       },
@@ -206,9 +204,7 @@ Future<void> main() async {
   Future<void> showSettings() async {
     final isVisible = await windowManager.isVisible();
     if (!isVisible) {
-      if (appSettingsProvider.showInDock) {
-        await windowManager.setSkipTaskbar(false);
-      }
+      await windowManager.setSkipTaskbar(false);
       await windowManager.show();
     }
     await windowManager.focus();
@@ -227,8 +223,7 @@ Future<void> main() async {
     singleInstance.onSecondInstance = showSettings;
   }
 
-  bool lastShowInDock = appSettingsProvider.showInDock;
-  appSettingsProvider.addListener(() async {
+  appSettingsProvider.addListener(() {
     forwardProvider.notificationsEnabled =
         appSettingsProvider.showNotifications;
     forwardProvider.autoReconnect = appSettingsProvider.autoReconnect;
@@ -236,13 +231,6 @@ Future<void> main() async {
         appSettingsProvider.autoReconnectDelaySec;
     forwardProvider.autoReconnectMaxRetries =
         appSettingsProvider.autoReconnectMaxRetries;
-
-    if (appSettingsProvider.showInDock != lastShowInDock) {
-      lastShowInDock = appSettingsProvider.showInDock;
-      if (await windowManager.isVisible()) {
-        await windowManager.setSkipTaskbar(!appSettingsProvider.showInDock);
-      }
-    }
   });
 
   runApp(
@@ -313,14 +301,10 @@ class _AppWithWindowListenerState extends State<_AppWithWindowListener>
 
   @override
   void onWindowClose() async {
-    // Never close the window — always hide it instead.
-    // The app can only be quit via "Quit" in the tray menu.
     final isPreventClose = await windowManager.isPreventClose();
     if (isPreventClose) {
       await windowManager.hide();
-      if (!widget.appSettings.showInDock) {
-        await windowManager.setSkipTaskbar(true);
-      }
+      await windowManager.setSkipTaskbar(true);
     }
   }
 

@@ -68,24 +68,6 @@ class AppSettingsSection extends StatelessWidget {
             Divider(height: 1, color: theme.dividerColor),
             _settingsRow(
               context,
-              icon: Platform.isMacOS
-                  ? Icons.dock_outlined
-                  : Icons.desktop_windows_outlined,
-              title: Platform.isMacOS
-                  ? 'Show in Dock'
-                  : 'Show in Taskbar',
-              subtitle: Platform.isMacOS
-                  ? 'Show app icon in Dock when window is open'
-                  : 'Show app icon in taskbar when window is open',
-              trailing: _customToggle(
-                value: provider.showInDock,
-                onChanged: (v) => provider.setShowInDock(v),
-                activeColor: theme.colorScheme.primary,
-              ),
-            ),
-            Divider(height: 1, color: theme.dividerColor),
-            _settingsRow(
-              context,
               icon: Icons.system_update_outlined,
               title: 'Auto Check for Updates',
               subtitle: 'Check for new versions periodically',
