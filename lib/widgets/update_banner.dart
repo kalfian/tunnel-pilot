@@ -77,18 +77,31 @@ class _UpdateBannerState extends State<UpdateBanner> {
               updateService.errorMessage!,
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.error),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 10),
             Row(
               children: [
-                if (updateService.downloadUrl != null)
+                if (updateService.hasDownloadedFile) ...[
+                  _actionButton(context,
+                      label: 'Retry Install',
+                      primary: true,
+                      isError: true,
+                      onPressed: () => updateService.proceedWithInstall()),
+                  const SizedBox(width: 8),
+                  _actionButton(context,
+                      label: 'Install Manually',
+                      isError: true,
+                      onPressed: () => updateService.installManually()),
+                ] else if (updateService.downloadUrl != null) ...[
                   _actionButton(context,
                       label: 'Retry',
                       primary: true,
                       isError: true,
                       onPressed: () => updateService.downloadAndInstall()),
-                if (updateService.downloadUrl != null)
-                  const SizedBox(width: 8),
+                ],
+                const SizedBox(width: 8),
                 _actionButton(context,
                     label: 'View Release',
                     isError: true,

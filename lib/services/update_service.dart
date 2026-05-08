@@ -59,6 +59,7 @@ class UpdateService extends ChangeNotifier {
   String? get checkError => _checkError;
   String? get statusMessage => _statusMessage;
   String get downloadDiagnostic => _downloadDiag.join('\n');
+  bool get hasDownloadedFile => _downloadedFilePath != null;
 
   @visibleForTesting
   set updateAvailable(bool v) => _updateAvailable = v;
@@ -401,20 +402,19 @@ class UpdateService extends ChangeNotifier {
       sink = null;
       response = null;
 
-      if (contentLength > 0) {
-        _logDiag('Checking file size...', notify: true);
-        try {
-          final fileSize = await partialFile.length().timeout(postTimeout);
-          _logDiag('File size: ${_formatBytes(fileSize)} (expected: ${_formatBytes(contentLength)})');
-          if (fileSize != contentLength) {
-            _errorMessage =
-                'Download corrupted (${_formatBytes(fileSize)} of ${_formatBytes(contentLength)}). Try again.';
-            _logDiag('Aborted: size mismatch');
-            return;
-          }
-        } catch (e) {
-          _logDiag('Size check failed: $e (continuing anyway)');
-        }
+      _logDiag('Checking file size...', notify: true);
+      final fileSize = partialFile.lengthSync();
+      _logDiag('File size: ${_formatBytes(fileSize)} (expected: ${contentLength > 0 ? _formatBytes(contentLength) : "unknown"})');
+      if (contentLength > 0 && fileSize != contentLength) {
+        _errorMessage =
+            'Download corrupted (${_formatBytes(fileSize)} of ${_formatBytes(contentLength)}). Try again.';
+        _logDiag('Aborted: size mismatch');
+        return;
+      }
+      if (fileSize == 0) {
+        _errorMessage = 'Downloaded file is empty. Try again.';
+        _logDiag('Aborted: empty file');
+        return;
       }
 
       partialFile = null;
@@ -497,6 +497,16 @@ class UpdateService extends ChangeNotifier {
 
     try {
       final filePath = _downloadedFilePath!;
+
+      final file = File(filePath);
+      if (!file.existsSync()) {
+        throw Exception('Downloaded file not found: $filePath');
+      }
+      final fileSize = file.lengthSync();
+      if (fileSize == 0) {
+        throw Exception('Downloaded file is empty');
+      }
+
       if (Platform.isMacOS && filePath.endsWith('.dmg')) {
         await _installDetachedMacOS(filePath);
       } else if (Platform.isWindows && filePath.endsWith('.zip')) {
@@ -511,10 +521,9 @@ class UpdateService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Install failed: $e');
-      _errorMessage =
-          'Install failed. Please try again or install manually.';
+      _errorMessage = 'Install failed: $e';
       _isInstalling = false;
-      _downloadedFilePath = null;
+      _readyToInstall = false;
       _statusMessage = null;
       notifyListeners();
     }

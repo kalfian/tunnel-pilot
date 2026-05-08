@@ -443,7 +443,7 @@ void main() {
 
       test('downloads real release from GitHub', tags: 'e2e', () async {
         service.downloadUrl =
-            'https://github.com/kalfian/tunnel-pilot/releases/download/v1.2.19/TunnelPilot-v1.2.19-macos.dmg';
+            'https://github.com/kalfian/tunnel-pilot/releases/download/v1.2.20/TunnelPilot-v1.2.20-macos.dmg';
 
         final sw = Stopwatch()..start();
         final steps = <String>[];

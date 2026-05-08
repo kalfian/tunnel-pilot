@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.20 (2026-05-08)
+
+### Fixes
+
+- **Install Error Now Shows Actual Cause** — Previously showed generic "Install failed" message. Now includes the specific exception (e.g., file not found, permission denied) so the user can diagnose the issue
+- **File Integrity Check Before Install** — Verifies downloaded file exists and is non-empty before attempting install. Uses synchronous file size check to avoid timeout issues with async I/O in release builds
+- **Retry Install Without Re-downloading** — When install fails, banner shows "Retry Install" and "Install Manually" buttons. Previously, only "Retry" (re-download) was available
+
+### Improvements
+
+- **Faster CI with Flutter SDK Cache** — Added `cache: true` to all Flutter action steps. Subsequent runs skip the ~30s SDK download
+
 ## 1.2.19 (2026-05-08)
 
 ### Improvements
