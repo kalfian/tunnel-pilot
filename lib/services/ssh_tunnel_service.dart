@@ -5,21 +5,22 @@ import 'package:dartssh2/dartssh2.dart';
 
 import '../models/forward_config.dart';
 import '../models/forward_status.dart';
+import '../models/tunnel_stats.dart';
+import 'counting_socket_wrapper.dart';
 
 class TunnelConnection {
   final SSHClient client;
   final ServerSocket serverSocket;
   final List<Socket> activeSockets = [];
+  final List<CountingSocketWrapper> _counters = [];
   final void Function(ForwardStatus status, String? error) onStatus;
   final int keepAliveMaxFailures;
   StreamSubscription<Socket>? serverSubscription;
 
-  /// Tracks consecutive forwardLocal failures to detect zombie connections
-  /// where SSH ping succeeds but forwarding is broken.
-  int consecutiveForwardFailures = 0;
+  DateTime? connectedSince;
+  Duration? lastPingLatency;
 
-  /// Tracks consecutive ping timeouts. Tolerance prevents single network
-  /// hiccups from dropping the tunnel — must exceed keepAliveMaxFailures.
+  int consecutiveForwardFailures = 0;
   int consecutivePingFailures = 0;
 
   static const maxForwardFailures = 3;
@@ -30,6 +31,21 @@ class TunnelConnection {
     required this.onStatus,
     required this.keepAliveMaxFailures,
   });
+
+  TunnelStats getStats() {
+    int totalUp = 0, totalDown = 0;
+    for (final c in _counters) {
+      totalUp += c.bytesUp;
+      totalDown += c.bytesDown;
+    }
+    return TunnelStats(
+      activeConnections: activeSockets.length,
+      totalBytesUp: totalUp,
+      totalBytesDown: totalDown,
+      lastPingLatency: lastPingLatency,
+      connectedSince: connectedSince,
+    );
+  }
 }
 
 typedef StatusCallback = void Function(
@@ -39,8 +55,8 @@ class SshTunnelService {
   final Map<String, TunnelConnection> _connections = {};
   final Map<String, int> _generation = {};
 
-  // Single global health monitor — checks ALL tunnels every 3 seconds.
-  // One Timer regardless of tunnel count. Only runs while tunnels are active.
+  void Function(String id, TunnelStats stats)? onStatsUpdate;
+
   Timer? _healthCheckTimer;
   bool _healthCheckRunning = false;
   static const _healthInterval = Duration(seconds: 3);
@@ -58,7 +74,7 @@ class SshTunnelService {
   }
 
   Future<void> _checkAll() async {
-    if (_healthCheckRunning) return; // skip if previous check still in flight
+    if (_healthCheckRunning) return;
     _healthCheckRunning = true;
 
     try {
@@ -69,7 +85,6 @@ class SshTunnelService {
         final id = entry.key;
         final conn = entry.value;
 
-        // Already cleaned up by another path
         if (!_connections.containsKey(id) || _connections[id] != conn) return;
 
         if (conn.client.isClosed) {
@@ -79,7 +94,10 @@ class SshTunnelService {
         }
 
         try {
+          final sw = Stopwatch()..start();
           await conn.client.ping().timeout(_pingTimeout);
+          sw.stop();
+          conn.lastPingLatency = sw.elapsed;
           conn.consecutivePingFailures = 0;
         } catch (_) {
           final current = _connections[id];
@@ -91,6 +109,10 @@ class SshTunnelService {
           }
         }
       }));
+
+      for (final entry in _connections.entries) {
+        onStatsUpdate?.call(entry.key, entry.value.getStats());
+      }
     } finally {
       _healthCheckRunning = false;
       _stopHealthMonitorIfIdle();
@@ -105,6 +127,7 @@ class SshTunnelService {
       s.destroy();
     }
     conn.activeSockets.clear();
+    conn._counters.clear();
     try {
       conn.serverSocket.close();
     } catch (_) {}
@@ -175,7 +198,6 @@ class SshTunnelService {
       );
       _connections[config.id] = tunnel;
 
-      // Backup: listen for SSH transport close (fires when TCP detects closure)
       void onConnectionLost(_) {
         final conn = _connections[config.id];
         if (conn == null || conn.client != client) return;
@@ -196,29 +218,24 @@ class SshTunnelService {
             final channel = await channelFuture
                 .timeout(const Duration(seconds: 10));
 
-            // Forward succeeded — reset failure counter
             tunnel.consecutiveForwardFailures = 0;
             tunnel.activeSockets.add(localSocket);
 
-            channel.stream.cast<List<int>>().listen(
-              localSocket.add,
-              onError: (_) => localSocket.destroy(),
-              onDone: () => localSocket.close(),
-            );
-            localSocket.listen(
-              channel.sink.add,
-              onError: (_) => channel.sink.close(),
-              onDone: () => channel.sink.close(),
-            );
+            final counter = CountingSocketWrapper();
+            tunnel._counters.add(counter);
+
+            counter.pipeChannelToLocal(
+                channel.stream.cast<List<int>>(), localSocket);
+            counter.pipeLocalToChannel(localSocket, channel.sink);
 
             localSocket.done.then((_) {
               tunnel.activeSockets.remove(localSocket);
+              tunnel._counters.remove(counter);
             }).catchError((_) {
               tunnel.activeSockets.remove(localSocket);
+              tunnel._counters.remove(counter);
             });
           } catch (e) {
-            // On timeout the underlying channel may still resolve — close it
-            // when it arrives to avoid leaking SSH session resources.
             if (e is TimeoutException) {
               channelFuture.then((ch) {
                 try {
@@ -228,8 +245,6 @@ class SshTunnelService {
             }
             localSocket.destroy();
 
-            // Track consecutive forward failures — if the SSH session is alive
-            // but forwarding is broken (zombie connection), trigger reconnect.
             final conn = _connections[config.id];
             if (conn != null && conn.client == client) {
               conn.consecutiveForwardFailures++;
@@ -254,9 +269,9 @@ class SshTunnelService {
         },
       );
 
+      tunnel.connectedSince = DateTime.now();
       safeCallback(ForwardStatus.connected, null);
 
-      // Start the global health monitor (single timer for all tunnels)
       _startHealthMonitor();
     } catch (e) {
       _connections.remove(config.id);
@@ -276,14 +291,22 @@ class SshTunnelService {
     await tunnel.serverSubscription?.cancel();
     tunnel.serverSubscription = null;
 
-    for (final socket in tunnel.activeSockets) {
-      socket.destroy();
-    }
-    tunnel.activeSockets.clear();
-
     try {
       await tunnel.serverSocket.close();
     } catch (_) {}
+
+    if (tunnel.activeSockets.isNotEmpty) {
+      try {
+        await Future.wait(
+          tunnel.activeSockets.map((s) => s.done),
+        ).timeout(const Duration(seconds: 2));
+      } catch (_) {}
+      for (final socket in tunnel.activeSockets) {
+        socket.destroy();
+      }
+      tunnel.activeSockets.clear();
+    }
+    tunnel._counters.clear();
 
     try {
       tunnel.client.close();
@@ -294,12 +317,12 @@ class SshTunnelService {
 
   Future<void> disconnectAll() async {
     final ids = _connections.keys.toList();
-    for (final id in ids) {
-      await disconnect(id);
-    }
+    await Future.wait(ids.map((id) => disconnect(id)));
   }
 
   bool isConnected(String id) => _connections.containsKey(id);
+
+  TunnelStats? getStats(String id) => _connections[id]?.getStats();
 
   void dispose() {
     _healthCheckTimer?.cancel();

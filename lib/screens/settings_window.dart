@@ -284,6 +284,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
                       config: config,
                       status: status,
                       errorMessage: errorMsg,
+                      stats: provider.getStats(config.id),
                       isSelected: _selectedId == config.id,
                       onTap: () => setState(() => _selectedId = config.id),
                       onDoubleTap: () => _editForward(config),

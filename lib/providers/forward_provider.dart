@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/forward_config.dart';
 import '../models/forward_status.dart';
+import '../models/tunnel_stats.dart';
 import '../services/log_service.dart';
 import '../services/notification_service.dart';
 import '../services/ssh_tunnel_service.dart';
@@ -25,8 +27,8 @@ class ForwardProvider extends ChangeNotifier {
   final Map<String, String> _errorMessages = {};
   final Map<String, int> _reconnectAttempts = {};
   final Map<String, Timer> _reconnectTimers = {};
-  // Track which tunnels the user explicitly disconnected
   final Set<String> _userDisconnected = {};
+  final Map<String, TunnelStats> _stats = {};
 
   ForwardProvider({
     required StorageService storage,
@@ -44,7 +46,16 @@ class ForwardProvider extends ChangeNotifier {
         _notificationsEnabled = notificationsEnabled,
         _autoReconnect = autoReconnect,
         _autoReconnectDelaySec = autoReconnectDelaySec,
-        _autoReconnectMaxRetries = autoReconnectMaxRetries;
+        _autoReconnectMaxRetries = autoReconnectMaxRetries {
+    _tunnel.onStatsUpdate = _onStatsUpdate;
+  }
+
+  void _onStatsUpdate(String id, TunnelStats stats) {
+    final prev = _stats[id];
+    if (prev == stats) return;
+    _stats[id] = stats;
+    notifyListeners();
+  }
 
   List<ForwardConfig> get forwards => List.unmodifiable(_forwards);
 
@@ -52,6 +63,8 @@ class ForwardProvider extends ChangeNotifier {
       _statuses[id] ?? ForwardStatus.disconnected;
 
   String? getErrorMessage(String id) => _errorMessages[id];
+
+  TunnelStats? getStats(String id) => _stats[id];
 
   set notificationsEnabled(bool value) => _notificationsEnabled = value;
 
@@ -82,6 +95,7 @@ class ForwardProvider extends ChangeNotifier {
       notifyListeners();
       await _tunnel.disconnect(config.id);
       _statuses[config.id] = ForwardStatus.disconnected;
+      _stats.remove(config.id);
       _logService.info(config.name, 'Disconnected (config updated)');
     }
 
@@ -102,6 +116,7 @@ class ForwardProvider extends ChangeNotifier {
     _statuses.remove(id);
     _errorMessages.remove(id);
     _userDisconnected.remove(id);
+    _stats.remove(id);
     await _storage.saveForwards(_forwards);
     _logService.info(config.name, 'Tunnel removed');
     notifyListeners();
@@ -121,7 +136,6 @@ class ForwardProvider extends ChangeNotifier {
   Future<void> toggleForward(String id) async {
     final status = getStatus(id);
 
-    // Ignore toggle while a connection/disconnection is in progress
     if (status == ForwardStatus.connecting ||
         status == ForwardStatus.disconnecting) {
       return;
@@ -135,14 +149,27 @@ class ForwardProvider extends ChangeNotifier {
       _userDisconnected.remove(id);
       _cancelReconnect(id);
       _reconnectAttempts.remove(id);
-      // Force to disconnected first to clear any stale error/connecting state
       await _tunnel.disconnect(id);
       _statuses[id] = ForwardStatus.disconnected;
       _errorMessages.remove(id);
+      _stats.remove(id);
       notifyListeners();
-      // Small delay to let OS release the local port (TIME_WAIT)
-      await Future.delayed(const Duration(milliseconds: 500));
+      final config = _forwards.firstWhere((f) => f.id == id);
+      await _waitForPortAvailable(config.localBindAddress, config.localPort);
       await _connectForward(id);
+    }
+  }
+
+  Future<void> _waitForPortAvailable(String address, int port,
+      {int maxAttempts = 10}) async {
+    for (var i = 0; i < maxAttempts; i++) {
+      try {
+        final socket = await ServerSocket.bind(address, port, shared: true);
+        await socket.close();
+        return;
+      } catch (_) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
     }
   }
 
@@ -173,18 +200,21 @@ class ForwardProvider extends ChangeNotifier {
         switch (status) {
           case ForwardStatus.connected:
             _reconnectAttempts.remove(id);
+            _stats[id] = _tunnel.getStats(id) ?? const TunnelStats();
             _logService.info(config.name,
                 'Connected (:${config.localPort} -> ${config.remoteHost}:${config.remotePort})');
             if (_notificationsEnabled) {
               _notification.showConnected(config.name);
             }
           case ForwardStatus.disconnected:
+            _stats.remove(id);
             _logService.info(config.name, 'Disconnected');
             if (_notificationsEnabled) {
               _notification.showDisconnected(config.name);
             }
             _tryAutoReconnect(id);
           case ForwardStatus.error:
+            _stats.remove(id);
             _logService.error(config.name, errorMessage ?? 'Unknown error');
             if (_notificationsEnabled) {
               _notification.showError(config.name, errorMessage ?? 'Unknown');
@@ -211,13 +241,16 @@ class ForwardProvider extends ChangeNotifier {
     }
 
     _reconnectAttempts[id] = attempts + 1;
+
+    final delay = (_autoReconnectDelaySec * (1 << attempts)).clamp(1, 60);
+
     final config = _forwards.firstWhere((f) => f.id == id);
     _logService.info(config.name,
-        'Auto-reconnecting in ${_autoReconnectDelaySec}s (attempt ${attempts + 1}/$_autoReconnectMaxRetries)...');
+        'Auto-reconnecting in ${delay}s (attempt ${attempts + 1}/$_autoReconnectMaxRetries)...');
 
     _reconnectTimers[id]?.cancel();
     _reconnectTimers[id] = Timer(
-      Duration(seconds: _autoReconnectDelaySec),
+      Duration(seconds: delay),
       () {
         _reconnectTimers.remove(id);
         if (_forwards.any((f) => f.id == id) &&
@@ -242,6 +275,7 @@ class ForwardProvider extends ChangeNotifier {
 
     await _tunnel.disconnect(id);
     _statuses[id] = ForwardStatus.disconnected;
+    _stats.remove(id);
     _logService.info(config.name, 'Disconnected');
     notifyListeners();
 
@@ -251,21 +285,27 @@ class ForwardProvider extends ChangeNotifier {
   }
 
   Future<void> connectAll() async {
-    for (final f in _forwards) {
+    final toConnect = _forwards.where((f) {
       final status = getStatus(f.id);
-      if (status == ForwardStatus.disconnected ||
-          status == ForwardStatus.error) {
-        _userDisconnected.remove(f.id);
-        _cancelReconnect(f.id);
-        _reconnectAttempts.remove(f.id);
-        await _tunnel.disconnect(f.id);
-        _statuses[f.id] = ForwardStatus.disconnected;
-        _errorMessages.remove(f.id);
-        notifyListeners();
-        await Future.delayed(const Duration(milliseconds: 300));
-        await _connectForward(f.id);
-      }
+      return status == ForwardStatus.disconnected ||
+          status == ForwardStatus.error;
+    }).toList();
+
+    for (final f in toConnect) {
+      _userDisconnected.remove(f.id);
+      _cancelReconnect(f.id);
+      _reconnectAttempts.remove(f.id);
+      _statuses[f.id] = ForwardStatus.disconnected;
+      _errorMessages.remove(f.id);
+      _stats.remove(f.id);
     }
+    notifyListeners();
+
+    await Future.wait(toConnect.map((f) async {
+      await _tunnel.disconnect(f.id);
+      await _waitForPortAvailable(f.localBindAddress, f.localPort);
+      await _connectForward(f.id);
+    }));
   }
 
   Future<void> disconnectAll() async {
@@ -283,11 +323,10 @@ class ForwardProvider extends ChangeNotifier {
     await _tunnel.disconnectAll();
     _statuses.clear();
     _errorMessages.clear();
+    _stats.clear();
     notifyListeners();
   }
 
-  /// Checks all tunnels that appear "connected" and reconnects any that are
-  /// actually dead (e.g. after system wake from sleep).
   Future<void> checkAndReconnectAll() async {
     final connectedIds = _forwards
         .where((f) => _statuses[f.id] == ForwardStatus.connected)
@@ -298,25 +337,28 @@ class ForwardProvider extends ChangeNotifier {
 
     _logService.info('System', 'Checking ${connectedIds.length} tunnel(s) after wake...');
 
-    for (final id in connectedIds) {
+    final results = await Future.wait(connectedIds.map((id) async {
       final alive = await _tunnel.isAlive(id);
-      if (!alive) {
-        final config = _forwards.firstWhere((f) => f.id == id);
-        _logService.warning(config.name, 'Connection lost after sleep, reconnecting...');
-        // Disconnect the dead tunnel cleanly
-        _statuses[id] = ForwardStatus.disconnecting;
-        notifyListeners();
-        await _tunnel.disconnect(id);
-        _statuses[id] = ForwardStatus.disconnected;
-        _errorMessages.remove(id);
-        notifyListeners();
-        // Small delay to let OS release the local port
-        await Future.delayed(const Duration(milliseconds: 500));
-        // Reconnect (not user-disconnected, so auto-reconnect is allowed)
-        _reconnectAttempts.remove(id);
-        await _connectForward(id);
-      }
-    }
+      return (id: id, alive: alive);
+    }));
+
+    final dead = results.where((r) => !r.alive).map((r) => r.id).toList();
+    if (dead.isEmpty) return;
+
+    await Future.wait(dead.map((id) async {
+      final config = _forwards.firstWhere((f) => f.id == id);
+      _logService.warning(config.name, 'Connection lost after sleep, reconnecting...');
+      _statuses[id] = ForwardStatus.disconnecting;
+      notifyListeners();
+      await _tunnel.disconnect(id);
+      _statuses[id] = ForwardStatus.disconnected;
+      _errorMessages.remove(id);
+      _stats.remove(id);
+      notifyListeners();
+      await _waitForPortAvailable(config.localBindAddress, config.localPort);
+      _reconnectAttempts.remove(id);
+      await _connectForward(id);
+    }));
   }
 
   Future<void> exportBackup(String path) async {

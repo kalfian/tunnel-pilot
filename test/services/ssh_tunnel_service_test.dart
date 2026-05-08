@@ -19,6 +19,10 @@ void main() {
       expect(service.isConnected('unknown'), isFalse);
     });
 
+    test('getStats returns null for unknown id', () {
+      expect(service.getStats('unknown'), isNull);
+    });
+
     test('isAlive returns false for unknown id', () async {
       final alive = await service.isAlive('unknown');
       expect(alive, isFalse);

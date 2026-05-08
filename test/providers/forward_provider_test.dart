@@ -146,6 +146,10 @@ void main() {
       expect(provider.getErrorMessage('unknown'), isNull);
     });
 
+    test('getStats returns null for unknown id', () {
+      expect(provider.getStats('unknown'), isNull);
+    });
+
     test('toggleForward sets error when no password or identity file', () async {
       final config = ForwardConfig(
         id: 'no-auth',

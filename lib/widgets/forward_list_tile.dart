@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../models/forward_config.dart';
 import '../models/forward_status.dart';
+import '../models/tunnel_stats.dart';
 
 class ForwardListTile extends StatefulWidget {
   final ForwardConfig config;
@@ -17,6 +18,7 @@ class ForwardListTile extends StatefulWidget {
   final VoidCallback onDelete;
   final bool isFirst;
   final bool isLast;
+  final TunnelStats? stats;
 
   const ForwardListTile({
     super.key,
@@ -32,6 +34,7 @@ class ForwardListTile extends StatefulWidget {
     required this.onDelete,
     this.isFirst = false,
     this.isLast = false,
+    this.stats,
   });
 
   @override
@@ -134,6 +137,67 @@ class _ForwardListTileState extends State<ForwardListTile> {
     }
   }
 
+  Widget _buildStatusDot(Color color, bool isActive) {
+    final dot = AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: isActive
+            ? [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 6)]
+            : null,
+      ),
+    );
+
+    final latency = widget.stats?.lastPingLatency;
+    if (widget.status == ForwardStatus.connected && latency != null) {
+      return Tooltip(
+        message: 'Ping: ${latency.inMilliseconds}ms',
+        child: dot,
+      );
+    }
+    return dot;
+  }
+
+  Widget _statChip(IconData icon, String label, ThemeData theme) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 10, color: theme.colorScheme.outline),
+        const SizedBox(width: 3),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontFamily: 'JetBrains Mono, SF Mono, Menlo, monospace',
+            color: theme.colorScheme.outline,
+          ),
+        ),
+      ],
+    );
+  }
+
+  static String _formatUptime(Duration d) {
+    if (d.inHours > 0) {
+      return '${d.inHours}h ${d.inMinutes.remainder(60)}m';
+    }
+    if (d.inMinutes > 0) {
+      return '${d.inMinutes}m ${d.inSeconds.remainder(60)}s';
+    }
+    return '${d.inSeconds}s';
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '${bytes}B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)}GB';
+  }
+
   Future<void> _copySshCommand(BuildContext context) async {
     final command = widget.config.toSshCommand();
     await Clipboard.setData(ClipboardData(text: command));
@@ -203,22 +267,7 @@ class _ForwardListTileState extends State<ForwardListTile> {
                 ),
               )
             else
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                  boxShadow: isActive
-                      ? [
-                          BoxShadow(
-                              color: color.withValues(alpha: 0.5),
-                              blurRadius: 6)
-                        ]
-                      : null,
-                ),
-              ),
+              _buildStatusDot(color, isActive),
             const SizedBox(width: 12),
 
             // Info
@@ -263,6 +312,31 @@ class _ForwardListTileState extends State<ForwardListTile> {
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  if (widget.status == ForwardStatus.connected &&
+                      widget.stats != null) ...[
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        _statChip(
+                          Icons.link_rounded,
+                          '${widget.stats!.activeConnections}',
+                          theme,
+                        ),
+                        const SizedBox(width: 8),
+                        _statChip(
+                          Icons.timer_outlined,
+                          _formatUptime(widget.stats!.uptime),
+                          theme,
+                        ),
+                        const SizedBox(width: 8),
+                        _statChip(
+                          Icons.swap_vert_rounded,
+                          '↑${_formatBytes(widget.stats!.totalBytesUp)} ↓${_formatBytes(widget.stats!.totalBytesDown)}',
+                          theme,
+                        ),
+                      ],
                     ),
                   ],
                 ],
