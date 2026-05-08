@@ -230,8 +230,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
   }
 
   Widget _buildConnectionsTab(BuildContext context) {
-    final provider = context.watch<ForwardProvider>();
-    final forwards = provider.forwards;
+    final forwards = context.select<ForwardProvider, List<ForwardConfig>>((p) => p.forwards);
     final theme = Theme.of(context);
 
     return Column(
@@ -277,21 +276,15 @@ class _SettingsWindowState extends State<SettingsWindow> {
                   itemCount: forwards.length,
                   itemBuilder: (context, index) {
                     final config = forwards[index];
-                    final status = provider.getStatus(config.id);
-                    final errorMsg = provider.getErrorMessage(config.id);
-
                     return ForwardListTile(
                       config: config,
-                      status: status,
-                      errorMessage: errorMsg,
-                      stats: provider.getStats(config.id),
                       isSelected: _selectedId == config.id,
                       onTap: () => setState(() => _selectedId = config.id),
                       onDoubleTap: () => _editForward(config),
-                      onToggle: () => provider.toggleForward(config.id),
+                      onToggle: () => context.read<ForwardProvider>().toggleForward(config.id),
                       onEdit: () => _editForward(config),
                       onDuplicate: () async {
-                        await provider.duplicateForward(config.id);
+                        await context.read<ForwardProvider>().duplicateForward(config.id);
                       },
                       onDelete: () async {
                         setState(() => _selectedId = config.id);

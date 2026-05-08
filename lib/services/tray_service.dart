@@ -46,7 +46,7 @@ class TrayService {
     final ext = Platform.isWindows ? 'ico' : 'png';
     final name = connectedCount <= 0
         ? 'tray_icon_idle'
-        : 'tray_icon_${connectedCount.clamp(1, 9)}';
+        : 'tray_icon_$connectedCount';
     return _assetPath('$name.$ext');
   }
 
@@ -109,21 +109,16 @@ class TrayService {
 
     final List<MenuItemBase> menuItems = [];
 
-    // ── Header ──
-    menuItems.add(MenuItemLabel(
-      label: 'Tunnel Pilot',
-      enabled: false,
-    ));
-
+    // ── Header & Status ──
+    String headerLabel = 'Tunnel Pilot';
     if (connectedCount > 0) {
-      menuItems.add(MenuItemLabel(
-        label: '$connectedCount tunnel${connectedCount > 1 ? 's' : ''} active',
-        enabled: false,
-      ));
+      headerLabel += ' • $connectedCount Active';
     }
+    menuItems.add(MenuItemLabel(label: headerLabel, enabled: false));
+
     if (connectingCount > 0) {
       menuItems.add(MenuItemLabel(
-        label: '$connectingCount tunnel${connectingCount > 1 ? 's' : ''} connecting...',
+        label: '  ◌ $connectingCount connecting...',
         enabled: false,
       ));
     }
@@ -133,7 +128,7 @@ class TrayService {
     // ── Update notice ──
     if (updateAvailable && latestVersion != null) {
       menuItems.add(MenuItemLabel(
-        label: 'Update available (v$latestVersion)',
+        label: '✨ Update Available (v$latestVersion)',
         onClicked: (_) {
           if (onUpdateClicked != null) {
             onUpdateClicked!();
@@ -154,9 +149,30 @@ class TrayService {
     } else {
       for (final forward in forwards) {
         final status = statuses[forward.id] ?? ForwardStatus.disconnected;
-        final portInfo = ':${forward.localPort} → :${forward.remotePort}';
+        
+        // Compact port info
+        final portLabel = 'L:${forward.localPort} → R:${forward.remotePort}';
+        
+        // Add a small indicator prefix in the text for extra clarity
+        String statusPrefix = '';
+        switch (status) {
+          case ForwardStatus.connected:
+            statusPrefix = '● ';
+            break;
+          case ForwardStatus.connecting:
+          case ForwardStatus.disconnecting:
+            statusPrefix = '○ ';
+            break;
+          case ForwardStatus.error:
+            statusPrefix = '× ';
+            break;
+          case ForwardStatus.disconnected:
+            statusPrefix = '  ';
+            break;
+        }
+
         menuItems.add(MenuItemLabel(
-          label: '${forward.name}  ($portInfo)',
+          label: '$statusPrefix${forward.name} ($portLabel)',
           image: _statusImagePath(status),
           onClicked: (_) => onToggleForward(forward.id),
         ));
@@ -164,23 +180,22 @@ class TrayService {
 
       menuItems.add(MenuSeparator());
 
-      // ── Connect All / Disconnect All ──
+      // ── Bulk Actions ──
       final hasDisconnected = statuses.values.any((s) =>
           s == ForwardStatus.disconnected || s == ForwardStatus.error);
       final hasConnected = statuses.values.any((s) =>
           s == ForwardStatus.connected ||
-          s == ForwardStatus.connecting ||
-          s == ForwardStatus.disconnecting);
+          s == ForwardStatus.connecting);
 
       if (hasDisconnected && onConnectAll != null) {
         menuItems.add(MenuItemLabel(
-          label: 'Connect All',
+          label: '⚡ Connect All',
           onClicked: (_) => onConnectAll!(),
         ));
       }
       if (hasConnected && onDisconnectAll != null) {
         menuItems.add(MenuItemLabel(
-          label: 'Disconnect All',
+          label: '🔌 Disconnect All',
           onClicked: (_) => onDisconnectAll!(),
         ));
       }
@@ -188,14 +203,14 @@ class TrayService {
 
     menuItems.add(MenuSeparator());
 
-    // ── Footer ──
+    // ── Controls ──
     menuItems.add(MenuItemLabel(
-      label: 'Settings...',
+      label: '⚙️ Settings...',
       onClicked: (_) => onSettingsClicked(),
     ));
 
     menuItems.add(MenuItemLabel(
-      label: 'Quit',
+      label: '🚪 Quit',
       onClicked: (_) => onQuitClicked(),
     ));
 

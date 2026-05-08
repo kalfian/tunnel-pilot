@@ -7,7 +7,7 @@ import '../services/storage_service.dart';
 class AppSettingsProvider extends ChangeNotifier {
   final StorageService _storage;
   final StartupService _startup;
-  AppSettings _settings;
+  final AppSettings _settings;
 
   AppSettingsProvider({
     required StorageService storage,

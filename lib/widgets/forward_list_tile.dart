@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import '../models/forward_config.dart';
 import '../models/forward_status.dart';
 import '../models/tunnel_stats.dart';
+import '../providers/forward_provider.dart';
 
 class ForwardListTile extends StatefulWidget {
   final ForwardConfig config;
-  final ForwardStatus status;
-  final String? errorMessage;
   final VoidCallback onToggle;
   final VoidCallback onDoubleTap;
   final bool isSelected;
@@ -18,13 +18,10 @@ class ForwardListTile extends StatefulWidget {
   final VoidCallback onDelete;
   final bool isFirst;
   final bool isLast;
-  final TunnelStats? stats;
 
   const ForwardListTile({
     super.key,
     required this.config,
-    required this.status,
-    this.errorMessage,
     required this.onToggle,
     required this.onDoubleTap,
     required this.isSelected,
@@ -34,7 +31,6 @@ class ForwardListTile extends StatefulWidget {
     required this.onDelete,
     this.isFirst = false,
     this.isLast = false,
-    this.stats,
   });
 
   @override
@@ -42,8 +38,8 @@ class ForwardListTile extends StatefulWidget {
 }
 
 class _ForwardListTileState extends State<ForwardListTile> {
-  Color _statusColor() {
-    switch (widget.status) {
+  Color _statusColor(ForwardStatus status) {
+    switch (status) {
       case ForwardStatus.connected:
         return const Color(0xFF22C55E);
       case ForwardStatus.connecting:
@@ -137,7 +133,7 @@ class _ForwardListTileState extends State<ForwardListTile> {
     }
   }
 
-  Widget _buildStatusDot(Color color, bool isActive) {
+  Widget _buildStatusDot(Color color, bool isActive, ForwardStatus status, TunnelStats? stats) {
     final dot = AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       width: 7,
@@ -151,8 +147,8 @@ class _ForwardListTileState extends State<ForwardListTile> {
       ),
     );
 
-    final latency = widget.stats?.lastPingLatency;
-    if (widget.status == ForwardStatus.connected && latency != null) {
+    final latency = stats?.lastPingLatency;
+    if (status == ForwardStatus.connected && latency != null) {
       return Tooltip(
         message: 'Ping: ${latency.inMilliseconds}ms',
         child: dot,
@@ -215,14 +211,19 @@ class _ForwardListTileState extends State<ForwardListTile> {
 
   @override
   Widget build(BuildContext context) {
+    final status = context.select<ForwardProvider, ForwardStatus>(
+        (p) => p.getStatus(widget.config.id));
+    final errorMessage = context.select<ForwardProvider, String?>(
+        (p) => p.getErrorMessage(widget.config.id));
+
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final hasError =
-        widget.status == ForwardStatus.error && widget.errorMessage != null;
-    final isTransitioning = widget.status == ForwardStatus.connecting ||
-        widget.status == ForwardStatus.disconnecting;
-    final isActive = widget.status == ForwardStatus.connected || isTransitioning;
-    final color = _statusColor();
+        status == ForwardStatus.error && errorMessage != null;
+    final isTransitioning = status == ForwardStatus.connecting ||
+        status == ForwardStatus.disconnecting;
+    final isActive = status == ForwardStatus.connected || isTransitioning;
+    final color = _statusColor(status);
     final borderColor = theme.dividerColor;
 
     final radius = BorderRadius.vertical(
@@ -267,7 +268,12 @@ class _ForwardListTileState extends State<ForwardListTile> {
                 ),
               )
             else
-              _buildStatusDot(color, isActive),
+              Selector<ForwardProvider, TunnelStats?>(
+                selector: (_, p) => p.getStats(widget.config.id),
+                builder: (context, stats, _) {
+                  return _buildStatusDot(color, isActive, status, stats);
+                },
+              ),
             const SizedBox(width: 12),
 
             // Info
@@ -305,7 +311,7 @@ class _ForwardListTileState extends State<ForwardListTile> {
                   if (hasError) ...[
                     const SizedBox(height: 2),
                     Text(
-                      widget.errorMessage!,
+                      errorMessage,
                       style: const TextStyle(
                         fontSize: 11,
                         color: Color(0xFFEF4444),
@@ -314,31 +320,37 @@ class _ForwardListTileState extends State<ForwardListTile> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
-                  if (widget.status == ForwardStatus.connected &&
-                      widget.stats != null) ...[
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        _statChip(
-                          Icons.link_rounded,
-                          '${widget.stats!.activeConnections}',
-                          theme,
-                        ),
-                        const SizedBox(width: 8),
-                        _statChip(
-                          Icons.timer_outlined,
-                          _formatUptime(widget.stats!.uptime),
-                          theme,
-                        ),
-                        const SizedBox(width: 8),
-                        _statChip(
-                          Icons.swap_vert_rounded,
-                          '↑${_formatBytes(widget.stats!.totalBytesUp)} ↓${_formatBytes(widget.stats!.totalBytesDown)}',
-                          theme,
-                        ),
-                      ],
+                  if (status == ForwardStatus.connected)
+                    Selector<ForwardProvider, TunnelStats?>(
+                      selector: (_, p) => p.getStats(widget.config.id),
+                      builder: (context, stats, _) {
+                        if (stats == null) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Row(
+                            children: [
+                              _statChip(
+                                Icons.link_rounded,
+                                '${stats.activeConnections}',
+                                theme,
+                              ),
+                              const SizedBox(width: 8),
+                              _statChip(
+                                Icons.timer_outlined,
+                                _formatUptime(stats.uptime),
+                                theme,
+                              ),
+                              const SizedBox(width: 8),
+                              _statChip(
+                                Icons.swap_vert_rounded,
+                                '↑${_formatBytes(stats.totalBytesUp)} ↓${_formatBytes(stats.totalBytesDown)}',
+                                theme,
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                  ],
                 ],
               ),
             ),
