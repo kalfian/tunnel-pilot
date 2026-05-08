@@ -208,6 +208,19 @@ void main() {
       expect(provider.getStatus('id-1'), isNotNull);
     });
 
+    test('toggleForward sets status to connecting immediately', () async {
+      final config = createConfig(id: 'sync-test');
+      await provider.addForward(config);
+
+      // Trigger toggle but don't await yet
+      final future = provider.toggleForward('sync-test');
+
+      // Status should be connecting IMMEDIATELY without awaiting
+      expect(provider.getStatus('sync-test'), ForwardStatus.connecting);
+
+      await future;
+    });
+
     test('disconnectAll clears all statuses', () async {
       await provider.addForward(createConfig(id: 'id-1'));
       await provider.addForward(createConfig(id: 'id-2'));

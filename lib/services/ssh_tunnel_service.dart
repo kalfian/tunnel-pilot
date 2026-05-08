@@ -119,17 +119,20 @@ class SshTunnelService {
     }
   }
 
-  void _cleanupTunnel(String id, TunnelConnection conn) {
+  Future<void> _cleanupTunnel(String id, TunnelConnection conn) async {
     _connections.remove(id);
-    conn.serverSubscription?.cancel();
+    await conn.serverSubscription?.cancel();
     conn.serverSubscription = null;
     for (final s in conn.activeSockets) {
       s.destroy();
     }
     conn.activeSockets.clear();
+    for (final c in conn._counters) {
+      c.dispose();
+    }
     conn._counters.clear();
     try {
-      conn.serverSocket.close();
+      await conn.serverSocket.close();
     } catch (_) {}
     try {
       conn.client.close();
@@ -155,6 +158,39 @@ class SshTunnelService {
     safeCallback(ForwardStatus.connecting, null);
 
     try {
+      // 1. Robust binding with retry to handle OS race conditions (e.g. TIME_WAIT)
+      // We bind FIRST to reserve the port before wasting time on SSH handshake
+      ServerSocket? serverSocket;
+      Object? bindError;
+      for (var i = 0; i < 5; i++) {
+        try {
+          serverSocket = await ServerSocket.bind(
+            config.localBindAddress,
+            config.localPort,
+            shared: true,
+          );
+          break;
+        } catch (e) {
+          bindError = e;
+          final errorStr = e.toString().toLowerCase();
+          final isAddrInUse = errorStr.contains('address already in use') || 
+                             errorStr.contains('eaddrinuse') ||
+                             errorStr.contains('shared flag') ||
+                             (e is SocketException && (e.osError?.errorCode == 48 || e.osError?.errorCode == 98));
+
+          if (isAddrInUse && i < 4) {
+            await Future.delayed(const Duration(milliseconds: 500));
+            continue;
+          }
+          rethrow;
+        }
+      }
+
+      if (serverSocket == null) {
+        throw bindError ?? Exception('Failed to bind to local port');
+      }
+
+      // 2. Start SSH connection
       final socket = await SSHSocket.connect(config.sshHost, config.sshPort)
           .timeout(const Duration(seconds: 15));
 
@@ -183,12 +219,6 @@ class SshTunnelService {
         );
       }
 
-      final serverSocket = await ServerSocket.bind(
-        config.localBindAddress,
-        config.localPort,
-        shared: true,
-      );
-
       final tunnel = TunnelConnection(
         client: client,
         serverSocket: serverSocket,
@@ -198,10 +228,10 @@ class SshTunnelService {
       );
       _connections[config.id] = tunnel;
 
-      void onConnectionLost(_) {
+      void onConnectionLost(_) async {
         final conn = _connections[config.id];
         if (conn == null || conn.client != client) return;
-        _cleanupTunnel(config.id, conn);
+        await _cleanupTunnel(config.id, conn);
         safeCallback(ForwardStatus.error, 'SSH connection lost');
         _stopHealthMonitorIfIdle();
       }
@@ -252,7 +282,7 @@ class SshTunnelService {
               conn.consecutiveForwardFailures++;
               if (conn.consecutiveForwardFailures >=
                   TunnelConnection.maxForwardFailures) {
-                _cleanupTunnel(config.id, conn);
+                await _cleanupTunnel(config.id, conn);
                 safeCallback(ForwardStatus.error,
                     'Port forwarding failed ($e)');
                 _stopHealthMonitorIfIdle();
@@ -260,11 +290,17 @@ class SshTunnelService {
             }
           }
         },
-        onError: (error) {
+        onError: (error) async {
+          final conn = _connections[config.id];
+          if (conn != null && conn.client == client) {
+             await _cleanupTunnel(config.id, conn);
+          }
           safeCallback(ForwardStatus.error, error.toString());
         },
-        onDone: () {
-          if (_connections.containsKey(config.id)) {
+        onDone: () async {
+          final conn = _connections[config.id];
+          if (conn != null && conn.client == client) {
+            await _cleanupTunnel(config.id, conn);
             safeCallback(ForwardStatus.disconnected, null);
             _stopHealthMonitorIfIdle();
           }
@@ -276,6 +312,10 @@ class SshTunnelService {
 
       _startHealthMonitor();
     } catch (e) {
+      final conn = _connections[config.id];
+      if (conn != null) {
+        await _cleanupTunnel(config.id, conn);
+      }
       _connections.remove(config.id);
       safeCallback(ForwardStatus.error, e.toString());
     }
@@ -284,36 +324,13 @@ class SshTunnelService {
   Future<void> disconnect(String id) async {
     _generation[id] = (_generation[id] ?? 0) + 1;
 
-    final tunnel = _connections.remove(id);
+    final tunnel = _connections[id];
     if (tunnel == null) {
       _generation.remove(id);
       return;
     }
 
-    await tunnel.serverSubscription?.cancel();
-    tunnel.serverSubscription = null;
-
-    try {
-      await tunnel.serverSocket.close();
-    } catch (_) {}
-
-    if (tunnel.activeSockets.isNotEmpty) {
-      try {
-        await Future.wait(
-          tunnel.activeSockets.map((s) => s.done),
-        ).timeout(const Duration(seconds: 2));
-      } catch (_) {}
-      for (final socket in tunnel.activeSockets) {
-        socket.destroy();
-      }
-      tunnel.activeSockets.clear();
-    }
-    tunnel._counters.clear();
-
-    try {
-      tunnel.client.close();
-    } catch (_) {}
-
+    await _cleanupTunnel(id, tunnel);
     _stopHealthMonitorIfIdle();
   }
 

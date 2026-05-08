@@ -156,26 +156,39 @@ class ForwardProvider extends ChangeNotifier {
       _userDisconnected.remove(id);
       _cancelReconnect(id);
       _reconnectAttempts.remove(id);
-      await _tunnel.disconnect(id);
-      _statuses[id] = ForwardStatus.disconnected;
+
+      // 1. Immediate UI update to 'connecting' (Yellow)
+      _statuses[id] = ForwardStatus.connecting;
       _errorMessages.remove(id);
       _stats.remove(id);
       notifyListeners();
+
+      // 2. Ensure any previous connection is fully purged
+      await _tunnel.disconnect(id);
+      
       final config = _forwards.firstWhere((f) => f.id == id);
+      
+      // 3. Release and wait for port
       await _waitForPortAvailable(config.localBindAddress, config.localPort);
+      
+      // 4. Start actual SSH connection
       await _connectForward(id);
     }
   }
 
   Future<void> _waitForPortAvailable(String address, int port,
-      {int maxAttempts = 10}) async {
+      {int maxAttempts = 15}) async {
     for (var i = 0; i < maxAttempts; i++) {
       try {
-        final socket = await ServerSocket.bind(address, port, shared: true);
+        // Try to bind with shared: false to ensure we can actually own it exclusively if needed,
+        // then immediately release it.
+        final socket = await ServerSocket.bind(address, port, shared: false);
         await socket.close();
+        // Give the OS a tiny bit of time to actually put it in TIME_WAIT or release it
+        await Future.delayed(const Duration(milliseconds: 50));
         return;
       } catch (_) {
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 200));
       }
     }
   }
@@ -302,7 +315,7 @@ class ForwardProvider extends ChangeNotifier {
       _userDisconnected.remove(f.id);
       _cancelReconnect(f.id);
       _reconnectAttempts.remove(f.id);
-      _statuses[f.id] = ForwardStatus.disconnected;
+      _statuses[f.id] = ForwardStatus.connecting; // Set to connecting immediately
       _errorMessages.remove(f.id);
       _stats.remove(f.id);
     }

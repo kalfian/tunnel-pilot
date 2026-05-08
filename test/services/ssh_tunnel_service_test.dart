@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tunnel_pilot/models/forward_config.dart';
 import 'package:tunnel_pilot/models/forward_status.dart';
@@ -162,6 +163,32 @@ void main() {
         // Should still report connecting then error (invalid host)
         expect(statuses.first, ForwardStatus.connecting);
         expect(statuses.last, ForwardStatus.error);
+      });
+
+      test('retries when address is already in use', () async {
+        final statuses = <ForwardStatus>[];
+        // Bind the port ourselves to simulate address in use
+        final socket = await ServerSocket.bind('127.0.0.1', 4567, shared: false);
+
+        try {
+          // Attempt to connect to a tunnel using the same port
+          // This will fail because we've already bound the port
+          // But it should take longer because of the retry mechanism (5 attempts x 500ms)
+          final sw = Stopwatch()..start();
+          await service.connect(
+            createConfig(localPort: 4567),
+            onStatusChanged: (id, status, error) {
+              statuses.add(status);
+            },
+          );
+          sw.stop();
+
+          // Retries: 5 attempts x 500ms delay = ~2000ms minimum elapsed time
+          expect(sw.elapsedMilliseconds, greaterThanOrEqualTo(2000));
+          expect(statuses.last, ForwardStatus.error);
+        } finally {
+          await socket.close();
+        }
       });
     });
   });

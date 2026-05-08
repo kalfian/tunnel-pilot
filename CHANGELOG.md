@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.7] - 2026-05-09
+
+### Fixed
+- **Port Management**: Eliminated "Address already in use" errors by implementing a mandatory port-release wait and a robust retry mechanism (5x) for local socket binding.
+- **UI Real-time Sync**: Fixed visual lag where the 'connecting' status (yellow) was not shown immediately in the tray and settings page; UI now provides zero-latency feedback.
+
+### Improved
+- **Connection Logic**: Swapped connection order to reserve the local port before initiating SSH handshakes, ensuring faster detection of local port conflicts.
+
 ## [1.3.6] - 2026-05-09
 
 ### Fixed
