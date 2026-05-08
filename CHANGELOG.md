@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.10 (2026-05-08)
+
+### Improvements
+
+- **Encapsulated Update State** — All UpdateService fields are now private with controlled access, preventing accidental external mutation
+- **Rate Limit Handling** — Update checks now detect GitHub API rate limits (403/429) and show the reset time instead of a generic error
+- **Safe macOS Install** — Replaced destructive `rm -rf` with backup-first strategy: move old app to `.bak`, copy new, remove backup — restores automatically if copy fails
+- **Real Download Cancel** — Dedicated HttpClient per download enables actual connection termination instead of just ignoring the response
+- **Download Size Progress** — Banner now shows byte progress (e.g. "45% · 12.5 MB / 45.2 MB") instead of just a percentage
+- **File Integrity Check** — Downloaded file size is verified against Content-Length header before install
+- **Check Feedback in Settings** — "Check for Updates" row now shows green "You're up to date!" or red error text with details
+- **Collapsible Release Notes** — Update banner includes expandable release notes section
+
 ## 1.2.9 (2026-04-23)
 
 ### Improvements
