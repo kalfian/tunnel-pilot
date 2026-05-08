@@ -151,7 +151,7 @@ class TrayService {
         final status = statuses[forward.id] ?? ForwardStatus.disconnected;
         
         // Compact port info
-        final portLabel = ':${forward.localPort} → ${forward.remoteHost}:${forward.remotePort}';
+        final portLabel = ':${forward.localPort} → :${forward.remotePort}';
 
         menuItems.add(MenuItemLabel(
           label: '${forward.name}  ($portLabel)',
