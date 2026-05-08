@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.21 (2026-05-08)
+
+### Improvements
+
+- Version bump to verify in-app update from v1.2.20
+
 ## 1.2.20 (2026-05-08)
 
 ### Fixes
