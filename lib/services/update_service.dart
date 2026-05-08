@@ -32,6 +32,8 @@ class UpdateService extends ChangeNotifier {
   String? _checkError;
   String? _statusMessage;
   bool _cancelRequested = false;
+  List<String> _downloadDiag = [];
+  Stopwatch? _diagStopwatch;
 
   Timer? _periodicTimer;
   HttpClient? _httpClient;
@@ -56,6 +58,7 @@ class UpdateService extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   String? get checkError => _checkError;
   String? get statusMessage => _statusMessage;
+  String get downloadDiagnostic => _downloadDiag.join('\n');
 
   @visibleForTesting
   set updateAvailable(bool v) => _updateAvailable = v;
@@ -270,6 +273,15 @@ class UpdateService extends ChangeNotifier {
     return aPre.compareTo(bPre);
   }
 
+  void _logDiag(String step, {bool notify = false}) {
+    final ms = _diagStopwatch?.elapsedMilliseconds ?? 0;
+    _downloadDiag.add('[+${ms}ms] $step');
+    if (notify) {
+      _statusMessage = step;
+      notifyListeners();
+    }
+  }
+
   Future<void> downloadAndInstall() async {
     if (_downloadUrl == null || _isDownloading) return;
 
@@ -280,7 +292,11 @@ class UpdateService extends ChangeNotifier {
     _downloadProgress = 0.0;
     _downloadedBytes = 0;
     _totalBytes = 0;
+    _downloadDiag = [];
+    _diagStopwatch = Stopwatch()..start();
     notifyListeners();
+
+    _logDiag('Starting download: $_downloadUrl');
 
     _downloadClient = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15);
@@ -290,11 +306,15 @@ class UpdateService extends ChangeNotifier {
     File? partialFile;
 
     try {
+      _logDiag('Sending HTTP request...');
       final request = await _downloadClient!.getUrl(Uri.parse(_downloadUrl!));
       response = await request.close();
+      _logDiag('HTTP ${response.statusCode}, Content-Length: ${response.contentLength}');
+
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.drain<void>();
         _errorMessage = 'Download failed (HTTP ${response.statusCode}).';
+        _logDiag('Aborted: bad status code');
         return;
       }
 
@@ -304,15 +324,14 @@ class UpdateService extends ChangeNotifier {
           tempDirOverride ?? (await getTemporaryDirectory()).path;
       final fileName = _downloadUrl!.split('/').last;
       final filePath = '$tempPath/$fileName';
+      _logDiag('Writing to: $filePath');
 
       partialFile = File(filePath);
       sink = partialFile.openWrite();
       int received = 0;
       int lastNotifiedPercent = -1;
 
-      // Use explicit subscription instead of `await for` + `break`.
-      // `await for` awaits subscription.cancel() on break, which can
-      // hang if the HTTPS TLS close handshake stalls.
+      _logDiag('Stream listening...');
       final downloadDone = Completer<void>();
       final downloadSub = response.timeout(_downloadIdleTimeout).listen(
         (chunk) {
@@ -355,58 +374,90 @@ class UpdateService extends ChangeNotifier {
       );
 
       await downloadDone.future;
-      // Fire-and-forget: don't await cancel (TLS close can hang)
+      _logDiag('Stream done: $received / $contentLength bytes');
+
       downloadSub.cancel();
+      _logDiag('Subscription cancel fired');
 
       if (_cancelRequested) return;
 
-      await sink.flush();
-      await sink.close();
+      const postTimeout = Duration(seconds: 10);
+
+      _logDiag('Flushing...', notify: true);
+      try {
+        await sink.flush().timeout(postTimeout);
+        _logDiag('Flush OK');
+      } catch (e) {
+        _logDiag('Flush failed: $e');
+      }
+
+      _logDiag('Closing file...', notify: true);
+      try {
+        await sink.close().timeout(postTimeout);
+        _logDiag('Close OK');
+      } catch (e) {
+        _logDiag('Close failed: $e');
+      }
       sink = null;
       response = null;
 
       if (contentLength > 0) {
-        final fileSize = await partialFile.length();
-        if (fileSize != contentLength) {
-          _errorMessage =
-              'Download corrupted (${_formatBytes(fileSize)} of ${_formatBytes(contentLength)}). Try again.';
-          return;
+        _logDiag('Checking file size...', notify: true);
+        try {
+          final fileSize = await partialFile.length().timeout(postTimeout);
+          _logDiag('File size: ${_formatBytes(fileSize)} (expected: ${_formatBytes(contentLength)})');
+          if (fileSize != contentLength) {
+            _errorMessage =
+                'Download corrupted (${_formatBytes(fileSize)} of ${_formatBytes(contentLength)}). Try again.';
+            _logDiag('Aborted: size mismatch');
+            return;
+          }
+        } catch (e) {
+          _logDiag('Size check failed: $e (continuing anyway)');
         }
       }
 
       partialFile = null;
 
+      _logDiag('Finalizing...');
       _downloadProgress = 1.0;
       _isDownloading = false;
       _readyToInstall = true;
       _downloadedFilePath = filePath;
-      notifyListeners();
+      _diagStopwatch?.stop();
+      _logDiag('Done! readyToInstall=true', notify: true);
     } catch (e) {
+      _logDiag('CATCH: $e');
       if (_cancelRequested) return;
-      debugPrint('Download error: $e');
       _errorMessage = e is TimeoutException
-          ? 'Download stalled due to inactivity. Please try again.'
-          : 'Download failed. Please try again.';
+          ? 'Download stalled. Diagnostic:\n${_downloadDiag.join("\n")}'
+          : 'Download failed. Diagnostic:\n${_downloadDiag.join("\n")}';
     } finally {
+      _logDiag('FINALLY block entered');
       if (sink != null) {
+        _logDiag('Finally: closing sink');
         try {
-          await sink.close();
+          await sink.close().timeout(const Duration(seconds: 5));
         } catch (_) {}
       }
       if (response != null) {
+        _logDiag('Finally: draining response');
         try {
-          await response.drain<void>();
+          await response.drain<void>().timeout(const Duration(seconds: 5));
         } catch (_) {}
       }
       if (partialFile != null) {
+        _logDiag('Finally: deleting partial file');
         try {
           await partialFile.delete();
         } catch (_) {}
       }
+      _logDiag('Finally: closing downloadClient');
       try {
-        _downloadClient?.close();
+        _downloadClient?.close(force: true);
       } catch (_) {}
       _downloadClient = null;
+      _logDiag('Finally: cleanup done');
 
       if (!_readyToInstall) {
         _isDownloading = false;
@@ -416,6 +467,7 @@ class UpdateService extends ChangeNotifier {
         _statusMessage = null;
         notifyListeners();
       }
+      _diagStopwatch?.stop();
     }
   }
 

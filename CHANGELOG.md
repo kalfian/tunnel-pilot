@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.18 (2026-05-08)
+
+### Fixes
+
+- **Update Download Hang Prevention** — Added 10-second timeouts to all post-download I/O operations (flush, close, file size check) and force-close on the HTTP client. If any step stalls in the release build, the app recovers instead of hanging at 100%
+- **Download Diagnostic Logging** — Every step of the download process is now timestamped and logged. Visible in the UI via "Diagnostic log" expander after download completes, or included in error messages if download fails
+
+### Improvements
+
+- **Faster CI Pipeline** — Test job now runs in parallel with platform builds instead of blocking them. Merged auto-tag and resolve-tag into a single prepare job. Test runner moved to ubuntu-latest. Estimated pipeline time reduced from ~7m30s to ~5m
+
 ## 1.2.17 (2026-05-08)
 
 ### Improvements

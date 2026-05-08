@@ -391,6 +391,100 @@ void main() {
         expect(service.readyToInstall, isTrue);
         expect(service.isDownloading, isFalse);
       });
+
+      test('completes with redirect + keep-alive', () async {
+        final testData = List.filled(10240, 0x42);
+
+        server = await HttpServer.bind('localhost', 0);
+        var reqCount = 0;
+        server.listen((request) {
+          reqCount++;
+          if (reqCount == 1) {
+            request.response
+              ..statusCode = 302
+              ..headers.set('Location',
+                  'http://localhost:${server.port}/real.dmg')
+              ..close();
+          } else {
+            request.response
+              ..statusCode = 200
+              ..contentLength = testData.length
+              ..add(testData);
+            // keep-alive: don't close
+          }
+        });
+
+        service.downloadUrl = 'http://localhost:${server.port}/test.dmg';
+
+        await service.downloadAndInstall().timeout(
+              const Duration(seconds: 5),
+              onTimeout: () =>
+                  fail('STUCK: redirect + keep-alive'),
+            );
+
+        expect(service.readyToInstall, isTrue);
+        expect(service.isDownloading, isFalse);
+      });
+    });
+
+    group('download e2e (real GitHub)', () {
+      late Directory tmpDir;
+
+      setUp(() {
+        tmpDir = Directory.systemTemp.createTempSync('update_e2e_');
+        service.tempDirOverride = tmpDir.path;
+      });
+
+      tearDown(() {
+        try {
+          tmpDir.deleteSync(recursive: true);
+        } catch (_) {}
+      });
+
+      test('downloads real release from GitHub', tags: 'e2e', () async {
+        service.downloadUrl =
+            'https://github.com/kalfian/tunnel-pilot/releases/download/v1.2.18/TunnelPilot-v1.2.18-macos.dmg';
+
+        final sw = Stopwatch()..start();
+        final steps = <String>[];
+
+        service.addListener(() {
+          final pct = (service.downloadProgress * 100).toInt();
+          final msg = 'progress=$pct% '
+              'downloading=${service.isDownloading} '
+              'ready=${service.readyToInstall} '
+              'error=${service.errorMessage} '
+              'at ${sw.elapsedMilliseconds}ms';
+          if (steps.isEmpty || !steps.last.startsWith('progress=$pct%')) {
+            steps.add(msg);
+          }
+        });
+
+        await service.downloadAndInstall().timeout(
+              const Duration(seconds: 120),
+              onTimeout: () {
+                print('=== STUCK! Steps so far: ===');
+                for (final s in steps) {
+                  print(s);
+                }
+                print('Final state: downloading=${service.isDownloading} '
+                    'ready=${service.readyToInstall} '
+                    'installing=${service.isInstalling} '
+                    'error=${service.errorMessage}');
+                fail('STUCK: real GitHub download timed out after 120s');
+              },
+            );
+
+        print('=== Download completed in ${sw.elapsedMilliseconds}ms ===');
+        for (final s in steps) {
+          print(s);
+        }
+
+        expect(service.readyToInstall, isTrue,
+            reason: 'readyToInstall should be true. '
+                'error=${service.errorMessage}');
+        expect(service.isDownloading, isFalse);
+      }, timeout: const Timeout(Duration(minutes: 3)));
     });
   });
 }

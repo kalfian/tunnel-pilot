@@ -164,6 +164,56 @@ class _UpdateBannerState extends State<UpdateBanner> {
               'Download complete. Ready to install.',
               style: theme.textTheme.bodySmall,
             ),
+            if (updateService.downloadDiagnostic.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: () =>
+                    setState(() => _notesExpanded = !_notesExpanded),
+                child: Row(
+                  children: [
+                    Icon(
+                      _notesExpanded
+                          ? Icons.expand_less
+                          : Icons.expand_more,
+                      size: 16,
+                      color: theme.colorScheme.outline,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Diagnostic log',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.outline,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_notesExpanded) ...[
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: theme.dividerColor),
+                  ),
+                  constraints: const BoxConstraints(maxHeight: 150),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      updateService.downloadDiagnostic,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontFamily:
+                            'JetBrains Mono, SF Mono, Menlo, monospace',
+                        fontSize: 10,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
             const SizedBox(height: 10),
             Row(
               children: [
@@ -331,6 +381,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
   }
 
   String _downloadStatusText(UpdateService service) {
+    if (service.statusMessage != null) return service.statusMessage!;
     final sizeText = service.downloadSizeText;
     if (service.downloadProgress > 0) {
       final pct = '${(service.downloadProgress * 100).toInt()}%';
