@@ -345,7 +345,7 @@ class UpdateService extends ChangeNotifier {
 
       if (contentLength > 0) {
         final fileSize = await partialFile.length();
-        if (received < contentLength || fileSize != contentLength) {
+        if (fileSize != contentLength) {
           _errorMessage =
               'Download corrupted (${_formatBytes(fileSize)} of ${_formatBytes(contentLength)}). Try again.';
           return;
@@ -407,7 +407,7 @@ class UpdateService extends ChangeNotifier {
       await openReleasePage();
     } catch (_) {
       _errorMessage =
-          'Could not open installer automatically. Please use View Release.';
+          'Could not open installer automatically. Please open the GitHub releases page to install manually.';
       notifyListeners();
     }
   }
