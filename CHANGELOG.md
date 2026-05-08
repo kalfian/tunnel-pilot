@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.22 (2026-05-08)
+
+### Fixes
+
+- **Error Message No Longer Truncated** — Download/install error messages are now scrollable instead of cut off at 3 lines, so the full diagnostic is visible
+
 ## 1.2.21 (2026-05-08)
 
 ### Improvements

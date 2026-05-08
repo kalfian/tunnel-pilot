@@ -73,12 +73,15 @@ class _UpdateBannerState extends State<UpdateBanner> {
               !updateService.isInstalling &&
               !updateService.readyToInstall) ...[
             const SizedBox(height: 8),
-            Text(
-              updateService.errorMessage!,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.error),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
+            Container(
+              constraints: const BoxConstraints(maxHeight: 100),
+              child: SingleChildScrollView(
+                child: Text(
+                  updateService.errorMessage!,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.error),
+                ),
+              ),
             ),
             const SizedBox(height: 10),
             Row(
