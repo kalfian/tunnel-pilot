@@ -6,6 +6,11 @@
 
 - Version bump to verify in-app update flow from v1.2.12
 
+### Fixes
+
+- **Update Download No Longer Hangs at 100%** — Added HTTP status validation, stream idle timeout, and deterministic completion when received bytes reach Content-Length
+- **Second Update Path (Manual Install)** — Added "Install Manually" action in the update banner/dialog to open the downloaded installer (or release page fallback) when direct install is not desired
+
 ## 1.2.12 (2026-05-08)
 
 ### Fixes

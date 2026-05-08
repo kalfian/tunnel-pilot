@@ -173,6 +173,10 @@ class _UpdateBannerState extends State<UpdateBanner> {
                     onPressed: () => _showInstallDialog(context)),
                 const SizedBox(width: 8),
                 _actionButton(context,
+                    label: 'Install Manually',
+                    onPressed: () => updateService.installManually()),
+                const SizedBox(width: 8),
+                _actionButton(context,
                     label: 'Later',
                     onPressed: () => updateService.dismissUpdate()),
               ],
@@ -299,6 +303,14 @@ class _UpdateBannerState extends State<UpdateBanner> {
           'The app will close and restart automatically after the update is installed.',
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              updateService.installManually();
+              _dialogShown = false;
+            },
+            child: const Text('Install Manually'),
+          ),
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
