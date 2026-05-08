@@ -231,9 +231,11 @@ class SshTunnelService {
             localSocket.done.then((_) {
               tunnel.activeSockets.remove(localSocket);
               tunnel._counters.remove(counter);
+              counter.dispose();
             }).catchError((_) {
               tunnel.activeSockets.remove(localSocket);
               tunnel._counters.remove(counter);
+              counter.dispose();
             });
           } catch (e) {
             if (e is TimeoutException) {
@@ -335,6 +337,9 @@ class SshTunnelService {
         conn.serverSubscription = null;
         for (final s in conn.activeSockets) {
           s.destroy();
+        }
+        for (final c in conn._counters) {
+          c.dispose();
         }
         try {
           conn.serverSocket.close();

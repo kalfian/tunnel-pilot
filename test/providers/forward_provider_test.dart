@@ -18,6 +18,7 @@ class MockStorageService extends StorageService {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('ForwardProvider', () {
     late MockStorageService mockStorage;
     late SshTunnelService tunnelService;
