@@ -17,6 +17,8 @@ import 'services/single_instance_service.dart';
 import 'services/tray_service.dart';
 import 'services/update_service.dart';
 
+const MethodChannel _appVisibilityChannel = MethodChannel('app_visibility');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -40,7 +42,7 @@ Future<void> main() async {
     maximumSize: const Size(700, 600),
     center: true,
     title: 'Tunnel Pilot',
-    skipTaskbar: true,
+    skipTaskbar: false,
     titleBarStyle: TitleBarStyle.normal,
   );
 
@@ -50,6 +52,11 @@ Future<void> main() async {
     // Always show first so the engine stays alive
     await windowManager.show();
   });
+
+  Future<void> setDockVisible(bool visible) async {
+    if (!Platform.isMacOS) return;
+    await _appVisibilityChannel.invokeMethod('setDockVisible', visible);
+  }
 
   final storageService = StorageService();
   final sshTunnelService = SshTunnelService();
@@ -110,19 +117,20 @@ Future<void> main() async {
     debugPrint('StartupService setEnabled failed: $e');
   }
 
+  Future<void> showSettings() async {
+    await setDockVisible(true);
+    final isVisible = await windowManager.isVisible();
+    if (!isVisible) {
+      await windowManager.setSkipTaskbar(false);
+      await windowManager.show();
+    }
+    await windowManager.focus();
+  }
+
   TrayService? trayService;
   try {
     trayService = TrayService(
-      onSettingsClicked: () async {
-        final isVisible = await windowManager.isVisible();
-        if (isVisible) {
-          await windowManager.focus();
-          return;
-        }
-        await windowManager.setSkipTaskbar(false);
-        await windowManager.show();
-        await windowManager.focus();
-      },
+      onSettingsClicked: showSettings,
       onQuitClicked: () async {
         await forwardProvider.disconnectAll();
         await singleInstance.dispose();
@@ -199,16 +207,6 @@ Future<void> main() async {
     updateService.setSkippedVersion(appSettingsProvider.lastSkippedVersion);
   });
 
-  // Show settings when another instance or app reopen is detected
-  Future<void> showSettings() async {
-    final isVisible = await windowManager.isVisible();
-    if (!isVisible) {
-      await windowManager.setSkipTaskbar(false);
-      await windowManager.show();
-    }
-    await windowManager.focus();
-  }
-
   // macOS: user opens .app again → applicationShouldHandleReopen
   if (Platform.isMacOS) {
     const channel = MethodChannel('app_lifecycle');
@@ -241,6 +239,7 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: updateService),
       ],
       child: _AppWithWindowListener(
+        setDockVisible: setDockVisible,
         appSettings: appSettingsProvider,
         child: const TunnelPilotApp(),
       ),
@@ -251,7 +250,12 @@ Future<void> main() async {
 class _AppWithWindowListener extends StatefulWidget {
   final Widget child;
   final AppSettingsProvider appSettings;
-  const _AppWithWindowListener({required this.child, required this.appSettings});
+  final Future<void> Function(bool visible) setDockVisible;
+  const _AppWithWindowListener({
+    required this.child,
+    required this.appSettings,
+    required this.setDockVisible,
+  });
 
   @override
   State<_AppWithWindowListener> createState() => _AppWithWindowListenerState();
@@ -266,11 +270,6 @@ class _AppWithWindowListenerState extends State<_AppWithWindowListener>
     super.initState();
     windowManager.addListener(this);
     WidgetsBinding.instance.addObserver(this);
-    // Hide window after the first frame so the engine is fully alive
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // await windowManager.hide();
-      await windowManager.setSkipTaskbar(true);
-    });
   }
 
   @override
@@ -304,6 +303,7 @@ class _AppWithWindowListenerState extends State<_AppWithWindowListener>
     if (isPreventClose) {
       await windowManager.hide();
       await windowManager.setSkipTaskbar(true);
+      await widget.setDockVisible(false);
     }
   }
 

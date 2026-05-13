@@ -5,6 +5,17 @@ import UserNotifications
 
 @main
 class AppDelegate: FlutterAppDelegate, UNUserNotificationCenterDelegate {
+  private weak var mainController: FlutterViewController?
+
+  private func setDockVisible(_ visible: Bool) {
+    DispatchQueue.main.async {
+      NSApp.setActivationPolicy(visible ? .regular : .accessory)
+      if visible {
+        NSApp.activate(ignoringOtherApps: true)
+      }
+    }
+  }
+
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     // Keep app alive when window is hidden — it lives in the system tray
     return false
@@ -16,7 +27,8 @@ class AppDelegate: FlutterAppDelegate, UNUserNotificationCenterDelegate {
 
   override func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
     // User re-launched the .app → tell Flutter to show the settings window
-    if let controller = mainFlutterWindow?.contentViewController as? FlutterViewController {
+    setDockVisible(true)
+    if let controller = mainController ?? mainFlutterWindow?.contentViewController as? FlutterViewController {
       let channel = FlutterMethodChannel(name: "app_lifecycle", binaryMessenger: controller.engine.binaryMessenger)
       channel.invokeMethod("showSettings", arguments: nil)
     }
@@ -41,21 +53,16 @@ class AppDelegate: FlutterAppDelegate, UNUserNotificationCenterDelegate {
             print("[Notifications] Permission error: \(error.localizedDescription)")
           }
           print("[Notifications] Permission granted: \(granted)")
-          // Now switch to accessory after permission is handled
-          DispatchQueue.main.async {
-            NSApp.setActivationPolicy(.accessory)
-          }
+          self.setDockVisible(true)
         }
       } else {
         print("[Notifications] Already determined (status: \(settings.authorizationStatus.rawValue))")
-        // Already determined, go to accessory immediately
-        DispatchQueue.main.async {
-          NSApp.setActivationPolicy(.accessory)
-        }
+        self.setDockVisible(true)
       }
     }
 
     let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
+    mainController = controller
 
     // Launch at startup channel
     let launchChannel = FlutterMethodChannel(name: "launch_at_startup", binaryMessenger: controller.engine.binaryMessenger)
@@ -127,6 +134,30 @@ class AppDelegate: FlutterAppDelegate, UNUserNotificationCenterDelegate {
             result(true)
           }
         }
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
+    let appVisibilityChannel = FlutterMethodChannel(
+      name: "app_visibility",
+      binaryMessenger: controller.engine.binaryMessenger
+    )
+
+    appVisibilityChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(nil)
+        return
+      }
+
+      switch call.method {
+      case "setDockVisible":
+        guard let visible = call.arguments as? Bool else {
+          result(FlutterError(code: "INVALID_ARGS", message: "Expected boolean visibility flag", details: nil))
+          return
+        }
+        self.setDockVisible(visible)
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
