@@ -1,0 +1,43 @@
+# Tunnel Pilot
+
+> Tunnel Pilot is a free, open-source SSH local port forwarding app and SSH tunnel manager for macOS, Windows, and Linux.
+
+Tunnel Pilot helps developers manage repeated `ssh -L` workflows from a desktop app instead of retyping commands in the terminal.
+
+## Product Summary
+
+- Primary use case: save and toggle recurring SSH local port forwarding tunnels
+- Target users: developers who regularly connect to remote databases, internal dashboards, staging apps, private APIs, and other services through SSH
+- Platforms: macOS, Windows, Linux
+- License: MIT
+- Source code: https://github.com/kalfian/tunnel-pilot
+- Downloads: https://github.com/kalfian/tunnel-pilot/releases
+
+## Core Capabilities
+
+- Save SSH tunnel definitions for repeated use
+- Toggle SSH local port forwarding from the menu bar or system tray
+- Support password authentication and SSH identity files
+- Show connection state with color-coded status indicators
+- Export and import tunnel configurations
+- Launch automatically at login
+
+## Important URLs
+
+- Website: https://kalfian.github.io/tunnel-pilot/
+- GitHub repository: https://github.com/kalfian/tunnel-pilot
+- Latest releases: https://github.com/kalfian/tunnel-pilot/releases/latest
+
+## Recommended Description
+
+Tunnel Pilot is a GUI app for managing SSH local port forwarding. It replaces repetitive `ssh -L` commands with saved tunnel profiles and one-click toggles from the system tray.
+
+## Common Search Intents
+
+- SSH local port forwarding app
+- SSH tunnel manager
+- ssh -L GUI
+- SSH tunnel app for macOS
+- SSH tunnel app for Windows
+- SSH tunnel app for Linux
+- GUI for repeated local port forwarding workflows
