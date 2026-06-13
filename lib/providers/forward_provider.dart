@@ -137,47 +137,55 @@ class ForwardProvider extends ChangeNotifier {
     final status = getStatus(id);
     final isReconnecting = _reconnectTimers.containsKey(id);
 
-    // If it's already disconnecting, ignore clicks to avoid race conditions
-    if (status == ForwardStatus.disconnecting) {
-      return;
-    }
+    // Ignore clicks during transient disconnecting state
+    if (status == ForwardStatus.disconnecting) return;
 
-    // If active, connecting, in error state, or has a pending reconnect timer:
-    // Manual click should FORCE DISCONNECT
-    if (status == ForwardStatus.connected ||
-        status == ForwardStatus.connecting ||
-        status == ForwardStatus.error ||
-        isReconnecting) {
-      _userDisconnected.add(id);
-      _cancelReconnect(id);
-      await _disconnectForward(id);
-    } else {
-      // It's strictly disconnected, so let's start it
+    // Error state: user wants to retry — reconnect, not disconnect
+    if (status == ForwardStatus.error) {
       _userDisconnected.remove(id);
       _cancelReconnect(id);
       _reconnectAttempts.remove(id);
 
-      // 1. Immediate UI update to 'connecting' (Yellow)
       _statuses[id] = ForwardStatus.connecting;
       _errorMessages.remove(id);
       _stats.remove(id);
       notifyListeners();
 
-      // 2. Ensure any previous connection is fully purged
       await _tunnel.disconnect(id);
-      
       final config = _forwards.firstWhere((f) => f.id == id);
-      
-      // 3. Release and wait for port
       await _waitForPortAvailable(config.localBindAddress, config.localPort);
-      
-      // 4. Start actual SSH connection
+      await _connectForward(id);
+      return;
+    }
+
+    // Active or pending reconnect: force disconnect
+    if (status == ForwardStatus.connected ||
+        status == ForwardStatus.connecting ||
+        isReconnecting) {
+      _userDisconnected.add(id);
+      _cancelReconnect(id);
+      await _disconnectForward(id);
+    } else {
+      // Strictly disconnected — start it
+      _userDisconnected.remove(id);
+      _cancelReconnect(id);
+      _reconnectAttempts.remove(id);
+
+      _statuses[id] = ForwardStatus.connecting;
+      _errorMessages.remove(id);
+      _stats.remove(id);
+      notifyListeners();
+
+      await _tunnel.disconnect(id);
+      final config = _forwards.firstWhere((f) => f.id == id);
+      await _waitForPortAvailable(config.localBindAddress, config.localPort);
       await _connectForward(id);
     }
   }
 
   Future<void> _waitForPortAvailable(String address, int port,
       {int maxAttempts = 15}) async {
+    if (skipPortWait) return;
     for (var i = 0; i < maxAttempts; i++) {
       try {
         // Try to bind with shared: false to ensure we can actually own it exclusively if needed,
@@ -227,6 +235,8 @@ class ForwardProvider extends ChangeNotifier {
               _notification.showConnected(config.name);
             }
           case ForwardStatus.disconnected:
+            // Unexpected disconnect (SSH died on its own). User-initiated
+            // disconnects go through _disconnectForward() which is silent.
             _stats.remove(id);
             _logService.info(config.name, 'Disconnected');
             if (_notificationsEnabled) {
@@ -236,10 +246,13 @@ class ForwardProvider extends ChangeNotifier {
           case ForwardStatus.error:
             _stats.remove(id);
             _logService.error(config.name, errorMessage ?? 'Unknown error');
-            if (_notificationsEnabled) {
+            _tryAutoReconnect(id);
+            // Notify only when no retry timer was scheduled — covers all
+            // "error is final" cases: disabled auto-reconnect, user-disconnected,
+            // and retries exhausted. Avoids duplicating the guard logic here.
+            if (!_reconnectTimers.containsKey(id) && _notificationsEnabled) {
               _notification.showError(config.name, errorMessage ?? 'Unknown');
             }
-            _tryAutoReconnect(id);
           case ForwardStatus.connecting:
           case ForwardStatus.disconnecting:
             break;
@@ -251,12 +264,16 @@ class ForwardProvider extends ChangeNotifier {
   void _tryAutoReconnect(String id) {
     if (!_autoReconnect) return;
     if (_userDisconnected.contains(id)) return;
+    // Guard: tunnel may have been removed while a reconnect was in flight.
+    if (!_forwards.any((f) => f.id == id)) return;
 
     final attempts = _reconnectAttempts[id] ?? 0;
+    final config = _forwards.firstWhere((f) => f.id == id);
+
     if (attempts >= _autoReconnectMaxRetries) {
-      final config = _forwards.firstWhere((f) => f.id == id);
       _logService.warning(config.name,
           'Auto-reconnect failed after $attempts attempts');
+      // No timer scheduled — caller's notification guard will fire.
       return;
     }
 
@@ -264,7 +281,6 @@ class ForwardProvider extends ChangeNotifier {
 
     final delay = (_autoReconnectDelaySec * (1 << attempts)).clamp(1, 60);
 
-    final config = _forwards.firstWhere((f) => f.id == id);
     _logService.info(config.name,
         'Auto-reconnecting in ${delay}s (attempt ${attempts + 1}/$_autoReconnectMaxRetries)...');
 
@@ -273,10 +289,15 @@ class ForwardProvider extends ChangeNotifier {
       Duration(seconds: delay),
       () {
         _reconnectTimers.remove(id);
-        if (_forwards.any((f) => f.id == id) &&
-            !_userDisconnected.contains(id)) {
-          _connectForward(id);
-        }
+        if (!_forwards.any((f) => f.id == id)) return;
+        if (_userDisconnected.contains(id)) return;
+
+        // Show connecting immediately so the UI reflects the retry in progress.
+        _statuses[id] = ForwardStatus.connecting;
+        _errorMessages.remove(id);
+        notifyListeners();
+
+        _connectForward(id);
       },
     );
   }
@@ -298,10 +319,7 @@ class ForwardProvider extends ChangeNotifier {
     _stats.remove(id);
     _logService.info(config.name, 'Disconnected');
     notifyListeners();
-
-    if (_notificationsEnabled) {
-      _notification.showDisconnected(config.name);
-    }
+    // No notification — user-initiated disconnect is intentional and silent.
   }
 
   Future<void> connectAll() async {
@@ -391,5 +409,36 @@ class ForwardProvider extends ChangeNotifier {
     await _storage.saveForwards(_forwards);
     notifyListeners();
     return imported;
+  }
+
+  // ── Test helpers (only used in tests) ─────────────────────────────────────
+
+  /// Skip the real socket bind check in unit tests.
+  @visibleForTesting
+  bool skipPortWait = false;
+
+  @visibleForTesting
+  void forceStatus(String id, ForwardStatus status) {
+    _statuses[id] = status;
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  void triggerAutoReconnect(String id) {
+    _tryAutoReconnect(id);
+  }
+
+  /// Directly runs the reconnect timer body without waiting for the delay.
+  /// Use this in tests that need to verify the post-timer state.
+  @visibleForTesting
+  Future<void> fireReconnectNow(String id) async {
+    _reconnectTimers[id]?.cancel();
+    _reconnectTimers.remove(id);
+    if (!_forwards.any((f) => f.id == id)) return;
+    if (_userDisconnected.contains(id)) return;
+    _statuses[id] = ForwardStatus.connecting;
+    _errorMessages.remove(id);
+    notifyListeners();
+    await _connectForward(id);
   }
 }

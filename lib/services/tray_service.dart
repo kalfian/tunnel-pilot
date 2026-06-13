@@ -153,8 +153,11 @@ class TrayService {
         // Compact port info
         final portLabel = ':${forward.localPort} → :${forward.remotePort}';
 
+        final label = status == ForwardStatus.error
+            ? '${forward.name}  ($portLabel)  ↺ Retry'
+            : '${forward.name}  ($portLabel)';
         menuItems.add(MenuItemLabel(
-          label: '${forward.name}  ($portLabel)',
+          label: label,
           image: _statusImagePath(status),
           onClicked: (_) => onToggleForward(forward.id),
         ));

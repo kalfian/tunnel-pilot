@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.9] - 2026-06-13
+
+### Fixed
+- **Instant Tunnel Usability** — "Connected" status now only fires after SSH authentication completes, eliminating the 10–15s delay where tunnels appeared connected but traffic was rejected.
+- **Error Retry in Tray** — Clicking an error-state tunnel now immediately reconnects instead of disconnecting (previously required two clicks to recover).
+- **Reconnect Visual Feedback** — UI jumps to "Connecting" (yellow) the moment auto-reconnect fires, instead of remaining red until the SSH attempt begins.
+- **Notification Spam** — User-initiated disconnects and in-progress retry attempts are now silent; only final outcomes (connected / all retries exhausted) trigger a notification.
+- **Dock Visibility** — Fixed Dock icon not appearing correctly when the window is shown on macOS.
+
+### Improved
+- **Tray Error Affordance** — Error-state tunnel items now show "↺ Retry" in the tray menu to clarify that clicking will reconnect, not disconnect.
+
 ## [1.3.8] - 2026-05-09
 
 ### Fixed

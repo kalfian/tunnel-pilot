@@ -228,6 +228,21 @@ class SshTunnelService {
         );
       }
 
+      // Wait for SSH handshake + authentication to complete before accepting
+      // local connections. Without this await, forwardLocal() calls made
+      // immediately after "connected" status stall until auth finishes (10-15s).
+      try {
+        await client.authenticated.timeout(const Duration(seconds: 30));
+      } catch (e) {
+        // Auth failed or timed out — release resources before outer catch handles it.
+        try { client.close(); } catch (_) {}
+        try { await serverSocket.close(); } catch (_) {}
+        if (e is TimeoutException) {
+          throw Exception('SSH authentication timed out after 30s');
+        }
+        rethrow;
+      }
+
       final tunnel = TunnelConnection(
         client: client,
         serverSocket: serverSocket,
