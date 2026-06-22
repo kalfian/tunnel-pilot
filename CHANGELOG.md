@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.10] - 2026-06-22
+
+### Added
+- **SSH Key Picker** — "Browse" now opens directly in `~/.ssh` so hidden key files are reachable, and the identity file path is selection-only to prevent invalid manual entry.
+
+### Improved
+- **Refined Desktop UI** — Hover states across rows, toggles, and tabs; removed Material ripple effects for a calmer, native desktop feel.
+- **Monospaced Technical Text** — Ports, latency, and timestamps now render in a true monospace font and align in columns.
+- **Tray Menu Icons** — Replaced emoji in the tray menu with clean monochrome icons (start, stop, settings, quit, update) matching the native macOS style.
+- **Status Color Consistency** — Unified connection status colors with dark-mode-tuned values.
+
+### Fixed
+- **Identity File Authentication** — Added the required file-access entitlement so selecting an SSH key no longer fails with an entitlement error.
+- **Dark Mode Toggle** — Fixed low-contrast off-state on custom toggles in dark mode.
+
 ## [1.3.9] - 2026-06-13
 
 ### Fixed
