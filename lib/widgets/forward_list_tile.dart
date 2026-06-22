@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../app.dart';
 import '../models/forward_config.dart';
 import '../models/forward_status.dart';
 import '../models/tunnel_stats.dart';
@@ -38,17 +39,19 @@ class ForwardListTile extends StatefulWidget {
 }
 
 class _ForwardListTileState extends State<ForwardListTile> {
-  Color _statusColor(ForwardStatus status) {
+  bool _hovered = false;
+
+  Color _statusColor(ForwardStatus status, AppTokens t) {
     switch (status) {
       case ForwardStatus.connected:
-        return const Color(0xFF22C55E);
+        return t.statusConnected;
       case ForwardStatus.connecting:
       case ForwardStatus.disconnecting:
-        return const Color(0xFFF59E0B);
+        return t.statusPending;
       case ForwardStatus.error:
-        return const Color(0xFFEF4444);
+        return t.statusError;
       case ForwardStatus.disconnected:
-        return const Color(0xFF6B7280);
+        return t.statusIdle;
     }
   }
 
@@ -167,7 +170,7 @@ class _ForwardListTileState extends State<ForwardListTile> {
           label,
           style: TextStyle(
             fontSize: 10,
-            fontFamily: 'JetBrains Mono, SF Mono, Menlo, monospace',
+            fontFamilyFallback: kMonoFontFallback,
             color: theme.colorScheme.outline,
           ),
         ),
@@ -217,13 +220,13 @@ class _ForwardListTileState extends State<ForwardListTile> {
         (p) => p.getErrorMessage(widget.config.id));
 
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final tokens = context.tokens;
     final hasError =
         status == ForwardStatus.error && errorMessage != null;
     final isTransitioning = status == ForwardStatus.connecting ||
         status == ForwardStatus.disconnecting;
     final isActive = status == ForwardStatus.connected || isTransitioning;
-    final color = _statusColor(status);
+    final color = _statusColor(status, tokens);
     final borderColor = theme.dividerColor;
 
     final radius = BorderRadius.vertical(
@@ -231,20 +234,35 @@ class _ForwardListTileState extends State<ForwardListTile> {
       bottom: widget.isLast ? const Radius.circular(10) : Radius.zero,
     );
 
-    return GestureDetector(
-      onTap: widget.onTap,
-      onDoubleTap: widget.onDoubleTap,
-      onSecondaryTapUp: (details) =>
-          _showContextMenu(context, details.globalPosition),
-      child: Container(
+    // Layered surface: selected wins, then hover, then base.
+    final Color surfaceColor = widget.isSelected
+        ? tokens.selected
+        : _hovered
+            ? Color.alphaBlend(tokens.hover, theme.colorScheme.surface)
+            : theme.colorScheme.surface;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onDoubleTap: widget.onDoubleTap,
+        onSecondaryTapUp: (details) =>
+            _showContextMenu(context, details.globalPosition),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
         decoration: BoxDecoration(
-          color: widget.isSelected
-              ? theme.colorScheme.primary
-                  .withValues(alpha: isDark ? 0.08 : 0.05)
-              : theme.colorScheme.surface,
+          color: surfaceColor,
           borderRadius: radius,
           border: Border(
-            left: BorderSide(color: borderColor),
+            left: BorderSide(
+              color: widget.isSelected
+                  ? theme.colorScheme.primary.withValues(alpha: 0.5)
+                  : borderColor,
+              width: widget.isSelected ? 1.5 : 1,
+            ),
             right: BorderSide(color: borderColor),
             top: widget.isFirst
                 ? BorderSide(color: borderColor)
@@ -303,7 +321,9 @@ class _ForwardListTileState extends State<ForwardListTile> {
                     ':${widget.config.localPort} \u2192 ${widget.config.remoteHost}:${widget.config.remotePort}',
                     style: TextStyle(
                       fontSize: 11,
-                      fontFamily: 'JetBrains Mono, SF Mono, Menlo, monospace',
+                      height: 1.3,
+                      letterSpacing: -0.1,
+                      fontFamilyFallback: kMonoFontFallback,
                       color: theme.colorScheme.outline,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -358,7 +378,11 @@ class _ForwardListTileState extends State<ForwardListTile> {
             const SizedBox(width: 12),
 
             // Custom toggle
-            GestureDetector(
+            MouseRegion(
+              cursor: isTransitioning
+                  ? SystemMouseCursors.basic
+                  : SystemMouseCursors.click,
+              child: GestureDetector(
               onTap: isTransitioning ? null : widget.onToggle,
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 200),
@@ -369,7 +393,9 @@ class _ForwardListTileState extends State<ForwardListTile> {
                 height: 20,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(10),
-                  color: isActive ? color : theme.colorScheme.outlineVariant,
+                  color: isActive
+                      ? color
+                      : theme.colorScheme.outline.withValues(alpha: 0.35),
                 ),
                 child: AnimatedAlign(
                   duration: const Duration(milliseconds: 200),
@@ -396,8 +422,10 @@ class _ForwardListTileState extends State<ForwardListTile> {
                 ),
               ),
               ),
+              ),
             ),
           ],
+        ),
         ),
       ),
     );

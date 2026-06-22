@@ -128,7 +128,8 @@ class TrayService {
     // ── Update notice ──
     if (updateAvailable && latestVersion != null) {
       menuItems.add(MenuItemLabel(
-        label: '✨ Update Available (v$latestVersion)',
+        label: 'Update Available (v$latestVersion)',
+        image: _assetPath('menu_update.png'),
         onClicked: (_) {
           if (onUpdateClicked != null) {
             onUpdateClicked!();
@@ -174,13 +175,15 @@ class TrayService {
 
       if (hasDisconnected && onConnectAll != null) {
         menuItems.add(MenuItemLabel(
-          label: '⚡ Start All Tunnels',
+          label: 'Start All Tunnels',
+          image: _assetPath('menu_play.png'),
           onClicked: (_) => onConnectAll!(),
         ));
       }
       if (hasConnected && onDisconnectAll != null) {
         menuItems.add(MenuItemLabel(
-          label: '🔌 Stop All Tunnels',
+          label: 'Stop All Tunnels',
+          image: _assetPath('menu_stop.png'),
           onClicked: (_) => onDisconnectAll!(),
         ));
       }
@@ -190,12 +193,14 @@ class TrayService {
 
     // ── Controls ──
     menuItems.add(MenuItemLabel(
-      label: '⚙️ Settings...',
+      label: 'Settings...',
+      image: _assetPath('menu_settings.png'),
       onClicked: (_) => onSettingsClicked(),
     ));
 
     menuItems.add(MenuItemLabel(
-      label: '🚪 Quit',
+      label: 'Quit',
+      image: _assetPath('menu_power.png'),
       onClicked: (_) => onQuitClicked(),
     ));
 

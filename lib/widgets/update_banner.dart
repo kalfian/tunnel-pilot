@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../app.dart';
 import '../providers/app_settings_provider.dart';
 import '../services/update_service.dart';
 
@@ -81,8 +82,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
                   updateService.errorMessage!,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.error,
-                    fontFamily:
-                        'JetBrains Mono, SF Mono, Menlo, monospace',
+                    fontFamilyFallback: kMonoFontFallback,
                     fontSize: 10,
                     height: 1.4,
                   ),
@@ -241,8 +241,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
                     child: Text(
                       updateService.downloadDiagnostic,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        fontFamily:
-                            'JetBrains Mono, SF Mono, Menlo, monospace',
+                        fontFamilyFallback: kMonoFontFallback,
                         fontSize: 10,
                         height: 1.4,
                       ),
@@ -312,8 +311,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
                     child: Text(
                       updateService.releaseNotes!.trim(),
                       style: theme.textTheme.bodySmall?.copyWith(
-                        fontFamily:
-                            'JetBrains Mono, SF Mono, Menlo, monospace',
+                        fontFamilyFallback: kMonoFontFallback,
                         fontSize: 11,
                         height: 1.4,
                       ),

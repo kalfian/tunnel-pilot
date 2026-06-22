@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../app.dart';
 import '../services/log_service.dart';
 
 class LogsSection extends StatelessWidget {
@@ -147,7 +148,7 @@ class LogsSection extends StatelessWidget {
   }
 }
 
-class _LogRow extends StatelessWidget {
+class _LogRow extends StatefulWidget {
   final LogEntry log;
   final bool isFirst;
   final bool showDivider;
@@ -159,26 +160,40 @@ class _LogRow extends StatelessWidget {
   });
 
   @override
+  State<_LogRow> createState() => _LogRowState();
+}
+
+class _LogRowState extends State<_LogRow> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
+    final log = widget.log;
+    final showDivider = widget.showDivider;
     final theme = Theme.of(context);
 
+    final tokens = context.tokens;
     Color levelColor;
     IconData levelIcon;
     switch (log.level) {
       case LogLevel.info:
-        levelColor = const Color(0xFF22C55E);
+        levelColor = tokens.statusConnected;
         levelIcon = Icons.check_circle_outline_rounded;
       case LogLevel.warning:
-        levelColor = const Color(0xFFF59E0B);
+        levelColor = tokens.statusPending;
         levelIcon = Icons.warning_amber_rounded;
       case LogLevel.error:
-        levelColor = const Color(0xFFEF4444);
+        levelColor = tokens.statusError;
         levelIcon = Icons.error_outline_rounded;
     }
 
     return Column(
       children: [
-        InkWell(
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: GestureDetector(
           onTap: () {
             Clipboard.setData(ClipboardData(text: log.formattedLine));
             ScaffoldMessenger.of(context).showSnackBar(
@@ -190,7 +205,8 @@ class _LogRow extends StatelessWidget {
               ),
             );
           },
-          child: Padding(
+          child: Container(
+            color: _hovered ? tokens.hover : Colors.transparent,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -201,7 +217,7 @@ class _LogRow extends StatelessWidget {
                   log.formattedTime,
                   style: TextStyle(
                     fontSize: 11,
-                    fontFamily: 'SF Mono',
+                    fontFamilyFallback: kMonoFontFallback,
                     color: theme.colorScheme.outline,
                   ),
                 ),
@@ -233,6 +249,7 @@ class _LogRow extends StatelessWidget {
                 ),
               ],
             ),
+          ),
           ),
         ),
         if (showDivider) Divider(height: 1, color: theme.dividerColor),

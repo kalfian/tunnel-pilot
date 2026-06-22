@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../app.dart';
 import '../providers/app_settings_provider.dart';
 import '../services/update_service.dart';
 
@@ -30,10 +31,11 @@ class AppSettingsSection extends StatelessWidget {
             Divider(height: 1, color: theme.dividerColor),
             _settingsRow(
               context,
-              icon: Icons.rocket_launch_outlined,
+              icon: Icons.login_rounded,
               title: 'Launch at Login',
               subtitle: 'Start automatically when you log in',
               trailing: _customToggle(
+                context: context,
                 value: provider.launchAtLogin,
                 onChanged: (v) => provider.setLaunchAtLogin(v),
                 activeColor: theme.colorScheme.primary,
@@ -46,6 +48,7 @@ class AppSettingsSection extends StatelessWidget {
               title: 'Notifications',
               subtitle: 'Show connection status changes',
               trailing: _customToggle(
+                context: context,
                 value: provider.showNotifications,
                 onChanged: (v) => provider.setShowNotifications(v),
                 activeColor: theme.colorScheme.primary,
@@ -58,6 +61,7 @@ class AppSettingsSection extends StatelessWidget {
               title: 'Auto Reconnect',
               subtitle: 'Retry ${provider.autoReconnectMaxRetries}x after ${provider.autoReconnectDelaySec}s delay',
               trailing: _customToggle(
+                context: context,
                 value: provider.autoReconnect,
                 onChanged: (v) => provider.setAutoReconnect(v),
                 activeColor: theme.colorScheme.primary,
@@ -70,6 +74,7 @@ class AppSettingsSection extends StatelessWidget {
               title: 'Auto Check for Updates',
               subtitle: 'Check for new versions periodically',
               trailing: _customToggle(
+                context: context,
                 value: provider.autoCheckUpdates,
                 onChanged: (v) => provider.setAutoCheckUpdates(v),
                 activeColor: theme.colorScheme.primary,
@@ -101,8 +106,8 @@ class AppSettingsSection extends StatelessWidget {
     Color? subtitleColor;
 
     if (updateService.isUpToDate) {
-      subtitle = 'You\'re up to date! (v${updateService.currentVersion})';
-      subtitleColor = const Color(0xFF22C55E);
+      subtitle = 'You\'re up to date (v${updateService.currentVersion})';
+      subtitleColor = context.tokens.statusConnected;
     } else if (updateService.checkError != null) {
       subtitle = updateService.checkError!;
       subtitleColor = theme.colorScheme.error;
@@ -110,7 +115,7 @@ class AppSettingsSection extends StatelessWidget {
 
     return _settingsRow(
       context,
-      icon: Icons.refresh_rounded,
+      icon: Icons.update_rounded,
       title: 'Check for Updates',
       subtitle: subtitle,
       subtitleColor: subtitleColor,
@@ -123,27 +128,12 @@ class AppSettingsSection extends StatelessWidget {
                 color: theme.colorScheme.primary,
               ),
             )
-          : GestureDetector(
+          : _HoverPill(
+              label: 'Check',
               onTap: () {
                 updateService.clearCheckStatus();
                 updateService.checkForUpdate();
               },
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  'Check',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-              ),
             ),
     );
   }
@@ -172,7 +162,9 @@ class AppSettingsSection extends StatelessWidget {
     final theme = Theme.of(context);
     final isSelected = current == mode;
 
-    return GestureDetector(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: () => onChanged(mode),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -196,6 +188,7 @@ class AppSettingsSection extends StatelessWidget {
               ? theme.colorScheme.primary
               : theme.colorScheme.outline,
         ),
+      ),
       ),
     );
   }
@@ -255,11 +248,16 @@ class AppSettingsSection extends StatelessWidget {
   }
 
   Widget _customToggle({
+    required BuildContext context,
     required bool value,
     required ValueChanged<bool> onChanged,
     required Color activeColor,
   }) {
-    return GestureDetector(
+    final inactiveColor =
+        Theme.of(context).colorScheme.outline.withValues(alpha: 0.35);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: () => onChanged(!value),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -267,7 +265,7 @@ class AppSettingsSection extends StatelessWidget {
         height: 20,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          color: value ? activeColor : const Color(0xFFD1D5DB),
+          color: value ? activeColor : inactiveColor,
         ),
         child: AnimatedAlign(
           duration: const Duration(milliseconds: 200),
@@ -287,6 +285,51 @@ class AppSettingsSection extends StatelessWidget {
                   offset: const Offset(0, 1),
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+      ),
+    );
+  }
+}
+
+class _HoverPill extends StatefulWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _HoverPill({required this.label, required this.onTap});
+
+  @override
+  State<_HoverPill> createState() => _HoverPillState();
+}
+
+class _HoverPillState extends State<_HoverPill> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primary
+                .withValues(alpha: _hovered ? 0.18 : 0.1),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.primary,
             ),
           ),
         ),

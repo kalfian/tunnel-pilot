@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -78,12 +80,29 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
   }
 
   Future<void> _pickIdentityFile() async {
+    // SSH keys typically live in ~/.ssh which is hidden in the native panel,
+    // so open the picker there directly when it exists.
+    String? initialDir;
+    final home = Platform.environment['HOME'] ??
+        Platform.environment['USERPROFILE'];
+    if (home != null && home.isNotEmpty) {
+      final sshDir = Directory('$home${Platform.pathSeparator}.ssh');
+      if (sshDir.existsSync()) {
+        initialDir = sshDir.path;
+      }
+    }
+
     final result = await FilePicker.platform.pickFiles(
       dialogTitle: 'Select SSH Identity File',
       type: FileType.any,
+      initialDirectory: initialDir,
     );
     if (result != null && result.files.single.path != null) {
-      _identityFileController.text = result.files.single.path!;
+      setState(() {
+        _identityFileController.text = result.files.single.path!;
+      });
+      // Clear any pending validation error now that a file is chosen.
+      _formKey.currentState?.validate();
     }
   }
 
@@ -339,8 +358,19 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
                     Expanded(
                       child: TextFormField(
                         controller: _identityFileController,
-                        decoration: const InputDecoration(
-                          hintText: '~/.ssh/id_rsa',
+                        readOnly: true,
+                        onTap: _pickIdentityFile,
+                        decoration: InputDecoration(
+                          hintText: 'No file selected',
+                          prefixIcon: Icon(
+                            Icons.key_outlined,
+                            size: 18,
+                            color: theme.colorScheme.outline,
+                          ),
+                          prefixIconConstraints: const BoxConstraints(
+                            minWidth: 36,
+                            minHeight: 0,
+                          ),
                         ),
                         validator: _useIdentityFile ? _required : null,
                       ),
@@ -632,7 +662,9 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
     final theme = Theme.of(context);
     final isSelected = _selectedTab == index;
 
-    return GestureDetector(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: () => setState(() => _selectedTab = index),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -659,13 +691,16 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
           ),
         ),
       ),
+      ),
     );
   }
 
   Widget _authTab(String label, bool isSelected, VoidCallback onTap) {
     final theme = Theme.of(context);
 
-    return GestureDetector(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -691,6 +726,7 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
                 : theme.colorScheme.outline,
           ),
         ),
+      ),
       ),
     );
   }
