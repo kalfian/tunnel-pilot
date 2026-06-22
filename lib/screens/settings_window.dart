@@ -396,16 +396,27 @@ class _SettingsWindowState extends State<SettingsWindow> {
   }
 
   Widget _buildSettingsTab(BuildContext context) {
+    final theme = Theme.of(context);
     return SingleChildScrollView(
       key: const ValueKey('settings'),
       padding: const EdgeInsets.all(20),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          UpdateBanner(),
-          AppSettingsSection(),
-          SizedBox(height: 24),
-          BackupRestoreSection(),
+          const UpdateBanner(),
+          const AppSettingsSection(),
+          const SizedBox(height: 24),
+          const BackupRestoreSection(),
+          const SizedBox(height: 20),
+          Center(
+            child: Text(
+              'Tunnel Pilot v${context.watch<UpdateService>().currentVersion}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.outline.withValues(alpha: 0.6),
+                fontSize: 11,
+              ),
+            ),
+          ),
         ],
       ),
     );
