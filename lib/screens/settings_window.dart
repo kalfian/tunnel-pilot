@@ -275,32 +275,82 @@ class _SettingsWindowState extends State<SettingsWindow> {
         Expanded(
           child: forwards.isEmpty
               ? _buildEmptyState(theme)
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              : ReorderableListView.builder(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+                  buildDefaultDragHandles: false,
                   itemCount: forwards.length,
+                  proxyDecorator: _buildDragProxy,
+                  onReorder: (oldIndex, newIndex) => context
+                      .read<ForwardProvider>()
+                      .reorderForward(oldIndex, newIndex),
                   itemBuilder: (context, index) {
                     final config = forwards[index];
-                    return ForwardListTile(
-                      config: config,
-                      isSelected: _selectedId == config.id,
-                      onTap: () => setState(() => _selectedId = config.id),
-                      onDoubleTap: () => _editForward(config),
-                      onToggle: () => context.read<ForwardProvider>().toggleForward(config.id),
-                      onEdit: () => _editForward(config),
-                      onDuplicate: () async {
-                        await context.read<ForwardProvider>().duplicateForward(config.id);
-                      },
-                      onDelete: () async {
-                        setState(() => _selectedId = config.id);
-                        await _deleteForward();
-                      },
-                      isFirst: index == 0,
-                      isLast: index == forwards.length - 1,
+                    // Each card is self-contained with a gap below it, so a
+                    // lifted item leaves a clean gap (no broken border stitching).
+                    return Padding(
+                      key: ValueKey(config.id),
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: ForwardListTile(
+                        config: config,
+                        reorderIndex: index,
+                        isSelected: _selectedId == config.id,
+                        onTap: () => setState(() => _selectedId = config.id),
+                        onDoubleTap: () => _editForward(config),
+                        onToggle: () => context
+                            .read<ForwardProvider>()
+                            .toggleForward(config.id),
+                        onEdit: () => _editForward(config),
+                        onDuplicate: () async {
+                          await context
+                              .read<ForwardProvider>()
+                              .duplicateForward(config.id);
+                        },
+                        onDelete: () async {
+                          setState(() => _selectedId = config.id);
+                          await _deleteForward();
+                        },
+                      ),
                     );
                   },
                 ),
         ),
       ],
+    );
+  }
+
+  /// Lifts the dragged row into a single clean floating card: fully rounded
+  /// (10px on all corners, regardless of its first/last position in the
+  /// resting list), a soft shadow, and a subtle scale-up. Material is
+  /// transparent so no ink splash bleeds over the row.
+  Widget _buildDragProxy(Widget child, int index, Animation<double> animation) {
+    return AnimatedBuilder(
+      animation: animation,
+      // Drives shadow + scale from 0 (settled) to 1 (fully lifted). The card
+      // already paints its own rounded fill/border, so the proxy only adds a
+      // lift shadow — no extra fill that would bleed into the inter-card gap.
+      builder: (context, _) {
+        final t = Curves.easeOut.transform(animation.value);
+        return Transform.scale(
+          scale: 1.0 + 0.02 * t,
+          child: Material(
+            type: MaterialType.transparency,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.28 * t),
+                    blurRadius: 22 * t,
+                    spreadRadius: 1 * t,
+                    offset: Offset(0, 8 * t),
+                  ),
+                ],
+              ),
+              child: child,
+            ),
+          ),
+        );
+      },
     );
   }
 

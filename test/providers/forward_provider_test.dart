@@ -58,6 +58,48 @@ void main() {
       expect(provider.forwards, isEmpty);
     });
 
+    test('reorderForward moves item down and persists new order', () async {
+      await provider.loadForwards([
+        createConfig(id: '1', name: 'First'),
+        createConfig(id: '2', name: 'Second'),
+        createConfig(id: '3', name: 'Third'),
+      ]);
+
+      // ReorderableListView passes newIndex assuming the item is still present;
+      // moving item 0 to the end reports newIndex == length (3).
+      await provider.reorderForward(0, 3);
+
+      expect(provider.forwards.map((f) => f.id).toList(), ['2', '3', '1']);
+      expect(mockStorage.lastSavedForwards?.map((f) => f.id).toList(),
+          ['2', '3', '1']);
+    });
+
+    test('reorderForward moves item up and persists new order', () async {
+      await provider.loadForwards([
+        createConfig(id: '1', name: 'First'),
+        createConfig(id: '2', name: 'Second'),
+        createConfig(id: '3', name: 'Third'),
+      ]);
+
+      await provider.reorderForward(2, 0);
+
+      expect(provider.forwards.map((f) => f.id).toList(), ['3', '1', '2']);
+    });
+
+    test('reorderForward ignores no-op and out-of-range indices', () async {
+      await provider.loadForwards([
+        createConfig(id: '1', name: 'First'),
+        createConfig(id: '2', name: 'Second'),
+      ]);
+
+      await provider.reorderForward(0, 1); // newIndex-1 == oldIndex => no-op
+      expect(provider.forwards.map((f) => f.id).toList(), ['1', '2']);
+      expect(mockStorage.lastSavedForwards, isNull);
+
+      await provider.reorderForward(5, 0); // out of range
+      expect(provider.forwards.map((f) => f.id).toList(), ['1', '2']);
+    });
+
     test('loadForwards populates list', () async {
       final configs = [
         createConfig(id: '1', name: 'First'),

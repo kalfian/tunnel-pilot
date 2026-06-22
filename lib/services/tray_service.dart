@@ -89,10 +89,10 @@ class TrayService {
     final connectingCount = statuses.values
         .where((s) => s == ForwardStatus.connecting)
         .length;
-    final iconCount = connectedCount + connectingCount;
 
-    // Update tray icon based on connection count (includes connecting)
-    await _systemTray.setImage(_iconPath(iconCount));
+    // Badge counts fully-connected tunnels only — a tunnel still connecting
+    // shows no count yet (idle icon until it actually comes up).
+    await _systemTray.setImage(_iconPath(connectedCount));
 
     // Build tooltip with connecting state
     String tooltip;

@@ -122,6 +122,27 @@ class ForwardProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Moves a tunnel from [oldIndex] to [newIndex] and persists the new order.
+  /// Order is stored implicitly as the position in the forwards list, so saving
+  /// the reordered list is all that's needed for it to survive app restarts.
+  Future<void> reorderForward(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 || oldIndex >= _forwards.length) return;
+    // ReorderableListView reports newIndex assuming the item is still present;
+    // adjust when moving an item further down the list.
+    if (newIndex > oldIndex) newIndex -= 1;
+    if (newIndex < 0) newIndex = 0;
+    if (newIndex >= _forwards.length) newIndex = _forwards.length - 1;
+    if (newIndex == oldIndex) return;
+
+    final item = _forwards.removeAt(oldIndex);
+    _forwards.insert(newIndex, item);
+    // Notify synchronously so the list reflects the new order on the same frame
+    // ReorderableListView settles the drop — awaiting the disk write first lets
+    // the list snap back to the old order for a frame (the post-drop glitch).
+    notifyListeners();
+    await _storage.saveForwards(_forwards);
+  }
+
   Future<void> duplicateForward(String id) async {
     final original = _forwards.firstWhere((f) => f.id == id);
     final duplicate = original.copyWith(
