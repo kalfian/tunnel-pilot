@@ -632,7 +632,9 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
     final theme = Theme.of(context);
     final isSelected = _selectedTab == index;
 
-    return GestureDetector(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: () => setState(() => _selectedTab = index),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -659,13 +661,16 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
           ),
         ),
       ),
+      ),
     );
   }
 
   Widget _authTab(String label, bool isSelected, VoidCallback onTap) {
     final theme = Theme.of(context);
 
-    return GestureDetector(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -691,6 +696,7 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
                 : theme.colorScheme.outline,
           ),
         ),
+      ),
       ),
     );
   }

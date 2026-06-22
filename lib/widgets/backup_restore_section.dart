@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../app.dart';
 import '../providers/forward_provider.dart';
 
 class BackupRestoreSection extends StatelessWidget {
@@ -102,20 +103,20 @@ class BackupRestoreSection extends StatelessWidget {
           ),
           child: Column(
             children: [
-              _actionRow(
-                context,
+              _ActionRow(
                 icon: Icons.upload_outlined,
                 title: 'Export Backup',
                 subtitle: 'Save configurations as JSON (passwords excluded)',
                 onTap: () => _exportBackup(context),
+                topRadius: true,
               ),
               Divider(height: 1, color: theme.dividerColor),
-              _actionRow(
-                context,
+              _ActionRow(
                 icon: Icons.download_outlined,
                 title: 'Import Backup',
                 subtitle: 'Restore configurations from a JSON file',
                 onTap: () => _importBackup(context),
+                bottomRadius: true,
               ),
             ],
           ),
@@ -124,38 +125,79 @@ class BackupRestoreSection extends StatelessWidget {
     );
   }
 
-  Widget _actionRow(
-    BuildContext context, {
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    final theme = Theme.of(context);
+}
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
+class _ActionRow extends StatefulWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool topRadius;
+  final bool bottomRadius;
+
+  const _ActionRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.topRadius = false,
+    this.bottomRadius = false,
+  });
+
+  @override
+  State<_ActionRow> createState() => _ActionRowState();
+}
+
+class _ActionRowState extends State<_ActionRow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tokens = context.tokens;
+
+    final radius = BorderRadius.vertical(
+      top: widget.topRadius ? const Radius.circular(10) : Radius.zero,
+      bottom: widget.bottomRadius ? const Radius.circular(10) : Radius.zero,
+    );
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: BoxDecoration(
+            color: _hovered ? tokens.hover : Colors.transparent,
+            borderRadius: radius,
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Row(
             children: [
-              Icon(icon, size: 18, color: theme.colorScheme.outline),
+              Icon(widget.icon, size: 18, color: theme.colorScheme.outline),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: theme.textTheme.bodyMedium),
+                    Text(widget.title, style: theme.textTheme.bodyMedium),
                     const SizedBox(height: 1),
-                    Text(subtitle, style: theme.textTheme.bodySmall),
+                    Text(widget.subtitle, style: theme.textTheme.bodySmall),
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right_rounded,
-                  size: 18, color: theme.colorScheme.outline),
+              AnimatedSlide(
+                duration: const Duration(milliseconds: 120),
+                offset: _hovered ? const Offset(0.15, 0) : Offset.zero,
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: theme.colorScheme.outline
+                      .withValues(alpha: _hovered ? 1 : 0.5),
+                ),
+              ),
             ],
           ),
         ),

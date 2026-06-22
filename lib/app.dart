@@ -4,6 +4,76 @@ import 'package:provider/provider.dart';
 import 'providers/app_settings_provider.dart';
 import 'screens/settings_window.dart';
 
+/// Monospace stack for technical content (ports, latency, timestamps).
+/// Flutter does NOT parse comma-separated `fontFamily` strings — it needs a
+/// real fallback list. Use this everywhere instead of a single CSS-style name.
+const List<String> kMonoFontFallback = <String>[
+  'SF Mono',
+  'Menlo',
+  'Consolas',
+  'monospace',
+];
+
+/// Shared, intentional design tokens. Centralizes the values that were
+/// previously scattered as magic numbers across widgets.
+@immutable
+class AppTokens extends ThemeExtension<AppTokens> {
+  const AppTokens({
+    required this.statusConnected,
+    required this.statusPending,
+    required this.statusError,
+    required this.statusIdle,
+    required this.hover,
+    required this.selected,
+  });
+
+  // Semantic status roles (single source of truth — was duplicated as raw hex
+  // in forward_list_tile and logs_section).
+  final Color statusConnected; // green
+  final Color statusPending; // amber
+  final Color statusError; // red
+  final Color statusIdle; // grey
+
+  // Interaction surface tints.
+  final Color hover;
+  final Color selected;
+
+  @override
+  AppTokens copyWith({
+    Color? statusConnected,
+    Color? statusPending,
+    Color? statusError,
+    Color? statusIdle,
+    Color? hover,
+    Color? selected,
+  }) =>
+      AppTokens(
+        statusConnected: statusConnected ?? this.statusConnected,
+        statusPending: statusPending ?? this.statusPending,
+        statusError: statusError ?? this.statusError,
+        statusIdle: statusIdle ?? this.statusIdle,
+        hover: hover ?? this.hover,
+        selected: selected ?? this.selected,
+      );
+
+  @override
+  AppTokens lerp(ThemeExtension<AppTokens>? other, double t) {
+    if (other is! AppTokens) return this;
+    return AppTokens(
+      statusConnected: Color.lerp(statusConnected, other.statusConnected, t)!,
+      statusPending: Color.lerp(statusPending, other.statusPending, t)!,
+      statusError: Color.lerp(statusError, other.statusError, t)!,
+      statusIdle: Color.lerp(statusIdle, other.statusIdle, t)!,
+      hover: Color.lerp(hover, other.hover, t)!,
+      selected: Color.lerp(selected, other.selected, t)!,
+    );
+  }
+}
+
+extension AppTokensX on BuildContext {
+  AppTokens get tokens => Theme.of(this).extension<AppTokens>()!;
+}
+
 class TunnelPilotApp extends StatelessWidget {
   const TunnelPilotApp({super.key});
 
@@ -36,6 +106,17 @@ class TunnelPilotApp extends StatelessWidget {
       brightness: Brightness.light,
       useMaterial3: true,
       fontFamily: '.SF Pro Text',
+      fontFamilyFallback: kMonoFontFallback,
+      extensions: const <ThemeExtension<dynamic>>[
+        AppTokens(
+          statusConnected: Color(0xFF16A34A),
+          statusPending: Color(0xFFD97706),
+          statusError: Color(0xFFDC2626),
+          statusIdle: Color(0xFF9CA3AF),
+          hover: Color(0x0A000000), // ~4% black
+          selected: Color(0x14007BFF), // accent @ 8%
+        ),
+      ],
       colorScheme: const ColorScheme.light(
         primary: accent,
         onPrimary: Colors.white,
@@ -43,10 +124,11 @@ class TunnelPilotApp extends StatelessWidget {
         onSurface: textPrimary,
         outline: textSecondary,
         outlineVariant: border,
+        error: Color(0xFFDC2626),
       ),
       scaffoldBackgroundColor: bg,
       dividerColor: border,
-      splashFactory: InkSplash.splashFactory,
+      splashFactory: NoSplash.splashFactory,
       textTheme: const TextTheme(
         bodySmall: TextStyle(fontSize: 12, color: textSecondary),
         bodyMedium: TextStyle(fontSize: 13, color: textPrimary),
@@ -127,6 +209,17 @@ class TunnelPilotApp extends StatelessWidget {
       brightness: Brightness.dark,
       useMaterial3: true,
       fontFamily: '.SF Pro Text',
+      fontFamilyFallback: kMonoFontFallback,
+      extensions: const <ThemeExtension<dynamic>>[
+        AppTokens(
+          statusConnected: Color(0xFF34D399),
+          statusPending: Color(0xFFFBBF24),
+          statusError: Color(0xFFF87171),
+          statusIdle: Color(0xFF6B7280),
+          hover: Color(0x0DFFFFFF), // ~5% white
+          selected: Color(0x1F3D9AFF), // accent @ 12%
+        ),
+      ],
       colorScheme: const ColorScheme.dark(
         primary: accent,
         onPrimary: Color(0xFF111318),
@@ -135,10 +228,11 @@ class TunnelPilotApp extends StatelessWidget {
         outline: textSecondary,
         outlineVariant: border,
         surfaceContainerHighest: surfaceElevated,
+        error: Color(0xFFF87171),
       ),
       scaffoldBackgroundColor: bg,
       dividerColor: border,
-      splashFactory: InkSplash.splashFactory,
+      splashFactory: NoSplash.splashFactory,
       textTheme: const TextTheme(
         bodySmall: TextStyle(fontSize: 12, color: textSecondary),
         bodyMedium: TextStyle(fontSize: 13, color: textPrimary),

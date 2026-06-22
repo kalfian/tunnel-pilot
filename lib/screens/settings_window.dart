@@ -203,9 +203,12 @@ class _SettingsWindowState extends State<SettingsWindow> {
     final theme = Theme.of(context);
     final isActive = _tabIndex == index;
 
-    return GestureDetector(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: () => setState(() => _tabIndex = index),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           border: Border(
@@ -225,6 +228,7 @@ class _SettingsWindowState extends State<SettingsWindow> {
                 : theme.colorScheme.outline,
           ),
         ),
+      ),
       ),
     );
   }
