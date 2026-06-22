@@ -44,9 +44,10 @@ class TrayService {
 
   String _iconPath(int connectedCount) {
     final ext = Platform.isWindows ? 'ico' : 'png';
-    final name = connectedCount <= 0
-        ? 'tray_icon_idle'
-        : 'tray_icon_$connectedCount';
+    // Badge assets exist for 1–9; clamp higher counts to the "9" asset.
+    // (The menu header still shows the exact count.)
+    final clamped = connectedCount > 9 ? 9 : connectedCount;
+    final name = clamped <= 0 ? 'tray_icon_idle' : 'tray_icon_$clamped';
     return _assetPath('$name.$ext');
   }
 
@@ -92,7 +93,13 @@ class TrayService {
 
     // Badge counts fully-connected tunnels only — a tunnel still connecting
     // shows no count yet (idle icon until it actually comes up).
-    await _systemTray.setImage(_iconPath(connectedCount));
+    // macOS: mark as template image so the OS auto-tints the black+alpha
+    // glyph for light/dark menu bars. Windows/Linux .ico are white, not
+    // templates, so isTemplate stays false there.
+    await _systemTray.setImage(
+      _iconPath(connectedCount),
+      isTemplate: Platform.isMacOS,
+    );
 
     // Build tooltip with connecting state
     String tooltip;
