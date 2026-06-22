@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -8,12 +10,23 @@ import '../providers/forward_provider.dart';
 class BackupRestoreSection extends StatelessWidget {
   const BackupRestoreSection({super.key});
 
+  /// Default the backup dialogs to the user's home folder so they don't
+  /// inherit the file picker's last-used location (e.g. ~/.ssh from the
+  /// identity-file picker). Returns null if home can't be resolved, which
+  /// lets the OS pick its own default.
+  String? _defaultDirectory() {
+    final home =
+        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+    return (home != null && home.isNotEmpty) ? home : null;
+  }
+
   Future<void> _exportBackup(BuildContext context) async {
     final provider = context.read<ForwardProvider>();
 
     final path = await FilePicker.platform.saveFile(
       dialogTitle: 'Export Backup',
       fileName: 'tunnel_pilot_backup.json',
+      initialDirectory: _defaultDirectory(),
       type: FileType.custom,
       allowedExtensions: ['json'],
     );
@@ -49,6 +62,7 @@ class BackupRestoreSection extends StatelessWidget {
 
     final result = await FilePicker.platform.pickFiles(
       dialogTitle: 'Import Backup',
+      initialDirectory: _defaultDirectory(),
       type: FileType.custom,
       allowedExtensions: ['json'],
     );
@@ -166,6 +180,10 @@ class _ActionRowState extends State<_ActionRow> {
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
+        // Whole padded row should be tappable, not just the text/icon glyphs.
+        // Without this, the transparent background + deferToChild hit-testing
+        // leaves the padding and the title→chevron gap as dead click zones.
+        behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),

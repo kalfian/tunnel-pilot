@@ -80,16 +80,16 @@ class _ForwardFormDialogState extends State<ForwardFormDialog> {
   }
 
   Future<void> _pickIdentityFile() async {
-    // SSH keys typically live in ~/.ssh which is hidden in the native panel,
-    // so open the picker there directly when it exists.
+    // SSH keys typically live in ~/.ssh (hidden in the native panel), so open
+    // the picker there by default on macOS/Linux/Windows. If it doesn't exist
+    // yet (e.g. a fresh machine), fall back to the home folder. Either way the
+    // user can still browse to any other folder from the native dialog.
     String? initialDir;
     final home = Platform.environment['HOME'] ??
         Platform.environment['USERPROFILE'];
     if (home != null && home.isNotEmpty) {
       final sshDir = Directory('$home${Platform.pathSeparator}.ssh');
-      if (sshDir.existsSync()) {
-        initialDir = sshDir.path;
-      }
+      initialDir = sshDir.existsSync() ? sshDir.path : home;
     }
 
     final result = await FilePicker.platform.pickFiles(
