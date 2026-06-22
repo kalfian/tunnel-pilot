@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-06-22
+
+### Improved
+- **Monochrome Tray Icon** — Redesigned the menu-bar icon around the app's ring-and-arrow logo as a clean monochrome glyph that adapts to both light and dark menu bars; the active tunnel count now shows as a refined corner badge.
+
+### Fixed
+- **Settings Version Label** — Moved the "Tunnel Pilot vX.Y.Z" label to the very bottom of the Settings tab; it previously rendered mid-content between sections.
+
 ## [1.4.0] - 2026-06-22
 
 ### Added
