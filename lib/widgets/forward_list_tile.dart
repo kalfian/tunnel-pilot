@@ -17,8 +17,10 @@ class ForwardListTile extends StatefulWidget {
   final VoidCallback onEdit;
   final VoidCallback onDuplicate;
   final VoidCallback onDelete;
-  final bool isFirst;
-  final bool isLast;
+
+  /// Position in the reorderable list. When non-null, an always-visible drag
+  /// handle is shown that lets the user drag this row to a new position.
+  final int? reorderIndex;
 
   const ForwardListTile({
     super.key,
@@ -30,8 +32,7 @@ class ForwardListTile extends StatefulWidget {
     required this.onEdit,
     required this.onDuplicate,
     required this.onDelete,
-    this.isFirst = false,
-    this.isLast = false,
+    this.reorderIndex,
   });
 
   @override
@@ -229,10 +230,7 @@ class _ForwardListTileState extends State<ForwardListTile> {
     final color = _statusColor(status, tokens);
     final borderColor = theme.dividerColor;
 
-    final radius = BorderRadius.vertical(
-      top: widget.isFirst ? const Radius.circular(10) : Radius.zero,
-      bottom: widget.isLast ? const Radius.circular(10) : Radius.zero,
-    );
+    const radius = BorderRadius.all(Radius.circular(10));
 
     // Layered surface: selected wins, then hover, then base.
     final Color surfaceColor = widget.isSelected
@@ -250,31 +248,44 @@ class _ForwardListTileState extends State<ForwardListTile> {
         onDoubleTap: widget.onDoubleTap,
         onSecondaryTapUp: (details) =>
             _showContextMenu(context, details.globalPosition),
-        child: AnimatedContainer(
+        child: Stack(
+          children: [
+            AnimatedContainer(
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
         decoration: BoxDecoration(
           color: surfaceColor,
           borderRadius: radius,
-          border: Border(
-            left: BorderSide(
-              color: widget.isSelected
-                  ? theme.colorScheme.primary.withValues(alpha: 0.5)
-                  : borderColor,
-              width: widget.isSelected ? 1.5 : 1,
-            ),
-            right: BorderSide(color: borderColor),
-            top: widget.isFirst
-                ? BorderSide(color: borderColor)
-                : BorderSide(color: borderColor, width: 0.5),
-            bottom: widget.isLast
-                ? BorderSide(color: borderColor)
-                : BorderSide.none,
-          ),
+          // Self-contained card: uniform border on all sides (Border.all is
+          // single-color, so it composes safely with borderRadius and any
+          // animation).
+          border: Border.all(color: borderColor),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         child: Row(
           children: [
+            // Drag handle for reordering — always visible, low-emphasis at
+            // rest and slightly stronger on hover. Opacity-only transition so
+            // the row layout never shifts between states.
+            if (widget.reorderIndex != null) ...[
+              ReorderableDragStartListener(
+                index: widget.reorderIndex!,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.grab,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 120),
+                    opacity: _hovered ? 0.6 : 0.35,
+                    child: Icon(
+                      Icons.drag_indicator_rounded,
+                      size: 16,
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+
             // Status indicator
             if (isTransitioning)
               SizedBox(
@@ -426,6 +437,29 @@ class _ForwardListTileState extends State<ForwardListTile> {
             ),
           ],
         ),
+        ),
+            // Selection accent — overlaid (not part of the border) so it never
+            // forces non-uniform border colors against the rounded corners.
+            if (widget.isSelected)
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    width: 2.5,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.8),
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(10),
+                        bottomLeft: Radius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

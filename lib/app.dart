@@ -100,7 +100,7 @@ class TunnelPilotApp extends StatelessWidget {
     const border = Color(0xFFE2E5EA);
     const textPrimary = Color(0xFF1A1D23);
     const textSecondary = Color(0xFF6B7280);
-    const accent = Color(0xFF007BFF);
+    const accent = Color(0xFF288DCC);
 
     return ThemeData(
       brightness: Brightness.light,
@@ -113,7 +113,7 @@ class TunnelPilotApp extends StatelessWidget {
           statusError: Color(0xFFDC2626),
           statusIdle: Color(0xFF9CA3AF),
           hover: Color(0x0A000000), // ~4% black
-          selected: Color(0x14007BFF), // accent @ 8%
+          selected: Color(0x14288DCC), // accent @ 8%
         ),
       ],
       colorScheme: const ColorScheme.light(
@@ -202,7 +202,7 @@ class TunnelPilotApp extends StatelessWidget {
     const border = Color(0xFF2E333D);
     const textPrimary = Color(0xFFE5E7EB);
     const textSecondary = Color(0xFF8B919A);
-    const accent = Color(0xFF3D9AFF);
+    const accent = Color(0xFF4AA5E0);
 
     return ThemeData(
       brightness: Brightness.dark,
@@ -215,7 +215,7 @@ class TunnelPilotApp extends StatelessWidget {
           statusError: Color(0xFFF87171),
           statusIdle: Color(0xFF6B7280),
           hover: Color(0x0DFFFFFF), // ~5% white
-          selected: Color(0x1F3D9AFF), // accent @ 12%
+          selected: Color(0x1F4AA5E0), // accent @ 12%
         ),
       ],
       colorScheme: const ColorScheme.dark(
