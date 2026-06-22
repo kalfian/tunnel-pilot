@@ -106,7 +106,6 @@ class TunnelPilotApp extends StatelessWidget {
       brightness: Brightness.light,
       useMaterial3: true,
       fontFamily: '.SF Pro Text',
-      fontFamilyFallback: kMonoFontFallback,
       extensions: const <ThemeExtension<dynamic>>[
         AppTokens(
           statusConnected: Color(0xFF16A34A),
@@ -209,7 +208,6 @@ class TunnelPilotApp extends StatelessWidget {
       brightness: Brightness.dark,
       useMaterial3: true,
       fontFamily: '.SF Pro Text',
-      fontFamilyFallback: kMonoFontFallback,
       extensions: const <ThemeExtension<dynamic>>[
         AppTokens(
           statusConnected: Color(0xFF34D399),
