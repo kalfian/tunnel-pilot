@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-22
+
+### Added
+- **Reorder Tunnels** — Drag tunnels into any order from the Connections list; the order is saved and restored across restarts.
+- **New Accent Color** — Refreshed the app, tray icons, and website to a new `#288DCC` brand blue.
+
+### Improved
+- **Tray Counter Accuracy** — The tray badge now counts only fully-connected tunnels; a tunnel that's still connecting no longer inflates the count.
+
+### Fixed
+- **Tunnel List Stability** — Fixed a rendering exception ("borderRadius on non-uniform border") that spammed the logs while reordering or selecting tunnels, and removed a brief snap-back glitch after dropping a reordered tunnel.
+
 ## [1.3.10] - 2026-06-22
 
 ### Added
