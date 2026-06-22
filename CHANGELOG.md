@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-06-22
+
+### Fixed
+- **Backup Buttons Clickable** — The Export and Import rows now respond to clicks across the entire row, not just on the text/icon.
+
+### Improved
+- **Smarter File Picker Defaults** — Export and Import now open in your home folder instead of inheriting `~/.ssh`. The SSH identity-file picker still defaults to `~/.ssh` (and to the home folder on a fresh machine), while letting you browse to any folder.
+
 ## [1.4.1] - 2026-06-22
 
 ### Improved
