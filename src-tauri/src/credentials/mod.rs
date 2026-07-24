@@ -17,7 +17,7 @@ mod fallback;
 use std::path::{Path, PathBuf};
 
 pub use backend::KC_SERVICE;
-use backend::{KeychainBackend, KeyringBackend};
+use backend::{InMemoryBackend, KeychainBackend, KeyringBackend, NullBackend};
 use fallback::FallbackStore;
 
 use crate::error::AppError;
@@ -55,6 +55,24 @@ impl CredentialStore {
     /// Build from the app-support directory, appending [`SECRETS_FILE_NAME`].
     pub fn from_app_dir(app_support_dir: &Path) -> Self {
         Self::new(app_support_dir.join(SECRETS_FILE_NAME))
+    }
+
+    /// Fully in-memory store (no OS keychain, no disk). `keychain_available()`
+    /// reports true so the keychain route is exercised. For headless
+    /// `AppState` (engine tests) and migration tests only — never production.
+    pub fn in_memory() -> Self {
+        Self {
+            keychain: Box::new(InMemoryBackend::default()),
+            fallback: FallbackStore::new(PathBuf::new()),
+            keychain_available: true,
+        }
+    }
+
+    /// Fallback-only store: the keychain is forced unavailable so every secret
+    /// is routed to the plaintext `secrets_file`. Used on headless Linux (no
+    /// Secret Service) and to exercise the fallback route deterministically.
+    pub fn fallback_only(secrets_file: PathBuf) -> Self {
+        Self::with_backend(Box::new(NullBackend), secrets_file)
     }
 
     /// Wire an explicit backend (probed once) + fallback path. `pub(crate)` so
