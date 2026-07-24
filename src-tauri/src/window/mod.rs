@@ -16,7 +16,13 @@ use crate::state::AppState;
 /// The main window label (matches `tauri.conf.json`).
 pub const MAIN_WINDOW: &str = "main";
 
-/// Show + focus the main window and apply dock visibility per `showInDock`.
+/// Show + focus the main window, apply dock visibility per `showInDock`, and
+/// notify the frontend so it rehydrates (AGENTS §5 "app_hydrate on show/boot").
+///
+/// This is the single show path for every trigger (tray "Open", the
+/// `show_window` IPC command, single-instance re-launch), so emitting
+/// `WINDOW_FOCUS` here guarantees the frontend re-hydrates on every show — the
+/// webview may have been torn down while hidden.
 pub fn show_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.show();
@@ -26,6 +32,8 @@ pub fn show_window(app: &AppHandle) {
     }
     // Window is now shown → dock visible iff the setting says so.
     crate::platform::dock::refresh(app, true);
+    // Tell the frontend to rehydrate now that the window is visible again.
+    let _ = app.emit(events::WINDOW_FOCUS, ());
 }
 
 /// Hide the main window and always drop the dock/taskbar entry (spec 03 §14).
@@ -37,11 +45,11 @@ pub fn hide_window(app: &AppHandle) {
     crate::platform::dock::refresh(app, false);
 }
 
-/// Single-instance re-show: a second launch focuses the existing window and
-/// notifies the frontend so it can refresh (spec 03 §11).
+/// Single-instance re-show: a second launch focuses the existing window (spec
+/// 03 §11). `show_window` already emits `WINDOW_FOCUS`, so the frontend refresh
+/// is covered without a second emit here.
 pub fn focus_from_second_instance(app: &AppHandle) {
     show_window(app);
-    let _ = app.emit(events::WINDOW_FOCUS, ());
 }
 
 /// Install the hide-on-close intercept on the main window (spec 03 §14): the OS
