@@ -4,9 +4,12 @@
   import { keychainUnavailable } from "./lib/stores/settings";
   import { activeView, type ViewId } from "./lib/ui/view";
   import { isMacOS } from "./lib/ui/platform";
+  import { paletteOpen, togglePalette } from "./lib/stores/palette";
+  import { requestAddForm } from "./lib/stores/commands";
   import SidebarItem from "./lib/components/ui/SidebarItem.svelte";
   import Icon from "./lib/components/ui/Icon.svelte";
   import ToastHost from "./lib/components/ui/ToastHost.svelte";
+  import CommandPalette from "./lib/components/CommandPalette.svelte";
   import ConnectionsView from "./lib/routes/ConnectionsView.svelte";
   import LogsView from "./lib/routes/LogsView.svelte";
   import SettingsView from "./lib/routes/SettingsView.svelte";
@@ -44,16 +47,25 @@
 
   function onKeydown(e: KeyboardEvent): void {
     if (!(e.metaKey || e.ctrlKey)) return;
-    if (e.key === "1") {
+    // ⌘K / Ctrl+K toggles the palette from anywhere (even over a dialog).
+    if (e.key === "k") {
+      e.preventDefault();
+      togglePalette();
+      return;
+    }
+    // While the palette owns focus, let it handle its own keys (it manages
+    // ⌘N/⌘,/nav internally via its action list).
+    if ($paletteOpen) return;
+    if (e.key === "n") {
+      e.preventDefault();
+      requestAddForm();
+    } else if (e.key === "1") {
       e.preventDefault();
       activeView.set("connections");
     } else if (e.key === "2") {
       e.preventDefault();
       activeView.set("activity");
-    } else if (e.key === "3") {
-      e.preventDefault();
-      activeView.set("settings");
-    } else if (e.key === ",") {
+    } else if (e.key === "3" || e.key === ",") {
       e.preventDefault();
       activeView.set("settings");
     }
@@ -87,6 +99,22 @@
           />
         {/each}
       </div>
+
+      <!-- Persistent ⌘K affordance (spec §2: always visible in the rail). -->
+      <button
+        type="button"
+        class="palette-cue"
+        class:compact
+        aria-label="Open command palette"
+        title="Command palette (⌘K)"
+        onclick={togglePalette}
+      >
+        <Icon name="search" size={15} />
+        {#if !compact}
+          <span class="cue-label">Search</span>
+          <span class="cue-kbd mono">⌘K</span>
+        {/if}
+      </button>
     </nav>
 
     <main class="content">
@@ -115,6 +143,10 @@
       </div>
     </main>
   </div>
+
+  {#if $paletteOpen}
+    <CommandPalette />
+  {/if}
 
   <ToastHost />
 </div>
@@ -170,6 +202,48 @@
     flex-direction: column;
     gap: var(--sp-1);
     width: 100%;
+  }
+
+  .palette-cue {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    width: 100%;
+    padding: var(--sp-2) var(--sp-3);
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text-2);
+    cursor: pointer;
+    transition:
+      background-color var(--dur-fast) var(--ease-standard),
+      border-color var(--dur-fast) var(--ease-standard);
+  }
+  .palette-cue.compact {
+    width: var(--hit-min);
+    height: var(--hit-min);
+    justify-content: center;
+    padding: 0;
+  }
+  .palette-cue:hover {
+    background: var(--hover);
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+  .palette-cue:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  .cue-label {
+    flex: 1;
+    text-align: left;
+    font-size: var(--fs-body-sm);
+  }
+  .cue-kbd {
+    flex: none;
+    font-size: var(--fs-mono-sm);
+    color: var(--text-3);
   }
 
   .content {

@@ -11,6 +11,8 @@
   import { deleteForward, duplicateForward, copySshCommand } from "../ipc";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { activeView } from "../ui/view";
+  import { paletteOpen } from "../stores/palette";
+  import { pendingForm, pendingDelete } from "../stores/commands";
   import { pushToast } from "../ui/toast";
   import ConnectionList from "../components/ConnectionList.svelte";
   import ForwardForm from "../components/ForwardForm.svelte";
@@ -62,6 +64,23 @@
     }
   });
 
+  // Command-bus: the palette / global shortcuts publish add/edit/delete requests
+  // (they can't reach this view's dialog state directly). Consume + clear them.
+  $effect(() => {
+    const req = $pendingForm;
+    if (req) {
+      form = req.mode === "add" ? { mode: "add" } : { mode: "edit", forward: req.forward };
+      pendingForm.set(null);
+    }
+  });
+  $effect(() => {
+    const target = $pendingDelete;
+    if (target) {
+      confirmTarget = target;
+      pendingDelete.set(null);
+    }
+  });
+
   async function duplicateSelected(): Promise<void> {
     if (!selected) return;
     try {
@@ -108,13 +127,9 @@
   }
 
   function onKeydown(e: KeyboardEvent): void {
-    if (form || confirmTarget) return; // dialogs own the keyboard
+    if (form || confirmTarget || $paletteOpen) return; // dialogs/palette own the keyboard
     const mod = e.metaKey || e.ctrlKey;
-    if (mod && e.key === "n") {
-      e.preventDefault();
-      form = { mode: "add" };
-      return;
-    }
+    // ⌘N (add) is handled globally in App via the command bus.
     if (mod && e.key === "f") {
       e.preventDefault();
       filterEl?.focus();
