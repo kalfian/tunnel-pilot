@@ -39,6 +39,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 russh = "0.45"
 russh-keys = "0.45"
+async-trait = "0.1.91"
 
 [features]
 # this feature is used for production builds or when a dev server is not specified,

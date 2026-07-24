@@ -26,11 +26,15 @@ pub mod tray;
 pub mod updater;
 pub mod window;
 
+use std::sync::Arc;
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     Manager,
 };
+
+use crate::state::AppState;
 
 /// Build and run the Tauri application.
 ///
@@ -53,11 +57,24 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // M1: temporary debug commands to drive the SSH engine (replaced at M4).
+        .invoke_handler(tauri::generate_handler![
+            crate::commands::debug::debug_upsert_config,
+            crate::commands::debug::debug_set_password,
+            crate::commands::debug::debug_connect,
+            crate::commands::debug::debug_disconnect,
+            crate::commands::debug::debug_retry,
+            crate::commands::debug::debug_runtime,
+        ])
         .setup(|app| {
             // Initialize tracing + the (stubbed) tracing→log-buffer layer first
             // so subsequent setup steps are captured (spec 03 §18).
             crate::logging::init_tracing();
             tracing::info!("Tunnel Pilot v{} starting", env!("CARGO_PKG_VERSION"));
+
+            // The shared application state (source of truth, spec 02 §5). Owns
+            // the tunnel registry + (M1) in-memory config/settings/credentials.
+            app.manage(Arc::new(AppState::new(app.handle().clone())));
 
             // macOS: sit in the tray as an agent app (baseline; the `showInDock`
             // activation-policy switching lands in M3, spec 03 §13). Mirrors the

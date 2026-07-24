@@ -5549,6 +5549,7 @@ name = "tunnel-pilot"
 version = "2.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "russh",
  "russh-keys",

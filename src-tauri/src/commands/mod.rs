@@ -10,6 +10,8 @@
 
 pub mod app;
 pub mod backup;
+/// TEMPORARY (M1): debug commands to drive the engine; removed at M4.
+pub mod debug;
 pub mod forwards;
 pub mod groups;
 pub mod logs;
