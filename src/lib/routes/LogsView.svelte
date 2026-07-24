@@ -31,6 +31,23 @@
     }),
   );
 
+  // Stable per-line keys (F48): keying `{#each}` by array index mis-associates
+  // rows to the wrong DOM node when the filter changes the visible subset.
+  // Logs carry no id, so derive a content key + an occurrence index among
+  // identical lines (order-stable under filtering, since filtering preserves
+  // relative order and never reorders the buffer).
+  const keyed = $derived(
+    (() => {
+      const seen: Record<string, number> = {};
+      return visible.map((l) => {
+        const base = `${l.timestamp}|${l.level}|${l.tunnelName ?? ""}|${l.message}`;
+        const n = seen[base] ?? 0;
+        seen[base] = n + 1;
+        return { key: `${base}#${n}`, l };
+      });
+    })(),
+  );
+
   function line(l: LogEntry): string {
     const tunnel = l.tunnelName ? ` [${l.tunnelName}]` : "";
     return `[${l.timestamp}] [${LEVEL_LABEL[l.level]}]${tunnel} ${l.message}`;
@@ -132,7 +149,7 @@
       />
     {:else}
       <ul class="log" aria-label="Activity log">
-        {#each visible as l, i (i)}
+        {#each keyed as { key, l } (key)}
           <li>
             <button
               type="button"
