@@ -73,8 +73,11 @@ impl FallbackStore {
         }
     }
 
-    /// Atomically persist `file`: write to a temp sibling, `0600` it, then
-    /// rename over the target so a crash mid-write can never truncate the file.
+    /// Atomically persist `file`: write to a temp sibling created `0600` from the
+    /// start, then rename over the target so a crash mid-write can never truncate
+    /// the file. Creating the tmp with mode `0600` (rather than `write` + a later
+    /// `chmod`) closes the brief window where the plaintext secret would be
+    /// world-readable under the default umask (F39).
     fn store(&self, file: &SecretsFile) -> Result<(), AppError> {
         if let Some(parent) = self.path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -84,17 +87,15 @@ impl FallbackStore {
 
         let bytes = serde_json::to_vec_pretty(file)?;
         let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, &bytes)?;
-        restrict_permissions(&tmp)?;
+        write_secret_tmp(&tmp, &bytes)?;
 
         // Rename is atomic on the same filesystem; the temp sibling guarantees
-        // that (parent dir + same fs).
+        // that (parent dir + same fs). Rename preserves the tmp's `0600` mode.
         std::fs::rename(&tmp, &self.path).map_err(|e| {
             // Best-effort cleanup so we don't leak a `.tmp` on failure.
             let _ = std::fs::remove_file(&tmp);
             AppError::from(e)
         })?;
-        restrict_permissions(&self.path)?;
         Ok(())
     }
 
@@ -121,18 +122,31 @@ impl FallbackStore {
     }
 }
 
-/// Tighten the secrets file to owner-only read/write (`0600`) on Unix. No-op on
-/// platforms without POSIX permission bits (the fallback path is a Linux-
-/// headless corner case anyway).
+/// Write `bytes` to the temp file, creating it owner-only read/write (`0600`)
+/// atomically at open time on Unix — so the plaintext secret is never briefly
+/// world-readable (F39). Any stale tmp from a previously crashed write is
+/// removed first so `create_new` succeeds. On platforms without POSIX
+/// permission bits (the fallback path is a Linux-headless corner case anyway)
+/// this falls back to a plain write.
 #[cfg(unix)]
-fn restrict_permissions(path: &Path) -> Result<(), AppError> {
-    use std::os::unix::fs::PermissionsExt;
-    let perms = std::fs::Permissions::from_mode(0o600);
-    std::fs::set_permissions(path, perms)?;
+fn write_secret_tmp(tmp: &Path, bytes: &[u8]) -> Result<(), AppError> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    // A leftover tmp from a crashed write would make `create_new` fail; clear it.
+    let _ = std::fs::remove_file(tmp);
+    let mut file = std::fs::OpenOptions::new()
+        .mode(0o600)
+        .create_new(true)
+        .write(true)
+        .open(tmp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
     Ok(())
 }
 
 #[cfg(not(unix))]
-fn restrict_permissions(_path: &Path) -> Result<(), AppError> {
+fn write_secret_tmp(tmp: &Path, bytes: &[u8]) -> Result<(), AppError> {
+    std::fs::write(tmp, bytes)?;
     Ok(())
 }
