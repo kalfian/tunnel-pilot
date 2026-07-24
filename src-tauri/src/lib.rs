@@ -7,6 +7,24 @@
 //!
 //! Module tree, plugins, tray, and tracing are wired across the M0 items.
 
+// M0 scaffold: the subsystem modules below are stubs (doc comments + TODO
+// markers) filled in M1+. Their public items are intentionally not yet
+// referenced, so allow dead_code crate-wide during the scaffold phase. Remove
+// this once the engine/commands wire the modules up (M1/M4).
+#![allow(dead_code)]
+
+pub mod commands;
+pub mod credentials;
+pub mod error;
+pub mod events;
+pub mod platform;
+pub mod ssh;
+pub mod state;
+pub mod storage;
+pub mod tray;
+pub mod updater;
+pub mod window;
+
 /// Build and run the Tauri application.
 ///
 /// The window starts hidden (`visible: false` in `tauri.conf.json`) so the app
