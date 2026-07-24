@@ -1000,3 +1000,221 @@ async fn retry_racing_reconnect_attempts_never_lost() {
         .unwrap();
     ssh2.kill().await;
 }
+
+#[tokio::test]
+async fn wake_probe_leaves_healthy_tunnel_connected() {
+    use crate::state::models::ForwardStatus;
+
+    // §4 acceptance: a wake nudge on a HEALTHY tunnel probes the session, finds
+    // it alive, and does NOT tear it down. Also proves the supervisor's RTT
+    // probe populates latency into the stats cell (what the shared sampler
+    // emits), and the shared sampler auto-started on connect (health.rs).
+    let echo = start_echo_target().await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
+    let local_port = free_port().await;
+
+    let state = make_state(true, 5);
+    state.upsert_config(base_config("wake-ok", local_port, ssh.port, echo.port));
+    state.set_password("wake-ok", "pw".into());
+
+    engine::connect_forward(&state, "wake-ok").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "wake-ok",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+
+    // The shared 3s sampler auto-started on the first connect (exactly one).
+    assert!(
+        state.registry.is_sampler_running(),
+        "shared sampler auto-starts on connect"
+    );
+
+    // Hammer wake nudges — a healthy session survives every probe.
+    for _ in 0..5 {
+        engine::request_wake_probe(&state, "wake-ok");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    assert_eq!(
+        state.registry.current_status("wake-ok"),
+        Some(ForwardStatus::Connected),
+        "healthy tunnel is untouched by a wake probe (§4)"
+    );
+
+    // The supervisor feeds a LIVE snapshot into the stats cell (the value the
+    // shared sampler reads and emits): `connected_since` is populated on connect.
+    // NOTE: we deliberately do NOT assert `last_ping_latency_ms.is_some()` here —
+    // the channel-open RTT on loopback is routinely <1ms, and `set_latency`
+    // truncates to whole ms (`as_millis`), so a sub-ms probe legitimately stores
+    // 0 → reported as `None`. The sampler's carrying of latency is covered
+    // deterministically by the seeded-cell unit test in `ssh/health.rs`.
+    let cell_is_live = state
+        .registry
+        .connected_snapshot()
+        .into_iter()
+        .find(|(id, _)| id == "wake-ok")
+        .map(|(_, cell)| cell.borrow().connected_since.is_some())
+        .unwrap_or(false);
+    assert!(
+        cell_is_live,
+        "supervisor publishes a live stats snapshot into the cell the sampler emits"
+    );
+
+    engine::disconnect_forward(&state, "wake-ok", true)
+        .await
+        .unwrap();
+    ssh.kill().await;
+}
+
+#[tokio::test]
+async fn wake_probe_reconnects_silently_dead_tunnel() {
+    use crate::state::models::ForwardStatus;
+
+    // §4 acceptance: on a SILENTLY dead session (TCP up, no traffic) with a SLOW
+    // keepalive, the wake probe — not keepalive — detects the death and forces
+    // an immediate reconnect. Isolates the wake path from the keepalive/is_closed
+    // backstop by making keepalive far too slow to fire during the test window.
+    let echo = start_echo_target().await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
+    let relay = start_relay(ssh.port).await;
+    let local_port = free_port().await;
+
+    let state = make_state(true, 10);
+    let mut cfg = base_config("wake-dead", local_port, relay.port, echo.port);
+    // Keepalive slow enough that it will NOT fire in the test window — so the
+    // ONLY thing that can detect the silent death is the wake RTT probe.
+    cfg.keep_alive_interval_sec = 3600;
+    cfg.keep_alive_max_count = 5;
+    state.upsert_config(cfg);
+    state.set_password("wake-dead", "pw".into());
+
+    engine::connect_forward(&state, "wake-dead").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "wake-dead",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+
+    // Silent death: hold the SSH sockets open but forward nothing. is_closed()
+    // stays false and keepalive is 3600s away — without the wake nudge the
+    // tunnel would sit "connected" indefinitely.
+    relay.blackhole.store(true, Ordering::SeqCst);
+    // The relay polls its blackhole flag on a ~40ms cadence; wait for forwarding
+    // to actually stop so the wake probe's channel-open can't slip through the
+    // gap and succeed (which would spuriously leave the session "healthy").
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    // Nudge as the wake watchdog would. The supervisor's spawned RTT probe hangs
+    // to its 3s timeout (no reply through the black hole) → wake-dead → immediate
+    // reconnect. The tunnel must LEAVE connected purely because of the probe.
+    engine::request_wake_probe(&state, "wake-dead");
+    let left_connected = {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            if state.registry.current_status("wake-dead") != Some(ForwardStatus::Connected) {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+    assert!(
+        left_connected,
+        "wake probe must detect the silent death and reconnect (keepalive is 3600s away)"
+    );
+
+    // Clear the black hole so a fresh reconnect attempt succeeds → recovers.
+    relay.blackhole.store(false, Ordering::SeqCst);
+    assert!(
+        wait_status(
+            &state,
+            "wake-dead",
+            ForwardStatus::Connected,
+            Duration::from_secs(25)
+        )
+        .await,
+        "tunnel recovers once the fault clears"
+    );
+
+    engine::disconnect_forward(&state, "wake-dead", true)
+        .await
+        .unwrap();
+    ssh.kill().await;
+}
+
+#[tokio::test]
+async fn session_signal_recovers_without_any_wake_nudge() {
+    use crate::state::models::ForwardStatus;
+
+    // §4 acceptance ("does not depend on the heuristic firing"): with NO wake
+    // nudge at all, a silent death still recovers via the keepalive/session
+    // signal backstop (F7/F15). Fast keepalive; never call request_wake_probe.
+    let echo = start_echo_target().await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
+    let relay = start_relay(ssh.port).await;
+    let local_port = free_port().await;
+
+    let state = make_state(true, 10);
+    let mut cfg = base_config("no-wake", local_port, relay.port, echo.port);
+    cfg.keep_alive_interval_sec = 1;
+    cfg.keep_alive_max_count = 2;
+    state.upsert_config(cfg);
+    state.set_password("no-wake", "pw".into());
+
+    engine::connect_forward(&state, "no-wake").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "no-wake",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+
+    // Silent death, then let the black hole clear on its own after keepalive has
+    // had time to trip. NO wake nudge is ever issued.
+    relay.blackhole.store(true, Ordering::SeqCst);
+    let left_connected = {
+        let deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            if state.registry.current_status("no-wake") != Some(ForwardStatus::Connected) {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+    assert!(
+        left_connected,
+        "keepalive/session signal recovers without any wake heuristic (F7/F15 backstop)"
+    );
+    relay.blackhole.store(false, Ordering::SeqCst);
+    assert!(
+        wait_status(
+            &state,
+            "no-wake",
+            ForwardStatus::Connected,
+            Duration::from_secs(25)
+        )
+        .await,
+        "auto-reconnect recovers via the backstop signal"
+    );
+
+    engine::disconnect_forward(&state, "no-wake", true)
+        .await
+        .unwrap();
+    ssh.kill().await;
+}
