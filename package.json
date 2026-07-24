@@ -11,6 +11,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "prettier --check \"src/**/*.{ts,svelte,css}\" \"*.{ts,js,json}\" && eslint .",
     "format": "prettier --write \"src/**/*.{ts,svelte,css}\" \"*.{ts,js,json}\"",
+    "test": "vitest run",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "tslib": "^2",
     "typescript": "^5",
     "typescript-eslint": "^8",
-    "vite": "^6"
+    "vite": "^6",
+    "vitest": "^4.1.10"
   }
 }
