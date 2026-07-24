@@ -1,0 +1,36 @@
+[package]
+name = "tunnel-pilot"
+version = "2.0.0"
+description = "Cross-platform SSH local port forwarding manager"
+authors = ["Kalfian"]
+edition = "2021"
+rust-version = "1.77"
+
+# The library target is what the Tauri app runs; main.rs is a thin entry that
+# calls `run()`. cdylib/staticlib kept for parity with the Tauri template.
+[lib]
+name = "tunnel_pilot_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri core. `tray-icon` enables the system tray; `image-png` lets us decode a
+# PNG icon at runtime for the tray.
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"                        # binary edges only (setup/main) — never in a command return type
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util", "sync", "macros"] }
+tokio-util = "0.7"                  # CancellationToken (two-level token hierarchy, M1)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["clock"] }
+
+[features]
+# this feature is used for production builds or when a dev server is not specified,
+# DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]

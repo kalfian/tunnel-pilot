@@ -29,13 +29,16 @@ importers:
     devDependencies:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^5
-        version: 5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3)
+        version: 5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3(@types/node@26.1.1))
       '@tauri-apps/cli':
         specifier: ^2
         version: 2.11.4
       '@tsconfig/svelte':
         specifier: ^5
         version: 5.0.8
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
       '@typescript-eslint/eslint-plugin':
         specifier: ^8
         version: 8.65.0(@typescript-eslint/parser@8.65.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3))(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)
@@ -77,7 +80,7 @@ importers:
         version: 8.65.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)
       vite:
         specifier: ^6
-        version: 6.4.3
+        version: 6.4.3(@types/node@26.1.1)
 
 packages:
 
@@ -575,6 +578,9 @@ packages:
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
+
+  '@types/node@26.1.1':
+    resolution: {integrity: sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw==}
 
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
@@ -1134,6 +1140,9 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  undici-types@8.3.0:
+    resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
+
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
 
@@ -1450,25 +1459,25 @@ snapshots:
 
   '@sveltejs/load-config@0.2.0': {}
 
-  '@sveltejs/vite-plugin-svelte-inspector@4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3))(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3)':
+  '@sveltejs/vite-plugin-svelte-inspector@4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3(@types/node@26.1.1)))(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3(@types/node@26.1.1))':
     dependencies:
-      '@sveltejs/vite-plugin-svelte': 5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3)
+      '@sveltejs/vite-plugin-svelte': 5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3(@types/node@26.1.1))
       debug: 4.4.3(supports-color@7.2.0)
       svelte: 5.56.7(@typescript-eslint/types@8.65.0)
-      vite: 6.4.3
+      vite: 6.4.3(@types/node@26.1.1)
     transitivePeerDependencies:
       - supports-color
 
-  '@sveltejs/vite-plugin-svelte@5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3)':
+  '@sveltejs/vite-plugin-svelte@5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3(@types/node@26.1.1))':
     dependencies:
-      '@sveltejs/vite-plugin-svelte-inspector': 4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3))(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3)
+      '@sveltejs/vite-plugin-svelte-inspector': 4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3(@types/node@26.1.1)))(supports-color@7.2.0)(svelte@5.56.7(@typescript-eslint/types@8.65.0))(vite@6.4.3(@types/node@26.1.1))
       debug: 4.4.3(supports-color@7.2.0)
       deepmerge: 4.3.1
       kleur: 4.1.5
       magic-string: 0.30.21
       svelte: 5.56.7(@typescript-eslint/types@8.65.0)
-      vite: 6.4.3
-      vitefu: 1.1.3(vite@6.4.3)
+      vite: 6.4.3(@types/node@26.1.1)
+      vitefu: 1.1.3(vite@6.4.3(@types/node@26.1.1))
     transitivePeerDependencies:
       - supports-color
 
@@ -1546,6 +1555,10 @@ snapshots:
   '@types/estree@1.0.9': {}
 
   '@types/json-schema@7.0.15': {}
+
+  '@types/node@26.1.1':
+    dependencies:
+      undici-types: 8.3.0
 
   '@types/trusted-types@2.0.7': {}
 
@@ -2152,13 +2165,15 @@ snapshots:
 
   typescript@5.9.3: {}
 
+  undici-types@8.3.0: {}
+
   uri-js@4.4.1:
     dependencies:
       punycode: 2.3.1
 
   util-deprecate@1.0.2: {}
 
-  vite@6.4.3:
+  vite@6.4.3(@types/node@26.1.1):
     dependencies:
       esbuild: 0.25.12
       fdir: 6.5.0(picomatch@4.0.5)
@@ -2167,11 +2182,12 @@ snapshots:
       rollup: 4.62.2
       tinyglobby: 0.2.17
     optionalDependencies:
+      '@types/node': 26.1.1
       fsevents: 2.3.3
 
-  vitefu@1.1.3(vite@6.4.3):
+  vitefu@1.1.3(vite@6.4.3(@types/node@26.1.1)):
     optionalDependencies:
-      vite: 6.4.3
+      vite: 6.4.3(@types/node@26.1.1)
 
   which@2.0.2:
     dependencies:
