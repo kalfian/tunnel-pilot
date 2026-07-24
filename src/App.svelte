@@ -251,6 +251,9 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+    /* Establish a container so screens reflow to the CONTENT-area width
+       (excludes the rail), per spec §3 breakpoints. */
+    container: content / inline-size;
   }
   .keychain-warn {
     display: flex;

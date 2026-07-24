@@ -22,6 +22,7 @@
   import ConfirmDialog from "../components/ConfirmDialog.svelte";
   import Button from "../components/ui/Button.svelte";
   import Icon from "../components/ui/Icon.svelte";
+  import Menu, { type MenuItem } from "../components/ui/Menu.svelte";
   import EmptyState from "../components/ui/EmptyState.svelte";
   import Skeleton from "../components/ui/Skeleton.svelte";
 
@@ -33,6 +34,7 @@
   );
   let confirmTarget = $state<ForwardConfig | null>(null);
   let deleting = $state(false);
+  let overflowOpen = $state(false);
 
   // Skeleton only if the (local, fast) hydrate hasn't landed within 120ms.
   const hydrated = $derived($settings !== null);
@@ -74,6 +76,23 @@
 
   const selected = $derived($forwards.find((f) => f.id === selectedId) ?? null);
   const total = $derived($forwards.length);
+
+  // Toolbar overflow (Compact breakpoint collapses Duplicate/Delete into ⋯).
+  const overflowItems = $derived<MenuItem[]>([
+    {
+      label: "Duplicate",
+      icon: "files",
+      disabled: !selected,
+      run: () => void duplicateSelected(),
+    },
+    {
+      label: "Delete",
+      icon: "trash",
+      danger: true,
+      disabled: !selected,
+      run: () => (confirmTarget = selected),
+    },
+  ]);
 
   $effect(() => {
     // Drop a stale selection if the tunnel disappeared (deleted elsewhere).
@@ -209,22 +228,36 @@
           onSelect={(t) => activeTag.set(t)}
         />
       {/if}
-      <Button
-        variant="ghost"
-        iconOnly="files"
-        ariaLabel="Duplicate selected tunnel"
-        title="Duplicate"
-        disabled={!selected}
-        onclick={() => void duplicateSelected()}
-      />
-      <Button
-        variant="ghost"
-        iconOnly="trash"
-        ariaLabel="Delete selected tunnel"
-        title="Delete"
-        disabled={!selected}
-        onclick={() => (confirmTarget = selected)}
-      />
+      <span class="wide-only">
+        <Button
+          variant="ghost"
+          iconOnly="files"
+          ariaLabel="Duplicate selected tunnel"
+          title="Duplicate"
+          disabled={!selected}
+          onclick={() => void duplicateSelected()}
+        />
+        <Button
+          variant="ghost"
+          iconOnly="trash"
+          ariaLabel="Delete selected tunnel"
+          title="Delete"
+          disabled={!selected}
+          onclick={() => (confirmTarget = selected)}
+        />
+      </span>
+      <div class="compact-only overflow">
+        <Button
+          variant="ghost"
+          iconOnly="more-horizontal"
+          ariaLabel="More actions"
+          title="More actions"
+          onclick={() => (overflowOpen = !overflowOpen)}
+        />
+        {#if overflowOpen}
+          <Menu items={overflowItems} onClose={() => (overflowOpen = false)} />
+        {/if}
+      </div>
       <Button
         variant="primary"
         iconLeft="plus"
@@ -236,6 +269,7 @@
   </header>
 
   <div class="scroll">
+    <div class="col">
     {#if !hydrated && showSkeleton}
       <div class="skeletons">
         <Skeleton variant="card" />
@@ -300,6 +334,7 @@
         onViewLog={() => activeView.set("activity")}
       />
     {/if}
+    </div>
   </div>
 </section>
 
@@ -406,6 +441,46 @@
     flex: 1;
     overflow-y: auto;
     padding: var(--sp-4) var(--sp-6) var(--sp-7);
+  }
+  /* Content column caps at 720 (scannable) and centers only when the content
+     area is wide enough to leave symmetric whitespace (spec §3 Wide). */
+  .col {
+    max-width: 720px;
+    margin-inline: 0;
+  }
+  .wide-only {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .compact-only {
+    display: none;
+  }
+  .overflow {
+    position: relative;
+  }
+
+  @container content (min-width: 1100px) {
+    .col {
+      margin-inline: auto;
+    }
+  }
+  @container content (max-width: 640px) {
+    .toolbar {
+      padding: var(--sp-4) var(--sp-5);
+    }
+    .scroll {
+      padding: var(--sp-4) var(--sp-5) var(--sp-7);
+    }
+    .filter-input {
+      width: 120px;
+    }
+    .wide-only {
+      display: none;
+    }
+    .compact-only {
+      display: inline-flex;
+    }
   }
   .skeletons {
     display: flex;
