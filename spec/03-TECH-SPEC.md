@@ -1029,8 +1029,11 @@ disconnects are **silent**. Update-available notified **once per version**. Only
 - `tauri-plugin-notification`, unified across OS.
 - Notification decision lives at the status-transition source: pass `user_initiated` through
   `disconnect`; suppress the notification when `true`.
-- Track `notified_update_version` to fire update notice once per version (persist alongside
-  `lastSkippedVersion` semantics).
+- Track `notified_update_version` to fire update notice once per version. **M6 impl note:**
+  this is done **in-memory per session** (`UpdaterState.last_notified_version`), NOT persisted —
+  persisting would require a new `AppSettings` field, an FE-coupled IPC-lockstep change (AGENTS
+  §1). The **persisted `lastSkippedVersion` already suppresses dismissed versions**, so an
+  at-most-once-per-restart notice for a still-pending update is acceptable and covers the intent.
 - **macOS permission timing**: request permission at a deliberate moment — on the first
   event that would notify (or when the user enables notifications in Settings), not blindly
   at startup (avoids a permission prompt race before the app is interactive).
@@ -1040,6 +1043,18 @@ disconnects are **silent**. Update-available notified **once per version**. Only
   macOS. This MUST be verified early (M6 spike, [07](07-ROADMAP.md)); do not assume it works.
   Fallback if it fails: rely on tray icon state + in-window log/status for signal, and document
   it as a known limitation of the unsigned build (fixed once OS signing is funded).
+  - **M6 F5 SPIKE RESULT (VERIFIED at source, `tauri-plugin-notification` 2.3.3):** the caveat is
+    real AND the failure is **undetectable from Rust**. Desktop `show()` on macOS does
+    `tauri::async_runtime::spawn(async move { let _ = notification.show(); })` — the underlying
+    show's `Result` is **discarded**, so our `show()` **always returns `Ok(())`** regardless of
+    delivery. It calls `notify_rust::set_application(&self.identifier)` which in a **bundled
+    (unsigned) app uses the app's own bundle id** (unregistered with the notification center
+    without code-signing → likely silent no-op), but in **`tauri dev` uses `com.apple.Terminal`**
+    so notifications **appear in dev, masking the prod failure**. Desktop `request_permission`/
+    `permission_state` are hardcoded `Granted` no-ops. Full runtime confirmation needs a bundled
+    unsigned `.app` on a desktop session (not possible headless). **Conclusion: treat as
+    best-effort; tray + log are authoritative; M6 acceptance does NOT assume macOS notifications
+    work.** Implemented accordingly in `platform/notify.rs` (fire-and-forget, `debug`-logged).
 
 ### Acceptance criteria
 - [ ] Unexpected disconnect/error/connect notifies; user-initiated disconnect is silent.
