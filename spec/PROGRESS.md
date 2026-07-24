@@ -22,7 +22,7 @@
 |---|---|---|---|
 | M0 | Scaffold (Tauri+Svelte+CI) | ✅ done | d146c19..7e1c3a2 (10 commits) |
 | M1 | SSH core engine (russh) | ✅ done | e2d42e9..560e799 (4 commits) |
-| M2 | Reconnect/wake/stats/persistence/keychain | ⬜ pending | — |
+| M2 | Reconnect/wake/stats/persistence/keychain | ✅ done | 8214cdb..9901e4d (10 commits) |
 | M3 | Tray/window/lifecycle/autostart/dock | ⬜ pending | — |
 | M4 | Full UI parity | ⬜ pending | — |
 | M5 | UX improvements | ⬜ pending | — |
@@ -68,8 +68,55 @@
 ### Known backlog (NIT — tracked, not a defect)
 - **Host-key verification (MITM hardening):** `ssh/client.rs` `check_server_key` returns `Ok(true)` (accepts any server key) — deliberate v1 (`dartssh2`) parity, but a carried-forward MITM exposure. Possible future hardening: host-key pinning / TOFU-with-store (known_hosts-style), surfaced in the UI on first connect + mismatch. Not in v2.0 scope; revisit post-cutover.
 
+## M2 item checklist (commit per item)
+Phase 1 (credentials + SSH liveness) landed earlier: `8214cdb`,`db190f7` (credential
+store — keychain-first + plaintext fallback, F9) and `2bba0c0`,`b26e35b`,`c724c00`,`7564f3c`
+(3s stats emit sampler `health.rs` + sleep/wake watchdog `wake.rs`, F15/F36). This session
+completed the persistence + migration + AppState-integration phase:
+- [x] `storage/config_file.rs`: `ConfigStore` over `tunnel_pilot_config.json` in the single
+      canonical `app_config_dir` (F2). Atomic write (tmp+fsync+rename) serialized behind an
+      async `Mutex`; read-merge-write (`save_forwards`/`save_settings`/`save_groups` preserve
+      siblings); corruption on load → `.corrupted-<ts>` sidecar + defaults, never crash;
+      `tokio::fs` (no sync I/O on the async path). `TunnelGroup` model + `AppSettings`
+      PartialEq/Eq added. Commit `361f4ed`.
+- [x] `credentials`: `CredentialStore::in_memory()` (InMemoryBackend — headless AppState +
+      migration tests, no OS keychain/disk) and `fallback_only(path)` (NullBackend — headless
+      Linux + deterministic fallback-route tests). Commit `07665fb`.
+- [x] `storage/migration.rs`: hardcoded per-OS v1 probe (`v1_config_path_for(os, base)` pure →
+      testable for all 3 OSes; macOS bundle id `com.kalfian.tunnelpilot` NO underscore,
+      Windows `%APPDATA%\kalfian\Tunnel Pilot\`, Linux None per F17). `migrate_if_needed`
+      (idempotent when schema≥2, in-place upgrade of pre-v2 at v2 path, else probe);
+      `import` moves plaintext `sshPassword`→credential store (`hasStoredPassword=true`,
+      never in the v2 file), `.v1-backup` copy, atomic v2 write. Lenient v1-**backup** parse
+      in `storage/backup.rs` (F19: reject `version>2`, no `groups`→`[]`, ignore legacy
+      `sshPassword`). Commit `fc65ffe`.
+- [x] AppState integration: configs now an ordered `Vec` (array order = display order),
+      groups+settings RAM mirrors, `Arc<CredentialStore>`, cached `keychain_available`,
+      optional `Arc<ConfigStore>`. `new_hydrated`/`new_headless`; `set/get/delete_password`
+      route to the credential store; `upsert_config`/`remove_config`/`set_settings` flush to
+      disk fire-and-forget. `HydrateSnapshot` + `debug_hydrate` make the persisted data +
+      keychain warning reachable (real `app_hydrate` = M4). lib.rs boot resolves
+      `app_config_dir`, runs `migrate_if_needed`→`load()` via `block_on` at the binary edge,
+      defaults on error. Commit `9901e4d`.
+
+### M2 findings / deviations
+- **configs is a `Vec`, not a `HashMap`** (M1 used a map): spec 04 §9 mandates array order =
+  display order, so the RAM mirror preserves insertion order and lookups are a linear scan
+  over the handful of configured forwards (`get_config` is not a hot path). No spec change.
+- **Mutations persist fire-and-forget** (`tauri::async_runtime::spawn`) so the sync accessors
+  (`upsert_config` etc.) stay infallible for the temporary debug command surface; the real
+  M4 command surface will report persistence failures to the user. Errors are logged (never
+  with the secret). No spec change.
+- **No spec corrections needed** (AGENTS §9): the hardcoded per-OS paths, `.corrupted-<ts>`
+  sidecar, `.v1-backup` copy, and `app_config_dir` single-dir rule were all implemented as
+  written in 03 §7/§8 and 04 §9/§10/§12.
+
 ## Next action
-Start **M2 — Reconnect/wake/stats sampler + persistence + keychain**. Backoff + supervisor reconnect loop + is_closed liveness already landed in M1; M2 adds: `ssh/health.rs` shared 3s emit sampler (reads stats cells, no teardown), `ssh/wake.rs` monotonic-gap watchdog (pokes the existing `wake_notify` arm), `storage/config_file.rs` (atomic read-merge-write + corruption→`.corrupted`), `storage/migration.rs` (hardcoded per-OS v1 probe), `credentials/mod.rs` (`keyring` per-target features + fallback). Swap AppState's in-memory `configs`/`passwords` for the persisted file + keychain.
+**M2 architect review, then M3** (tray/window/lifecycle/autostart/dock). Full test suite:
+64 Rust tests pass (`cargo test`), `cargo clippy --all-targets -D warnings` + `cargo fmt
+--check` clean. Migration fixtures cover the current host OS (macOS on this dev machine) end
+to end plus all three OS path builders via the pure `v1_config_path_for`; the real-OS-sleep
+wake check remains deferred to M6 (F15).
 
 ## Commit log (append hash + item as they land)
 - `4aac549` docs: spec package v1 (pre-build baseline)
@@ -90,3 +137,14 @@ Start **M2 — Reconnect/wake/stats sampler + persistence + keychain**. Backoff 
 - `7fb427c` docs(m1): mark M1 complete in progress checkpoint
 - `4c0cf4e` fix(m1): non-blocking RTT probe (F32) + atomic start reserve (F33) + token-driven attempt reset (F34)
 - `eb0d150` test(m1): F35 coverage — keepalive-timeout, no-double-bind, conflict, park/retry
+- `b27141d` docs(m1): record architecture code-review fixes (F32-F35) + host-key backlog
+- `8214cdb` feat(m2): pin keyring v3 per-target backends + tempfile dev-dep
+- `db190f7` feat(m2): credential store — keychain-first with plaintext fallback
+- `2bba0c0` feat(m2): shared 3s stats emit sampler + registry sampler slot
+- `b26e35b` feat(m2): wire sampler emit + immediate wake-reconnect + F36 guards
+- `c724c00` feat(m2): sleep/wake watchdog task + setup registration
+- `7564f3c` test(m2): wake sweep, sampler lifecycle, immediate wake-reconnect
+- `361f4ed` feat(m2): TunnelGroup model + persisted config store (config_file.rs)
+- `07665fb` feat(m2): credential store in-memory + fallback-only constructors
+- `fc65ffe` feat(m2): v1->v2 migration (hardcoded per-OS probe) + lenient v1-backup parse
+- `9901e4d` feat(m2): wire persisted config + credential store into AppState + boot migration
