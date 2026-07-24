@@ -71,11 +71,11 @@ const SNAPSHOT: AppSnapshot = {
       tags: [],
     },
   ],
-  groups: [
-    { id: "g1", name: "prod", color: null, order: 0, collapsed: false },
-  ],
+  groups: [{ id: "g1", name: "prod", color: null, order: 0, collapsed: false }],
   settings: SETTINGS,
-  logs: [{ level: "info", tunnelName: null, message: "boot", timestamp: "00:00:00" }],
+  logs: [
+    { level: "info", tunnelName: null, message: "boot", timestamp: "00:00:00" },
+  ],
   runtimes: [
     [
       "a",
@@ -177,7 +177,12 @@ describe("subscribeEvents", () => {
     expect(get(settings)).toEqual(SETTINGS);
 
     handlers.onUpdateStatus({
-      payload: { available: true, version: "2.1.0", notes: null, skipped: false },
+      payload: {
+        available: true,
+        version: "2.1.0",
+        notes: null,
+        skipped: false,
+      },
     });
     expect(get(updateStatus)?.available).toBe(true);
 
