@@ -240,3 +240,11 @@ is deferred to a real desktop session; the real-OS-sleep wake check remains defe
 - `fdf6ab9` feat(m3): dock/taskbar visibility + autostart reconcile
 - `d5b5e83` feat(m3): global bulk start_all/stop_all commands (F3)
 - `331a2d4` feat(m3): wire tray/window/dock/autostart + bulk commands into setup
+
+## M3 review outcome (focused code-review) — CLEAN
+CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).
+Defensive follow-ups (non-blocking — do in a pre-cutover hardening pass):
+- F40 [Low] `quit_app` (window/mod.rs) lacks an overall teardown watchdog → add `select!` teardown-vs-timeout(5s)→exit(0) so a future unbounded engine await can't make the tray app unquittable.
+- F41 [Nit] Quit not guarded against double-invocation → AtomicBool guard (harmless today; idempotent).
+- F42 [Nit] second-instance re-show respects showInDock (v1 unconditionally un-hid taskbar) → intentional improvement, keep.
+- Backlog (pre-existing): host-key verification (accept-any = v1 parity, MITM exposure) — revisit post-cutover.
