@@ -23,7 +23,7 @@
 | M0 | Scaffold (Tauri+Svelte+CI) | ✅ done | d146c19..7e1c3a2 (10 commits) |
 | M1 | SSH core engine (russh) | ✅ done | e2d42e9..560e799 (4 commits) |
 | M2 | Reconnect/wake/stats/persistence/keychain | ✅ done | 8214cdb..9901e4d (10 commits) |
-| M3 | Tray/window/lifecycle/autostart/dock | ⬜ pending | — |
+| M3 | Tray/window/lifecycle/autostart/dock | ✅ done | 6610ce8..331a2d4 (5 commits) |
 | M4 | Full UI parity | ⬜ pending | — |
 | M5 | UX improvements | ⬜ pending | — |
 | M6 | Signed updater + notifications | ⬜ pending | — |
@@ -144,12 +144,62 @@ completed the persistence + migration + AppState-integration phase:
   field-by-field with defaults instead of the whole struct resetting to `Default`. Tests
   `app_settings_partial_block_merges_with_defaults` + `app_settings_empty_block_equals_default`.
 
+## M3 item checklist (commit per item)
+- [x] `tray/icon.rs`: pure `tray_icon_for_count` (idle at 0, badge 1–9, clamp ≥9) unit-tested;
+      PNGs embedded via `include_bytes!` (v1 assets reused as placeholders); `update_tray_icon`
+      sets the icon + marks it a macOS template. Commit `6610ce8`.
+- [x] `tray/menu.rs`: pure `build_menu_model` (per-tunnel rows + status-driven actions incl.
+      Retry-on-error, conditional Start/Stop All, update-notice slot) unit-tested (14 tests);
+      `build_tauri_menu` renders it; `handle_menu_event` routes clicks to engine/window;
+      `spawn_tray_sync` subscribes to `tunnel://status` and rebuilds icon+menu **debounced
+      ~100ms**. Commit `6610ce8`.
+- [x] `window/mod.rs`: `CloseRequested` → `prevent_close` + hide (app persists in tray);
+      `show_window`/`hide_window` (apply dock visibility); `focus_from_second_instance`
+      (single-instance re-show + `window://focus`); `quit_app` tears down every live tunnel
+      before exit. Commit `b9b9390`.
+- [x] `platform/dock.rs`: pure `dock_visible(window_shown, show_in_dock)` truth table
+      unit-tested; `apply` = macOS `set_activation_policy(Regular/Accessory)` (no objc FFI,
+      F11) / Win+Linux `set_skip_taskbar`; `refresh` reads `showInDock` from AppState. Commit
+      `fdf6ab9`.
+- [x] `platform/autostart.rs`: `reconcile(app, launch_at_login)` drives the OS autostart
+      registration to match the setting (idempotent), called on boot. Commit `fdf6ab9`.
+- [x] `commands/forwards.rs`: `start_all`/`stop_all` (F3) — connectAll/disconnectAll parity;
+      registered in the invoke_handler; shared `run_*` helpers reused by the tray bulk items.
+      Commit `d5b5e83`.
+- [x] `lib.rs`: replaced the M0 minimal tray with `tray::setup`; single-instance re-show;
+      autostart reconcile; hide-on-close handler; window boots hidden → dock hidden until
+      `show_window`. Commit `331a2d4`.
+- [x] Verify: `cargo build`, `cargo test` (**89 pass, +21 M3 unit tests**), `cargo clippy
+      --all-targets -D warnings`, `cargo fmt --check`, `pnpm check`, `pnpm lint` all clean.
+      Interactive tray/close/dock/single-instance/autostart behavior needs a real desktop
+      session — PENDING a display (like M0). Only the pure logic is verified here.
+
+### M3 findings / deviations
+- **No spec correction needed** (AGENTS §9). Tech-spec section numbers used: tray §10, menu
+  §11, single-instance §11-note, autostart §12, dock §13, hide-on-close §14. (Some stub module
+  doc-comments referenced older §12/§13 numbering — corrected in-file to match 03-TECH-SPEC.)
+- **`ipc.ts` already had `startAll`/`stopAll`** wrappers from the M0 contract scaffold (spec
+  02 §6.1), so no frontend change was required for the bulk commands — only the Rust
+  `invoke_handler` registration.
+- **Tray icons are v1 pre-colored PNGs reused as placeholders** (`assets/icons/tray_icon_*`),
+  embedded at compile time. They render correctly on Windows/Linux; on macOS they are set as
+  template images per spec (alpha-tinted by menu-bar appearance). Dedicated monochrome macOS
+  template art (count digit as a crisp knockout for light+dark menu bars) is a design-agent
+  follow-up; the count→asset selection is final.
+- **Update-notice slot is present but inert until M6** — `build_menu_model` is always called
+  with `update_available=false`, so the `ID_UPDATE` item never renders yet (the click branch
+  is a logged no-op). M6 wires the real availability + `install_update`.
+- **Menu rebuild runs on the main thread** via `AppHandle::run_on_main_thread` (AppKit
+  requirement) from the debounced tokio task; state is gathered off-thread, only the
+  icon/menu apply is dispatched.
+
 ## Next action
-**M2 architect review, then M3** (tray/window/lifecycle/autostart/dock). Full test suite:
-64 Rust tests pass (`cargo test`), `cargo clippy --all-targets -D warnings` + `cargo fmt
---check` clean. Migration fixtures cover the current host OS (macOS on this dev machine) end
-to end plus all three OS path builders via the pure `v1_config_path_for`; the real-OS-sleep
-wake check remains deferred to M6 (F15).
+**M4 — Full UI parity** (connections/logs/settings/forms/backup), after the F37/F38/F39
+M2-hardening lands. M3 backend lifecycle is complete: full test suite **89 Rust tests pass**
+(`cargo test`), `cargo clippy --all-targets -D warnings` + `cargo fmt --check` + `pnpm check`
++ `pnpm lint` all clean. Interactive tray/window/dock/single-instance/autostart verification
+is deferred to a real desktop session; the real-OS-sleep wake check remains deferred to M6
+(F15).
 
 ## Commit log (append hash + item as they land)
 - `4aac549` docs: spec package v1 (pre-build baseline)
@@ -185,3 +235,8 @@ wake check remains deferred to M6 (F15).
 - `2d8aa27` fix(m2): per-field serde defaults on AppSettings so partial blocks merge (NIT)
 - `4a92ee2` fix(m2): route persistence through a single ordered writer (F37)
 - `3f56aa1` fix(m2): run keychain password read off the async runtime (F38)
+- `6610ce8` feat(m3): dynamic count tray icon + debounced state-driven menu
+- `b9b9390` feat(m3): window hide-on-close, show/hide, single-instance re-show, quit
+- `fdf6ab9` feat(m3): dock/taskbar visibility + autostart reconcile
+- `d5b5e83` feat(m3): global bulk start_all/stop_all commands (F3)
+- `331a2d4` feat(m3): wire tray/window/dock/autostart + bulk commands into setup
