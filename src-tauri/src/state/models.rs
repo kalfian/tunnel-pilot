@@ -154,31 +154,59 @@ pub struct ForwardRuntime {
 /// Application settings (spec 04 §3). Only the fields the M1 engine reads
 /// (`auto_reconnect`, delay, max-retries) are load-bearing here; the rest are
 /// carried for the persisted mirror (M2).
+///
+/// Every field carries `#[serde(default)]` (with the correct v1 default) so a
+/// partial or legacy settings block MERGES with defaults field-by-field: a file
+/// missing one key keeps every other configured value instead of resetting the
+/// whole struct to `Default`. The defaults below MUST stay in lockstep with the
+/// [`Default`] impl (both delegate to the same free functions).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
+    #[serde(default = "default_true")]
     pub launch_at_login: bool,
+    #[serde(default = "default_true")]
     pub show_notifications: bool,
+    #[serde(default = "default_theme_mode")]
     pub theme_mode: ThemeMode,
+    #[serde(default = "default_true")]
     pub auto_reconnect: bool,
+    #[serde(default = "default_reconnect_delay_sec")]
     pub auto_reconnect_delay_sec: u32,
+    #[serde(default = "default_reconnect_max_retries")]
     pub auto_reconnect_max_retries: u32,
+    #[serde(default)]
     pub show_in_dock: bool,
+    #[serde(default = "default_true")]
     pub auto_check_updates: bool,
+    #[serde(default)]
     pub last_skipped_version: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_theme_mode() -> ThemeMode {
+    ThemeMode::System
+}
+fn default_reconnect_delay_sec() -> u32 {
+    5
+}
+fn default_reconnect_max_retries() -> u32 {
+    3
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            launch_at_login: true,
-            show_notifications: true,
-            theme_mode: ThemeMode::System,
-            auto_reconnect: true,
-            auto_reconnect_delay_sec: 5,
-            auto_reconnect_max_retries: 3,
+            launch_at_login: default_true(),
+            show_notifications: default_true(),
+            theme_mode: default_theme_mode(),
+            auto_reconnect: default_true(),
+            auto_reconnect_delay_sec: default_reconnect_delay_sec(),
+            auto_reconnect_max_retries: default_reconnect_max_retries(),
             show_in_dock: false,
-            auto_check_updates: true,
+            auto_check_updates: default_true(),
             last_skipped_version: None,
         }
     }
@@ -190,4 +218,42 @@ pub enum ThemeMode {
     System,
     Light,
     Dark,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_settings_partial_block_merges_with_defaults() {
+        // A legacy/partial settings block sets ONE field; every other field must
+        // fall back to its v1 default rather than the whole struct resetting.
+        let json = r#"{ "showInDock": true }"#;
+        let parsed: AppSettings = serde_json::from_str(json).expect("parse partial settings");
+
+        // The one present field is honored...
+        assert!(parsed.show_in_dock);
+        // ...and the rest match the documented v1 defaults (NOT bool/int zero).
+        let defaults = AppSettings::default();
+        assert_eq!(parsed.launch_at_login, defaults.launch_at_login);
+        assert_eq!(parsed.show_notifications, defaults.show_notifications);
+        assert_eq!(parsed.theme_mode, defaults.theme_mode);
+        assert_eq!(parsed.auto_reconnect, defaults.auto_reconnect);
+        assert_eq!(
+            parsed.auto_reconnect_delay_sec,
+            defaults.auto_reconnect_delay_sec
+        );
+        assert_eq!(
+            parsed.auto_reconnect_max_retries,
+            defaults.auto_reconnect_max_retries
+        );
+        assert_eq!(parsed.auto_check_updates, defaults.auto_check_updates);
+        assert_eq!(parsed.last_skipped_version, defaults.last_skipped_version);
+    }
+
+    #[test]
+    fn app_settings_empty_block_equals_default() {
+        let parsed: AppSettings = serde_json::from_str("{}").expect("parse empty settings");
+        assert_eq!(parsed, AppSettings::default());
+    }
 }
