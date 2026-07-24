@@ -18,6 +18,7 @@ use std::sync::{Arc, RwLock};
 
 use serde::Serialize;
 use tauri::Emitter;
+use tokio::sync::mpsc;
 
 use crate::credentials::CredentialStore;
 use crate::events;
@@ -56,6 +57,65 @@ pub struct HydrateSnapshot {
     pub keychain_available: bool,
 }
 
+/// A pending whole-section persistence request. The ordered writer task
+/// consumes these; each variant carries the FULL latest snapshot of its section
+/// (last-write-wins is correct — every save is a whole-section write).
+enum PersistMsg {
+    Forwards(Vec<ForwardConfig>),
+    Settings(AppSettings),
+}
+
+/// The single ordered persistence writer (F37).
+///
+/// All mutations enqueue the latest full section snapshot on an mpsc channel;
+/// this one task is the ONLY writer, so writes land in enqueue order and can
+/// never race for the config store's write lock the way detached per-mutation
+/// spawns did (an older snapshot overwriting a newer one → silent data loss).
+///
+/// On each wakeup it coalesces every message already queued down to the latest
+/// per section before writing, so a burst of rapid mutations collapses to a
+/// single write of the newest state. Because `ConfigStore` does read-merge-write
+/// from disk, writing the two sections sequentially preserves siblings; the
+/// order between sections within a batch is irrelevant to the final content.
+///
+/// Persist failures are logged (never with the secret — the config file holds
+/// none). Surfacing them to the user is an explicit M4 follow-up: M4 introduces
+/// the real command surface, which can offer an async save path returning
+/// `Result` (see PROGRESS.md M2 findings).
+async fn persist_writer_loop(store: Arc<ConfigStore>, mut rx: mpsc::UnboundedReceiver<PersistMsg>) {
+    fn coalesce(
+        msg: PersistMsg,
+        forwards: &mut Option<Vec<ForwardConfig>>,
+        settings: &mut Option<AppSettings>,
+    ) {
+        match msg {
+            PersistMsg::Forwards(v) => *forwards = Some(v),
+            PersistMsg::Settings(v) => *settings = Some(v),
+        }
+    }
+
+    while let Some(first) = rx.recv().await {
+        let mut forwards: Option<Vec<ForwardConfig>> = None;
+        let mut settings: Option<AppSettings> = None;
+        coalesce(first, &mut forwards, &mut settings);
+        // Drain anything already queued, keeping only the newest per section.
+        while let Ok(msg) = rx.try_recv() {
+            coalesce(msg, &mut forwards, &mut settings);
+        }
+
+        if let Some(forwards) = forwards {
+            if let Err(e) = store.save_forwards(forwards).await {
+                tracing::error!(error = %e, "failed to persist forwards");
+            }
+        }
+        if let Some(settings) = settings {
+            if let Err(e) = store.save_settings(settings).await {
+                tracing::error!(error = %e, "failed to persist settings");
+            }
+        }
+    }
+}
+
 /// The shared application state (`Arc<AppState>`), managed by Tauri and cloned
 /// into each supervisor task.
 pub struct AppState {
@@ -75,6 +135,10 @@ pub struct AppState {
     /// Persistence handle. `None` in headless engine tests (nothing is flushed
     /// to disk); `Some` in production (mutations are written back).
     config_store: Option<Arc<ConfigStore>>,
+    /// Enqueue side of the single ordered persistence writer (F37). `None` in
+    /// headless tests (no `config_store` → no writer task). Mutations push the
+    /// latest full section snapshot here instead of spawning a detached write.
+    persist_tx: Option<mpsc::UnboundedSender<PersistMsg>>,
     /// `AppHandle` for emitting events; `None` in headless engine tests.
     app: RwLock<Option<tauri::AppHandle>>,
 }
@@ -89,6 +153,12 @@ impl AppState {
         doc: ConfigDocument,
     ) -> Self {
         let keychain_available = credentials.keychain_available();
+        // Spin up the single ordered persistence writer (F37): one task drains
+        // the channel and is the sole writer, so mutations can never race the
+        // config store's write lock and land out of order.
+        let (persist_tx, persist_rx) = mpsc::unbounded_channel::<PersistMsg>();
+        let writer_store = config_store.clone();
+        tauri::async_runtime::spawn(persist_writer_loop(writer_store, persist_rx));
         Self {
             registry: Arc::new(TunnelRegistry::new()),
             configs: RwLock::new(doc.forwards),
@@ -97,6 +167,7 @@ impl AppState {
             credentials,
             keychain_available,
             config_store: Some(config_store),
+            persist_tx: Some(persist_tx),
             app: RwLock::new(Some(app)),
         }
     }
@@ -116,6 +187,7 @@ impl AppState {
             credentials,
             keychain_available,
             config_store: None,
+            persist_tx: None,
             app: RwLock::new(None),
         }
     }
@@ -242,6 +314,7 @@ impl AppState {
     /// Fetch the password for a forward, if stored. `None` on absence or error
     /// (the error is logged; the engine treats a missing password as an auth
     /// precondition failure).
+    ///
     pub fn get_password(&self, id: &str) -> Option<String> {
         match self.credentials.get_password(id) {
             Ok(pw) => pw,
@@ -259,29 +332,126 @@ impl AppState {
         }
     }
 
-    // --- persistence helpers (fire-and-forget; None store = no-op) ---
+    // --- persistence helpers (enqueue to the single ordered writer; F37) ---
 
+    /// Enqueue the latest full forwards snapshot for the ordered writer. No-op
+    /// when headless (no `persist_tx`). The writer serializes writes in enqueue
+    /// order and coalesces bursts to the newest snapshot, so the last mutation
+    /// is always what lands on disk (no stale-snapshot data loss).
     fn persist_forwards(&self) {
-        if let Some(store) = &self.config_store {
-            let store = store.clone();
-            let forwards = self.configs_snapshot();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = store.save_forwards(forwards).await {
-                    tracing::error!(error = %e, "failed to persist forwards");
-                }
-            });
+        if let Some(tx) = &self.persist_tx {
+            // Send failure only happens if the writer task is gone (shutdown);
+            // logged, never with a secret (the config file holds none).
+            if tx
+                .send(PersistMsg::Forwards(self.configs_snapshot()))
+                .is_err()
+            {
+                tracing::error!("persistence writer unavailable; forwards not queued");
+            }
         }
     }
 
+    /// Enqueue the latest full settings snapshot for the ordered writer (F37).
     fn persist_settings(&self) {
-        if let Some(store) = &self.config_store {
-            let store = store.clone();
-            let settings = self.settings_snapshot();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = store.save_settings(settings).await {
-                    tracing::error!(error = %e, "failed to persist settings");
-                }
-            });
+        if let Some(tx) = &self.persist_tx {
+            if tx
+                .send(PersistMsg::Settings(self.settings_snapshot()))
+                .is_err()
+            {
+                tracing::error!("persistence writer unavailable; settings not queued");
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn forward_with_port(id: &str, port: u16) -> ForwardConfig {
+        ForwardConfig {
+            id: id.to_string(),
+            name: format!("fwd-{id}"),
+            ssh_host: "bastion.example.com".into(),
+            ssh_port: 22,
+            ssh_username: "deploy".into(),
+            identity_file_path: None,
+            has_stored_password: false,
+            local_bind_address: "127.0.0.1".into(),
+            local_port: port,
+            remote_host: "db.internal".into(),
+            remote_port: 5432,
+            keep_alive_interval_sec: 30,
+            keep_alive_max_count: 5,
+            group_id: None,
+            tags: vec![],
+        }
+    }
+
+    /// F37: a burst of distinct snapshots enqueued rapidly must land on disk as
+    /// the LAST enqueued value — never an earlier snapshot written after a newer
+    /// one (the data-loss race the detached per-mutation spawns had). The single
+    /// ordered writer is the only writer, so enqueue order == write order.
+    #[tokio::test]
+    async fn ordered_writer_persists_last_enqueued_snapshot() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = Arc::new(ConfigStore::from_config_dir(dir.path()));
+        let (tx, rx) = mpsc::unbounded_channel::<PersistMsg>();
+
+        // Burst of 200 distinct forwards snapshots, monotonically newer.
+        for i in 0..200u16 {
+            let snapshot = vec![forward_with_port("f", 1000 + i)];
+            tx.send(PersistMsg::Forwards(snapshot)).expect("enqueue");
+        }
+        // The final, newest snapshot.
+        let last = vec![forward_with_port("f", 9999), forward_with_port("g", 8888)];
+        tx.send(PersistMsg::Forwards(last.clone()))
+            .expect("enqueue last");
+
+        // Close the channel so the writer drains and returns, then run it to
+        // completion (drives the same loop production uses).
+        drop(tx);
+        persist_writer_loop(store.clone(), rx).await;
+
+        // The on-disk forwards equal the LAST enqueued snapshot, not an earlier one.
+        let doc = store.load().await.expect("load");
+        assert_eq!(doc.forwards, last);
+    }
+
+    /// The writer coalesces mixed-section bursts to the newest of EACH section,
+    /// and both land (read-merge-write preserves the sibling).
+    #[tokio::test]
+    async fn ordered_writer_coalesces_both_sections_to_latest() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = Arc::new(ConfigStore::from_config_dir(dir.path()));
+        let (tx, rx) = mpsc::unbounded_channel::<PersistMsg>();
+
+        for i in 0..50u16 {
+            tx.send(PersistMsg::Forwards(vec![forward_with_port("f", 2000 + i)]))
+                .expect("enqueue fwd");
+            let settings = AppSettings {
+                auto_reconnect_max_retries: i as u32,
+                ..AppSettings::default()
+            };
+            tx.send(PersistMsg::Settings(settings))
+                .expect("enqueue settings");
+        }
+        let last_forwards = vec![forward_with_port("final", 7777)];
+        let last_settings = AppSettings {
+            auto_reconnect_max_retries: 99,
+            show_in_dock: true,
+            ..AppSettings::default()
+        };
+        tx.send(PersistMsg::Forwards(last_forwards.clone()))
+            .expect("enqueue last fwd");
+        tx.send(PersistMsg::Settings(last_settings.clone()))
+            .expect("enqueue last settings");
+
+        drop(tx);
+        persist_writer_loop(store.clone(), rx).await;
+
+        let doc = store.load().await.expect("load");
+        assert_eq!(doc.forwards, last_forwards);
+        assert_eq!(doc.settings, last_settings);
     }
 }
