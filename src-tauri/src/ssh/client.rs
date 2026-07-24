@@ -113,8 +113,10 @@ async fn authenticate_inner(
             return Err(AppError::Ssh("publickey authentication rejected".into()));
         }
     } else {
+        // Keyring get does blocking OS calls; run it off the async runtime (F38).
         let pw = state
-            .get_password(&cfg.id)
+            .get_password_async(&cfg.id)
+            .await
             .ok_or_else(|| AppError::Connection("password or identity file required".into()))?;
         let accepted = session
             .authenticate_password(&cfg.ssh_username, pw)

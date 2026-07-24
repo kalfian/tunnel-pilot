@@ -315,11 +315,37 @@ impl AppState {
     /// (the error is logged; the engine treats a missing password as an auth
     /// precondition failure).
     ///
+    ///
+    /// Synchronous — safe off the async runtime (migration/boot, sync commands).
+    /// On the async auth path use [`get_password_async`](Self::get_password_async)
+    /// so the blocking keyring call never stalls a tokio worker.
     pub fn get_password(&self, id: &str) -> Option<String> {
         match self.credentials.get_password(id) {
             Ok(pw) => pw,
             Err(e) => {
                 tracing::error!(forward_id = %id, error = %e, "failed to read password");
+                None
+            }
+        }
+    }
+
+    /// Async variant of [`get_password`](Self::get_password) for the async auth
+    /// path (F38). The `keyring` get does blocking OS calls (macOS Security
+    /// framework / Linux Secret Service D-Bus) that can stall a tokio worker, so
+    /// the read runs on `spawn_blocking` — mirroring the identity-key load in
+    /// `ssh/client.rs`. `None` on absence, error, or task panic (logged).
+    pub async fn get_password_async(&self, id: &str) -> Option<String> {
+        let credentials = self.credentials.clone();
+        let account = id.to_string();
+        let log_id = id.to_string();
+        match tokio::task::spawn_blocking(move || credentials.get_password(&account)).await {
+            Ok(Ok(pw)) => pw,
+            Ok(Err(e)) => {
+                tracing::error!(forward_id = %log_id, error = %e, "failed to read password");
+                None
+            }
+            Err(e) => {
+                tracing::error!(forward_id = %log_id, error = %e, "password read task panicked");
                 None
             }
         }
