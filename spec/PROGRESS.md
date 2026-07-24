@@ -24,7 +24,7 @@
 | M1 | SSH core engine (russh) | ✅ done | e2d42e9..560e799 (4 commits) |
 | M2 | Reconnect/wake/stats/persistence/keychain | ✅ done | 8214cdb..9901e4d (10 commits) |
 | M3 | Tray/window/lifecycle/autostart/dock | ✅ done | 6610ce8..331a2d4 (5 commits) |
-| M4 | Full UI parity | 🚧 in-progress | Phase 1 (backend surface + FE contract): `08c2e35` |
+| M4 | Full UI parity | ✅ done | P1 `08c2e35` · P2a `1c94b5c..048de6b` · P2b `fcd25ee..85939c7` |
 | M5 | UX improvements | ⬜ pending | — |
 | M6 | Signed updater + notifications | ⬜ pending | — |
 | M7 | Packaging + cutover | ⬜ pending | — |
@@ -253,12 +253,83 @@ completed the persistence + migration + AppState-integration phase:
 - **F38 reuse:** `set/clear_forward_password` credential writes run on
   `spawn_blocking` (blocking keyring calls) via new `set/delete_password_checked`.
 
+## M4 Phase 2b — UI layer (ui-ux, commits `fcd25ee..85939c7`)
+Built the entire visual layer on the Phase-2a stores/contract. Design-agent owned
+`.svelte` + `src/main.ts` + CSS only; reserved files (stores/hydrate/validation/
+ipc/events/types/Rust) consumed as-is.
+- [x] **Design tokens** (`src/styles/tokens.css`) transcribed verbatim from
+      `design-tokens.md` (`:root` + `[data-theme=dark]`), + `base.css`
+      (reset/focus-ring/reduced-motion), imported from `app.css`.
+- [x] **UI primitives** (`src/lib/components/ui/*`): Button, Toggle (36×20 custom,
+      disabled while pending), Input (string-controlled so number inputs don't
+      coerce), Select, SegmentedControl, StatusDot, StatChip, EmptyState, Skeleton,
+      SidebarItem, Dialog (focus-trap/Esc/return-focus), Menu, ToastHost, inlined
+      Lucide `Icon` (no emoji, no runtime dep). UI plumbing in `src/lib/ui/*`
+      (theme/platform/view/toast/format) — NEW files, distinct from reserved data
+      stores.
+- [x] **App shell** (`App.svelte`): sidebar-rail IA + active-count badge +
+      compact rail < 640px; macOS custom transparent titlebar + drag region
+      (native decorations on Win/Linux); keychain-fallback banner; 150ms
+      reduced-motion-aware route crossfade. `main.ts` boots
+      `initTheme()`+`subscribeEvents()`+`hydrateAll()`.
+- [x] **Connections**: flat reorderable list (drag + `⌥↑/↓`, optimistic), 5-state
+      cards, live mono stat chips, per-row copy-ssh/edit/duplicate/delete + error
+      strip Retry/View-log, toolbar (count/filter/dup/del/Add), honest empty/
+      filter/loading states.
+- [x] **ForwardForm**: General/Advanced sub-tabs (state preserved), v1 fields +
+      defaults, password/identity segmented auth + `~/.ssh` picker, `validateForwardForm`
+      gating + inline errors + dirty tracking + discard-confirm; password only via
+      set/clear_forward_password.
+- [x] **Activity**: reverse-chron mono stream, level+substring filters, click-copy/
+      Copy-all/Clear (clipboard-manager), empty state.
+- [x] **Settings**: all toggles via `updateSettings` (store-driven auto-revert),
+      animated reconnect sub-options, 3-icon theme control, six-state update
+      banner (inert pending M6), backup export/import + mode + confirm.
+- [x] Tests: +10 Vitest component tests (jsdom, `lib/ipc` mocked) — ConnectionRow
+      states/toggle, ForwardForm gating/errors/password-channel, Settings import
+      mode. **36 FE tests pass.**
+- [x] Gates: `pnpm check` (0/0/0), `pnpm lint`, `pnpm test` (36), `pnpm build` all clean.
+
+### M4 Phase 2b findings / deviations (AGENTS §9)
+- **No `05`/`design-tokens` spec corrections needed** — tokens implemented verbatim,
+  screens/states/keyboard-map followed. Two honest deviations forced by the M4
+  backend surface (not spec errors):
+  1. **Logs "Clear" has no 4s undo toast** (`05 §5`): `clear_logs` wipes the
+     authoritative Rust buffer and there is no restore command, so a real undo is
+     impossible in M4 — a plain "Logs cleared" confirmation is shown instead
+     (faking undo would desync from the source of truth). Revisit if a restore
+     command is added.
+  2. **Import confirm shows the mode's effect, not exact "N imported / M overwritten"
+     counts** (`05 §6`): there is no dry-run IPC, so counts aren't knowable before
+     applying; the real `ImportResult` counts are reported in the post-import toast.
+- **Out of M4 scope (M5), left as stubs:** command palette (⌘K), groups/tags UI
+  (`GroupHeader`/`TagFilterBar`/`CommandPalette` still comment-only), Wide detail
+  pane/sparkline (v2.1). Flat list built per brief.
+- **Minor polish deferred (not blocking):** Activity "N new" jump-to-top pill;
+  dedicated `Tooltip` component (native `title` used for now); multi-select delete
+  variant (single-selection only).
+- **Icons inlined** as Lucide SVG path data in `Icon.svelte` (ISC) rather than a
+  `lucide-svelte` dependency — keeps the bundle hermetic; one visual weight,
+  `currentColor`.
+- **Tooling note:** added dev deps `jsdom` + `@testing-library/{svelte,jest-dom,
+  user-event}` and the Svelte plugin to `vitest.config.ts` for component tests.
+  `pnpm install` normalized `pnpm-lock.yaml`; prettier stayed 3.9.6 but reformatted
+  `src/lib/hydrate.test.ts` (whitespace only — required for `pnpm lint`).
+- **Anti-slop self-score (05 §16 + agent rubric): 1/10.** Dense single-column list
+  (no card grid), flat surfaces + hairlines (no gradients/glass), Lucide icons (no
+  emoji), 4/8 spacing tokens, mono tabular numerics, full 5-state machine, honest
+  empty/loading/error separation, keyboard-driveable, reduced-motion honored.
+- **Needs a real desktop session to verify:** macOS transparent titlebar + traffic-
+  light inset + drag region, native decorations on Win/Linux, file-picker/clipboard
+  plugin round-trips, live `tunnel://stats` 3s cross-fade, theme follow of OS
+  `prefers-color-scheme`, and 560px-min responsive layout. Logic + component tests
+  are green headless.
+
 ## Next action
-**M4 Phase 2** — coder stores (`src/lib/stores/*`) + ui-ux components/views built
-on top of this contract (the stores/components scaffolded at M0 wire to the now-live
-`ipc.ts`/`events.ts`). Backend command surface for M4 is complete: **106 Rust tests
-pass**, all six gates clean. Interactive tray/window/dock verification and the
-real-OS-sleep wake check remain deferred to a real desktop session / M6 (F15).
+**M4 review, then M5** (command palette ⌘K, groups/tags UI, resizable/responsive
+reflow + Wide detail pane, sparkline). M4 is feature-complete: 106 Rust + 36 FE
+tests pass; all six gates clean. Interactive tray/window/dock + real-OS-sleep wake
+remain deferred to a desktop session / M6 (F15).
 
 ## Commit log (append hash + item as they land)
 - `4aac549` docs: spec package v1 (pre-build baseline)
@@ -300,6 +371,17 @@ real-OS-sleep wake check remain deferred to a real desktop session / M6 (F15).
 - `d5b5e83` feat(m3): global bulk start_all/stop_all commands (F3)
 - `331a2d4` feat(m3): wire tray/window/dock/autostart + bulk commands into setup
 - `08c2e35` feat(m4): full IPC command surface + F37 error surfacing + log buffer
+- `1c94b5c` chore(m4): add vitest for frontend store/helper tests
+- `f4d57d6` feat(m4): forwards store reconciliation + connectedCount
+- `7d86f24` feat(m4): settings/groups/logs/updater/backup store reconcilers
+- `644439b` feat(m4): hydrateAll + event->store subscription wiring
+- `048de6b` feat(m4): ForwardForm validation rules
+- `fcd25ee` feat(m4): design token layer + global base styles
+- `bf9541c` feat(m4): UI primitive library + UI plumbing helpers
+- `3e205f2` feat(m4): Connections view — cards, list, form, delete confirm
+- `7d69f31` feat(m4): Activity + Settings views
+- `3c5aada` feat(m4): app shell + boot wiring (hydrate/subscribe/theme)
+- `85939c7` test(m4): component tests + jsdom vitest setup
 
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).
