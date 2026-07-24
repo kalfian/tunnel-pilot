@@ -336,5 +336,11 @@ Names are constants in `events.rs`. Payloads are serde structs. Frontend subscri
 `tauri.conf.json` highlights (detailed in [03](03-TECH-SPEC.md) & [06](06-MIGRATION-REPO.md)):
 - Window: `visible:false` at startup (starts hidden → tray), `resizable:true`, `minWidth`/`minHeight` set, decorations per design.
 - macOS: `LSUIElement=true` (agent app), activation-policy switching at runtime for dock.
-- Updater: `active:true`, `pubkey`, `endpoints` → GitHub Releases `latest.json`.
+- Updater: `pubkey`, `endpoints` → GitHub Releases `latest.json`. **NOTE (found in M0):**
+  `tauri-plugin-updater` v2 is **not a bare no-op** — registering it (`Builder::new().build()`)
+  panics at launch unless a `plugins.updater` config block exists (`PluginInitialization`:
+  it deserializes to a required `Config` struct, so a missing/`null` block errors). Therefore
+  M0 ships a minimal block with `pubkey: ""` + a placeholder `endpoints` entry (the pubkey is
+  only parsed at verify time, so empty is fine at init). M6 replaces the pubkey with the real
+  minisign public key. (There is no `active` field in the v2 plugin config — that was v1.)
 - Capabilities (v2 ACL): expose only the commands above to the main window; restrict fs/dialog scopes.
