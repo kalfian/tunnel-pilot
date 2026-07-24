@@ -17,6 +17,7 @@ pub mod commands;
 pub mod credentials;
 pub mod error;
 pub mod events;
+pub mod logging;
 pub mod platform;
 pub mod ssh;
 pub mod state;
@@ -53,6 +54,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            // Initialize tracing + the (stubbed) tracing→log-buffer layer first
+            // so subsequent setup steps are captured (spec 03 §18).
+            crate::logging::init_tracing();
+            tracing::info!("Tunnel Pilot v{} starting", env!("CARGO_PKG_VERSION"));
+
             // macOS: sit in the tray as an agent app (baseline; the `showInDock`
             // activation-policy switching lands in M3, spec 03 §13). Mirrors the
             // Info.plist LSUIElement flag so dev runs also stay dock-less.
