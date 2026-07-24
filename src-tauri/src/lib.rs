@@ -28,11 +28,7 @@ pub mod window;
 
 use std::sync::Arc;
 
-use tauri::{
-    menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-    Manager,
-};
+use tauri::Manager;
 
 use crate::credentials::CredentialStore;
 use crate::state::AppState;
@@ -44,10 +40,11 @@ use crate::storage::config_file::{ConfigDocument, ConfigStore};
 /// boots straight into the tray.
 pub fn run() {
     tauri::Builder::default()
-        // single-instance MUST be registered first (spec 02 §8). On a second
-        // launch it re-shows the window; M3 wires show_window + window://focus.
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
-            // TODO(M3): show_window() + emit WINDOW_FOCUS.
+        // single-instance MUST be registered first (spec 02 §8/§11). On a second
+        // launch its callback runs in the already-running instance and re-shows +
+        // focuses the window, emitting `window://focus` for the frontend.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            crate::window::focus_from_second_instance(app);
         }))
         // Launch-at-login. Reconciled with the `launchAtLogin` setting in M3.
         .plugin(tauri_plugin_autostart::init(
@@ -68,6 +65,9 @@ pub fn run() {
             crate::commands::debug::debug_retry,
             crate::commands::debug::debug_runtime,
             crate::commands::debug::debug_hydrate,
+            // M3: global bulk connect/disconnect (spec 02 §6.1, F3).
+            crate::commands::forwards::start_all,
+            crate::commands::forwards::stop_all,
         ])
         .setup(|app| {
             // Initialize tracing + the (stubbed) tracing→log-buffer layer first
@@ -128,40 +128,30 @@ pub fn run() {
             // sleep). Best-effort; the russh session-future signal is the
             // backstop (F15). The 3s stats sampler (health.rs) is NOT started
             // here — it auto-starts on the first connect.
-            crate::ssh::wake::spawn_wake_watchdog(state);
+            crate::ssh::wake::spawn_wake_watchdog(state.clone());
 
-            // macOS: sit in the tray as an agent app (baseline; the `showInDock`
-            // activation-policy switching lands in M3, spec 03 §13). Mirrors the
-            // Info.plist LSUIElement flag so dev runs also stay dock-less.
+            // macOS: sit in the tray as an agent app. The window boots hidden, so
+            // the dock stays hidden regardless of `showInDock` (spec 03 §13) —
+            // `window::show_window` flips to Regular later iff the setting is on.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // Minimal tray: Open (show/focus the window) + Quit (exit). The full
-            // dynamic icon + rebuilt menu lands in M3 (spec 03 §§12,13).
-            let open_item = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+            // Autostart (spec 03 §12): reconcile the OS launch-at-login
+            // registration with the persisted `launchAtLogin` setting on every
+            // boot, correcting any drift.
+            crate::platform::autostart::reconcile(
+                &app.handle().clone(),
+                state.settings_snapshot().launch_at_login,
+            );
 
-            let mut tray = TrayIconBuilder::with_id("main")
-                .tooltip("Tunnel Pilot")
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "open" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "quit" => app.exit(0),
-                    _ => {}
-                });
+            // Full dynamic tray (spec 03 §§10,11): count icon 1–9, per-tunnel rows
+            // with Retry-on-error, conditional bulk Start/Stop All, update-notice
+            // slot; rebuilt (debounced) on `tunnel://status` changes.
+            crate::tray::setup(app, state)?;
 
-            // Reuse the bundled app icon for the tray when available.
-            if let Some(icon) = app.default_window_icon().cloned() {
-                tray = tray.icon(icon);
-            }
-            tray.build(app)?;
+            // Hide-on-close intercept (spec 03 §14): the OS close button hides the
+            // window and keeps the app alive in the tray; only Quit exits.
+            crate::window::install_close_handler(&app.handle().clone());
 
             // Tracing→log-buffer layer is initialized in the next M0 item.
             Ok(())
