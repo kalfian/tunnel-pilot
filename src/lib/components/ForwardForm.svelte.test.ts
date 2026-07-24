@@ -37,6 +37,8 @@ async function fillValid(): Promise<void> {
   await type(/local port/i, "5432");
   await type(/remote host/i, "10.0.4.12");
   await type(/remote port/i, "5432");
+  // At least one auth method is required (F46); the default auth tab is Password.
+  await type(/^password$/i, "s3cret");
 }
 
 describe("ForwardForm", () => {

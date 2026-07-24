@@ -116,6 +116,11 @@ export function validateForwardForm(values: ForwardFormValues): FieldErrors {
     values.identityFilePath !== null && !isBlank(values.identityFilePath);
   if (hasPassword && hasIdentity) {
     errors.auth = "Use either a password or an identity file, not both.";
+  } else if (!hasPassword && !hasIdentity) {
+    // At least one auth method is required (v1 intent — a forward with neither
+    // can never authenticate). F46: the old rule only enforced exclusivity, so
+    // an empty-auth config could be saved and would always fail to connect.
+    errors.auth = "Add a password or an identity file to authenticate.";
   }
 
   return errors;

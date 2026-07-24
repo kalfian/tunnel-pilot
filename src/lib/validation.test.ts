@@ -22,7 +22,9 @@ function validForm(over: Partial<ForwardFormValues> = {}): ForwardFormValues {
     keepAliveIntervalSec: 0,
     keepAliveMaxCount: 0,
     identityFilePath: null,
-    password: "",
+    // Default to a valid single auth method so the base form is valid; auth
+    // tests override this explicitly.
+    password: "hunter2",
     ...over,
   };
 }
@@ -93,14 +95,24 @@ describe("validateForwardForm", () => {
 
     it("allows identity only", () => {
       const errors = validateForwardForm(
-        validForm({ identityFilePath: "/home/u/.ssh/id_ed25519" }),
+        validForm({ password: "", identityFilePath: "/home/u/.ssh/id_ed25519" }),
       );
       expect(errors.auth).toBeUndefined();
     });
 
-    it("allows neither (agent / no auth)", () => {
-      const errors = validateForwardForm(validForm());
-      expect(errors.auth).toBeUndefined();
+    it("requires at least one auth method (F46: neither is invalid)", () => {
+      const errors = validateForwardForm(
+        validForm({ password: "", identityFilePath: null }),
+      );
+      expect(errors.auth).toBeDefined();
+      expect(isFormValid(errors)).toBe(false);
+    });
+
+    it("accepts a blank identity path as no identity (still needs auth)", () => {
+      const errors = validateForwardForm(
+        validForm({ password: "", identityFilePath: "   " }),
+      );
+      expect(errors.auth).toBeDefined();
     });
 
     it("rejects a typed password together with an identity file", () => {
