@@ -25,6 +25,12 @@ pub mod tray;
 pub mod updater;
 pub mod window;
 
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    Manager,
+};
+
 /// Build and run the Tauri application.
 ///
 /// The window starts hidden (`visible: false` in `tauri.conf.json`) so the app
@@ -46,9 +52,41 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .setup(|_app| {
-            // Tray and the tracing→log-buffer layer are registered in later M0
-            // items. Window is hidden at start via tauri.conf.json.
+        .setup(|app| {
+            // macOS: sit in the tray as an agent app (baseline; the `showInDock`
+            // activation-policy switching lands in M3, spec 03 §13). Mirrors the
+            // Info.plist LSUIElement flag so dev runs also stay dock-less.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Minimal tray: Open (show/focus the window) + Quit (exit). The full
+            // dynamic icon + rebuilt menu lands in M3 (spec 03 §§12,13).
+            let open_item = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+
+            let mut tray = TrayIconBuilder::with_id("main")
+                .tooltip("Tunnel Pilot")
+                .menu(&menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                });
+
+            // Reuse the bundled app icon for the tray when available.
+            if let Some(icon) = app.default_window_icon().cloned() {
+                tray = tray.icon(icon);
+            }
+            tray.build(app)?;
+
+            // Tracing→log-buffer layer is initialized in the next M0 item.
             Ok(())
         })
         // `expect` is acceptable at this binary edge: a failure here means the
