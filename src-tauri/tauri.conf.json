@@ -33,7 +33,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUwQTNCRUM3NkQ2MjlCMjAKUldRZ20ySnR4NzZqNFBrUExZc2ZncW80bjBQalVVVFpOdlNEWm5IbFZVMFZ0OHNJSGhYOEZBd3cK",
       "endpoints": [
         "https://github.com/kalfian/tunnel-pilot/releases/latest/download/latest.json"
       ]
@@ -41,6 +41,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "category": "DeveloperTool",
     "shortDescription": "SSH local port forwarding manager",

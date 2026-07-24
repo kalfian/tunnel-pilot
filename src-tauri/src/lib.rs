@@ -52,7 +52,9 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_notification::init())
-        // Updater endpoints/pubkey are configured in M6 (minisign signing).
+        // Self-updater (spec 03 §16). Endpoints + the minisign public key live in
+        // `tauri.conf.json` (`plugins.updater`); the private key is a CI secret
+        // only. `check_update`/`install_update` drive it via `crate::updater`.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -165,6 +167,28 @@ pub fn run() {
                 doc,
             ));
             app.manage(state.clone());
+
+            // Updater runtime state (spec 03 §16): holds the pending signed
+            // bundle from the last check + once-per-version notification guard.
+            // Managed alongside `AppState` so the updater commands and the boot
+            // auto-check share one instance.
+            let updater_state = Arc::new(crate::updater::UpdaterState::new());
+            app.manage(updater_state.clone());
+
+            // Boot update-check (spec 03 §16): one check at startup iff
+            // `autoCheckUpdates`, firing the update-available notification once
+            // per version and emitting `update://status`. Runs detached so a slow
+            // or failing network check never blocks startup (errors swallowed).
+            {
+                let app_handle = app.handle().clone();
+                let state_for_updater = state.clone();
+                let updater_for_task = updater_state.clone();
+                tauri::async_runtime::spawn(crate::updater::auto_check_on_startup(
+                    app_handle,
+                    state_for_updater,
+                    updater_for_task,
+                ));
+            }
 
             // Sleep/wake watchdog (spec 03 §4): an app-lifetime monotonic-gap
             // task that probes connected tunnels after a >30s gap (likely OS

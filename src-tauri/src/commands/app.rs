@@ -11,14 +11,20 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 use crate::error::AppError;
-use crate::state::models::{AppSnapshot, UpdateStatus};
+use crate::state::models::AppSnapshot;
 use crate::state::AppState;
+use crate::updater::UpdaterState;
 
 /// `app_hydrate` — the full boot/rehydrate snapshot (spec 04 §8). The `update`
-/// field is a not-available default until the updater is wired in M6.
+/// field carries the latest known availability snapshot (spec 03 §16): the boot
+/// auto-check emits `update://status` live, and this returns the cached result
+/// so a window shown *after* that emit still sees the current state.
 #[tauri::command]
-pub fn app_hydrate(state: State<'_, Arc<AppState>>) -> AppSnapshot {
-    state.app_snapshot(UpdateStatus::default())
+pub fn app_hydrate(
+    state: State<'_, Arc<AppState>>,
+    updater: State<'_, Arc<UpdaterState>>,
+) -> AppSnapshot {
+    state.app_snapshot(updater.latest_status())
 }
 
 /// `show_window` — show + focus the main window (tray "Open" / single-instance).
