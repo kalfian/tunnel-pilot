@@ -12,7 +12,7 @@
 //! (`disconnect_forward`) writes disconnecting/disconnected.
 
 use std::io::ErrorKind;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -41,6 +41,10 @@ const LIVENESS_POLL: Duration = Duration::from_secs(1);
 const STATS_PROBE: Duration = Duration::from_secs(3);
 /// RTT probe timeout.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+/// Upper bound on the best-effort SSH-disconnect during teardown (F32). Sending
+/// `Msg::Disconnect` only queues on the session's channel, but a wedged session
+/// must never let teardown stall past cancel latency.
+const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// What the supervisor should do after a session teardown.
 enum Flow {
@@ -82,6 +86,14 @@ pub async fn connect_forward(state: &Arc<AppState>, id: &str) -> Result<(), AppE
                 disconnect_forward(state, &other, false).await?;
             }
         }
+    }
+
+    // Atomically reserve the id (F33): if a concurrent connect already reserved
+    // it or it is already live, bail — this guarantees at most ONE supervisor
+    // per tunnel even when multiple drivers race (M4 drives this concurrently).
+    // A second connect losing the race is a benign no-op; the winner is live.
+    if !state.registry.try_begin_start(id) {
+        return Ok(());
     }
 
     // Shared per-tunnel state. The status starts Disconnected; the supervisor's
@@ -296,9 +308,11 @@ async fn supervise(
             // Lost the race to a user disconnect (now disconnecting) → tear this
             // session down and let the command handler finish to disconnected.
             drop(listener);
-            let _ = session
-                .disconnect(russh::Disconnect::ByApplication, "", "")
-                .await;
+            let _ = timeout(
+                DISCONNECT_TIMEOUT,
+                session.disconnect(russh::Disconnect::ByApplication, "", ""),
+            )
+            .await;
             break 'supervisor;
         }
         state.emit_status(&id, ForwardStatus::Connected, None);
@@ -326,9 +340,11 @@ async fn supervise(
         // ---- teardown of this session ----
         stats.mark_disconnected();
         drop(listener); // release the local port
-        let _ = session
-            .disconnect(russh::Disconnect::ByApplication, "", "")
-            .await;
+        let _ = timeout(
+            DISCONNECT_TIMEOUT,
+            session.disconnect(russh::Disconnect::ByApplication, "", ""),
+        )
+        .await;
         drop(session);
 
         match disposition {
@@ -415,6 +431,15 @@ async fn accept_loop(ctx: AcceptCtx<'_>) -> Disposition {
     let mut probe = interval(STATS_PROBE);
     probe.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+    // F32: the RTT probe can hang up to PROBE_TIMEOUT (3s) on a WEDGED session
+    // (TCP up, SSH stalled). It MUST NOT run inline in this `select!` — that
+    // would block user-disconnect (`attempt_cancel`), `accept`, and the cheap
+    // `is_closed()` liveness poll for up to 3s. So probes are SPAWNED off the
+    // loop: the stats probe updates latency in the shared cell for the next
+    // publish tick, and a wake probe signals `wake_dead` on failure.
+    let probe_in_flight = Arc::new(AtomicBool::new(false));
+    let wake_dead = Arc::new(Notify::new());
+
     loop {
         tokio::select! {
             // Attempt token cancelled — disambiguate (F27d): parent cancelled =
@@ -463,26 +488,63 @@ async fn accept_loop(ctx: AcceptCtx<'_>) -> Disposition {
                 }
             }
 
-            // Wake-from-sleep nudge (NIT-1/§4): immediate RTT probe; if it fails,
-            // reconnect now (bypassing backoff via the reconnect path).
-            _ = ctx.wake_notify.notified() => {
-                if !run_rtt_probe(ctx.session, ctx.stats).await {
-                    tracing::info!(tunnel = %ctx.id, "wake probe failed -> reconnect");
-                    return Disposition::Reconnect;
-                }
+            // A SPAWNED wake probe found the session dead → reconnect fast
+            // (bypassing backoff). Non-blocking: the probe ran off the loop.
+            _ = wake_dead.notified() => {
+                tracing::info!(tunnel = %ctx.id, "wake probe failed -> reconnect");
+                return Disposition::Reconnect;
             }
 
-            // Stats + latency cadence (§6): probe RTT on the OWNED session,
-            // publish a snapshot into the cell, and emit tunnel://stats. A failed
-            // probe leaves latency unchanged and is NOT a teardown signal.
+            // Wake-from-sleep nudge (NIT-1/§4): SPAWN an immediate RTT probe that
+            // pokes `wake_dead` on failure. Spawned (not inline) so a wedged
+            // probe can't block the loop (F32). Wake events are rare (sleep
+            // resume), so this probe is not gated by `probe_in_flight`.
+            _ = ctx.wake_notify.notified() => {
+                spawn_rtt_probe(ctx.session.clone(), ctx.stats.clone(), None, Some(wake_dead.clone()));
+            }
+
+            // Stats + latency cadence (§6): publish the current snapshot (cheap,
+            // non-blocking) and SPAWN a latency probe whose result lands in the
+            // cell for the NEXT publish. A failed/wedged probe leaves latency
+            // unchanged, never tears down, and never blocks this loop (F32). The
+            // `probe_in_flight` guard prevents 3s-cadence pile-up on a wedged
+            // session (one probe at a time).
             _ = probe.tick() => {
-                run_rtt_probe(ctx.session, ctx.stats).await;
                 let snap = ctx.stats.snapshot();
                 let _ = ctx.stats_tx.send(snap.clone());
                 ctx.state.emit_stats(ctx.id, snap);
+                spawn_rtt_probe(ctx.session.clone(), ctx.stats.clone(), Some(probe_in_flight.clone()), None);
             }
         }
     }
+}
+
+/// Spawn an RTT probe OFF the accept loop (F32). Updates `stats` latency on
+/// success; pokes `dead` (if any) on failure. `in_flight`, when provided, caps
+/// concurrency to one probe (used by the periodic stats probe to avoid pile-up
+/// on a wedged session); the wake probe passes `None` so it always runs.
+fn spawn_rtt_probe(
+    session: Arc<Session>,
+    stats: Arc<StatsInner>,
+    in_flight: Option<Arc<std::sync::atomic::AtomicBool>>,
+    dead: Option<Arc<Notify>>,
+) {
+    if let Some(flag) = &in_flight {
+        if flag.swap(true, Ordering::SeqCst) {
+            return; // a probe is already running
+        }
+    }
+    tokio::spawn(async move {
+        let ok = run_rtt_probe(&session, &stats).await;
+        if !ok {
+            if let Some(d) = dead {
+                d.notify_one();
+            }
+        }
+        if let Some(flag) = in_flight {
+            flag.store(false, Ordering::SeqCst);
+        }
+    });
 }
 
 /// Channel-open RTT probe on the OWNED session (spec 03 §6). There is no

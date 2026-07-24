@@ -104,10 +104,17 @@ pub struct TerminalErrorOutcome {
 }
 
 /// The registry: a single briefly-held `Mutex` guards the map (spec 03 §5 —
-/// never held across an `.await` doing network I/O).
+/// never held across an `.await` doing network I/O). A second small `Mutex`
+/// tracks ids whose supervisor is mid-launch ("starting") so that
+/// [`TunnelRegistry::try_begin_start`] can reserve an id atomically and prevent
+/// two concurrent `connect_forward`s from spawning duplicate supervisors (F33).
 #[derive(Default)]
 pub struct TunnelRegistry {
     inner: Mutex<HashMap<TunnelId, TunnelHandle>>,
+    /// Ids reserved by an in-flight `connect_forward` before its handle lands in
+    /// `inner`. Ordering rule (no deadlock): `try_begin_start` is the ONLY method
+    /// that holds both locks, and always takes `inner` first, then `starting`.
+    starting: Mutex<std::collections::HashSet<TunnelId>>,
 }
 
 impl TunnelRegistry {
@@ -122,8 +129,38 @@ impl TunnelRegistry {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn lock_starting(&self) -> MutexGuard<'_, std::collections::HashSet<TunnelId>> {
+        self.starting.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Atomically reserve `id` for a starting supervisor (F33). Returns `true`
+    /// iff the id is neither already live (in `inner`) nor already reserved by a
+    /// concurrent `connect_forward`; on `true` the id is marked "starting" and
+    /// the caller MUST eventually [`insert`](Self::insert) (which clears the
+    /// reservation) or call [`finish_start`](Self::finish_start) on failure.
+    /// This closes the check-then-insert race that would otherwise let a second
+    /// concurrent connect orphan the first supervisor (leaked task + bound port).
+    pub fn try_begin_start(&self, id: &str) -> bool {
+        let live = self.lock();
+        let mut starting = self.lock_starting();
+        if live.contains_key(id) || starting.contains(id) {
+            return false;
+        }
+        starting.insert(id.to_string());
+        true
+    }
+
+    /// Clear a "starting" reservation without inserting a handle (start aborted).
+    pub fn finish_start(&self, id: &str) {
+        self.lock_starting().remove(id);
+    }
+
+    /// Insert the live handle and clear any "starting" reservation for its id
+    /// (the reservation and the handle never coexist as a gap, F33).
     pub fn insert(&self, handle: TunnelHandle) {
-        self.lock().insert(handle.id.clone(), handle);
+        let id = handle.id.clone();
+        self.lock().insert(id.clone(), handle);
+        self.lock_starting().remove(&id);
     }
 
     /// Remove and return a handle (caller awaits its `JoinHandle` first, F21).
@@ -169,6 +206,9 @@ impl TunnelRegistry {
             return None; // no-op unless parked in error
         }
         h.retry_requested = true;
+        // Cancel the outgoing attempt token so any lingering children of the
+        // previous attempt tear down explicitly/token-driven (F34).
+        h.attempt_cancel.cancel();
         let child = h.parent_cancel.child_token();
         h.attempt_cancel = child;
         Some(h.retry_notify.clone())
@@ -191,6 +231,12 @@ impl TunnelRegistry {
     pub fn mint_fresh_attempt(&self, id: &str) -> Option<CancellationToken> {
         let mut g = self.lock();
         let h = g.get_mut(id)?;
+        // Cancel the OUTGOING token first (F34): on a reconnect transition this
+        // explicitly reaps the previous attempt's forward children via their
+        // `attempt_cancel.cancelled()` arm, rather than relying on the session
+        // disconnect erroring their channels — so `active_connections` isn't
+        // left briefly inflated and teardown is token-driven.
+        h.attempt_cancel.cancel();
         let child = h.parent_cancel.child_token();
         h.attempt_cancel = child.clone();
         Some(child)
