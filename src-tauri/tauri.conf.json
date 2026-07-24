@@ -16,9 +16,9 @@
       {
         "label": "main",
         "title": "Tunnel Pilot",
-        "width": 900,
+        "width": 860,
         "height": 640,
-        "minWidth": 720,
+        "minWidth": 560,
         "minHeight": 480,
         "resizable": true,
         "visible": false,
