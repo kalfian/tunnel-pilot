@@ -25,7 +25,7 @@
 | M2 | Reconnect/wake/stats/persistence/keychain | ✅ done | 8214cdb..9901e4d (10 commits) |
 | M3 | Tray/window/lifecycle/autostart/dock | ✅ done | 6610ce8..331a2d4 (5 commits) |
 | M4 | Full UI parity | ✅ done | P1 `08c2e35` · P2a `1c94b5c..048de6b` · P2b `fcd25ee..85939c7` |
-| M5 | UX improvements | ⬜ pending | — |
+| M5 | UX improvements | ✅ done | Rust `44ef253`,`ffc4f69` · FE `5c95728..1812a43` |
 | M6 | Signed updater + notifications | ⬜ pending | — |
 | M7 | Packaging + cutover | ⬜ pending | — |
 
@@ -325,11 +325,70 @@ ipc/events/types/Rust) consumed as-is.
   `prefers-color-scheme`, and 560px-min responsive layout. Logic + component tests
   are green headless.
 
+## M5 — UX improvements (N1–N4, N7 + M4-review FE fixes)
+Backend (parallel coder): `44ef253` emit `window://focus` on every show path (F44);
+`ffc4f69` resizable window + min inner size 560×480 in `tauri.conf.json` (N2 enable).
+Frontend (ui-ux, `5c95728..1812a43`):
+- [x] **M4-review FE fixes:** F45 (`await subscribeEvents()` before `hydrateAll()` —
+      no dropped mid-hydrate event); F46 (validation now requires ≥1 auth method,
+      not just exclusivity); F47 (password-store failure after a successful create
+      reports "created, but password not saved", not "Save failed"); F48 (Activity
+      `{#each}` keyed by content+occurrence, not array index).
+- [x] **N1 command palette (⌘K):** pure DP fuzzy matcher `lib/fuzzy.ts` (word-boundary/
+      consecutive/multi-term AND, unit-tested); `stores/palette.ts` (open/query/recents)
+      + `stores/commands.ts` bus (palette → ConnectionsView dialogs); `CommandPalette.svelte`
+      (context-aware connect/disconnect, per-tunnel action sub-menu via →, start/stop all,
+      per-group start/stop, jump-to-view, toggle theme, check updates, add, about);
+      combobox+listbox a11y, hover/keyboard share one active index; App wires ⌘K + a
+      persistent rail search cue; ⌘N global via the bus.
+- [x] **N3 groups/tags UI:** collapsible `GroupHeader` (collapse persisted via
+      `update_group`), X/Y active count, per-group Start/Stop all, ambient accent rail;
+      Ungrouped section; flat list when no groups; `TagFilterBar` bound to `activeTag`
+      (auto-pruned), tag pills on cards (3 + "+N"), Group Select + type-to-create Tags
+      editor in the form.
+- [x] **F43 reorder-under-filter fix:** `ConnectionList` owns filtering and always
+      reorders on the FULL ordered id list (keyboard swap stays within a group; drag
+      across groups reassigns via `assign_forward_group`); reorder disabled while any
+      filter/tag is active; no-move drag no longer persists.
+- [x] **N2 responsive reflow:** content area is a CSS container (excludes rail); list
+      caps 720 + centers past ~1100; Compact (<640) tightens padding, shrinks filter,
+      collapses Duplicate/Delete into a ⋯ overflow menu; stat chips wrap.
+- [x] **N7 non-destructive import merge:** VERIFIED already surfaced — `importMode`
+      defaults to `merge`, Merge/Replace segmented control, pre-apply confirm dialog
+      with mode-specific copy, post-import result counts. No change needed.
+- [x] Tests (+23 → **59 FE**): `fuzzy` matcher (10), CommandPalette dispatch (5),
+      ConnectionList groups + collapse + tag filter + **F43 full-order/disabled-under-filter**
+      (7), F46 validation. Gates: `pnpm check`/`lint`/`test`/`build` all clean.
+
+### M5 findings / deviations (AGENTS §9)
+- **No `05`/`design-tokens` spec corrections needed.** Implemented within spec.
+- **Tag filter is single-tag** (per the `activeTag: string|null` store contract), not the
+  multi-tag AND/OR menu sketched in `05 §4.2`. The store is the contract; multi-tag is a
+  cheap future extension if the store grows to `string[]`. Not a spec error — flagged.
+- **Context-menu "Assign group ▸ / Add tag ▸"** (`05 §4.3`) are NOT nested submenus in the
+  row menu; assignment is via the form's Group select + Tags editor and drag-across-groups
+  (`assign_forward_group`). Avoids building nested ContextMenu submenus for M5; the
+  capability is fully reachable.
+- **Palette "Keyboard shortcuts (?)" entry** (`05 §15`) omitted — would need a shortcuts
+  sheet; the footer hints + per-action hint labels cover discovery. Revisit if wanted.
+- **Import confirm still shows mode effect, not exact N/M counts** (carried from M4) — no
+  dry-run IPC; real counts reported post-import. Unchanged.
+- **Anti-slop self-score: 1/10.** Dense grouped single-column list (no card grid), flat
+  surfaces + hairlines, Lucide icons (no emoji), 4/8 tokens only, mono tabular numerics,
+  full state machine, honest empty/loading/error, keyboard-first (⌘K + full keymap),
+  reduced-motion honored, AA contrast.
+
+### Needs a real desktop session to verify
+Window resize/min-size clamp + the responsive breakpoints at 560px (container queries are
+correct headless but the live webview + Tauri min bounds want eyes); ⌘K over a native
+dialog; clipboard/file-picker round-trips; live `tunnel://stats` 3s cross-fade; theme
+follow of OS `prefers-color-scheme`; drag-reorder + cross-group drag reassign (jsdom can't
+exercise HTML5 DnD — keyboard reorder + the disabled-under-filter guard are unit-tested).
+
 ## Next action
-**M4 review, then M5** (command palette ⌘K, groups/tags UI, resizable/responsive
-reflow + Wide detail pane, sparkline). M4 is feature-complete: 106 Rust + 36 FE
-tests pass; all six gates clean. Interactive tray/window/dock + real-OS-sleep wake
-remain deferred to a desktop session / M6 (F15).
+**M5 review, then M6** (signed updater + notifications + wake polish). M5 feature-complete:
+N1–N4 + N7 shipped, F43/F45–F48 fixed; 59 FE tests pass; `pnpm check`/`lint`/`test`/`build`
+all clean. Interactive window/resize/DnD + real-OS-sleep wake remain for a desktop session / M6.
 
 ## Commit log (append hash + item as they land)
 - `4aac549` docs: spec package v1 (pre-build baseline)
@@ -382,6 +441,15 @@ remain deferred to a desktop session / M6 (F15).
 - `7d69f31` feat(m4): Activity + Settings views
 - `3c5aada` feat(m4): app shell + boot wiring (hydrate/subscribe/theme)
 - `85939c7` test(m4): component tests + jsdom vitest setup
+- `44ef253` fix(m5): emit WINDOW_FOCUS on every window show path (F44)
+- `ffc4f69` feat(m5): resizable main window with spec min bounds (N2)
+- `5c95728` fix(m5): F45 await subscribeEvents before hydrateAll on boot
+- `a9e1876` fix(m5): F46 require at least one auth method
+- `9e2d558` fix(m5): F47 distinguish password-save failure from config-save failure
+- `05a8cc4` fix(m5): F48 stable log row keys instead of array index
+- `6ec51d5` feat(m5): N1 command palette (⌘K) with fuzzy launcher
+- `c164226` feat(m5): N3 groups/tags UI + F43 reorder-under-filter fix
+- `1812a43` feat(m5): N2 responsive reflow (content-area container queries)
 
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).
