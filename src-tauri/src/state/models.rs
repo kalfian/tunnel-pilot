@@ -84,6 +84,21 @@ impl ForwardConfig {
     }
 }
 
+/// A folder that forwards can belong to (new in v2, spec 04 §2). A forward has
+/// at most one exclusive `group_id`; ungrouped forwards render under a default
+/// section. `collapsed` is persisted (F13) so folder state survives restarts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelGroup {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub color: Option<String>,
+    pub order: u32,
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
 /// Create/update payload — no `id`, no live state, no secret (spec 04 §1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,7 +154,7 @@ pub struct ForwardRuntime {
 /// Application settings (spec 04 §3). Only the fields the M1 engine reads
 /// (`auto_reconnect`, delay, max-retries) are load-bearing here; the rest are
 /// carried for the persisted mirror (M2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub launch_at_login: bool,
