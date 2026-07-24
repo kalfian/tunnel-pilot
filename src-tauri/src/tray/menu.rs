@@ -18,8 +18,9 @@ use tauri::{AppHandle, Listener, Manager, Wry};
 use tokio::sync::Notify;
 
 use crate::events;
-use crate::state::models::ForwardStatus;
+use crate::state::models::{ForwardStatus, UpdateStatus};
 use crate::state::AppState;
+use crate::updater::UpdaterState;
 
 /// Debounce window for coalescing rapid status changes into one rebuild.
 const REBUILD_DEBOUNCE: Duration = Duration::from_millis(100);
@@ -64,16 +65,37 @@ pub struct TunnelMenuRow {
     pub actions: Vec<TunnelAction>,
 }
 
+/// Content of the update-notice slot when an update is pending install.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateNotice {
+    /// The available version (e.g. `"1.5.0"`), if the updater reported one.
+    pub version: Option<String>,
+}
+
 /// The full tray-menu model — a pure function of state (see [`build_menu_model`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuModel {
-    /// Update-notice slot at the top; always `false` until M6 wires the updater.
-    pub update_available: bool,
+    /// Update-notice slot at the top; `Some` only when an update is pending
+    /// install (available and not skipped) — see [`update_notice_from_status`].
+    pub update_notice: Option<UpdateNotice>,
     pub tunnels: Vec<TunnelMenuRow>,
     /// "Start All" shown when at least one tunnel is startable.
     pub show_start_all: bool,
     /// "Stop All" shown when at least one tunnel is stoppable.
     pub show_stop_all: bool,
+}
+
+/// Derive the tray update-notice from the cached [`UpdateStatus`]. An update is
+/// offered in the tray only when it is available **and not skipped** — a version
+/// the user dismissed (`lastSkippedVersion`) must not be re-offered here.
+pub fn update_notice_from_status(status: &UpdateStatus) -> Option<UpdateNotice> {
+    if status.available && !status.skipped {
+        Some(UpdateNotice {
+            version: status.version.clone(),
+        })
+    } else {
+        None
+    }
 }
 
 /// The actions offered for a given status (spec 03 §11). `disconnecting` is a
@@ -93,7 +115,7 @@ fn actions_for(status: ForwardStatus) -> Vec<TunnelAction> {
 /// availability. Bulk items appear conditionally: Start All when anything is
 /// startable (disconnected/error), Stop All when anything is stoppable
 /// (connected/connecting).
-pub fn build_menu_model(tunnels: &[TunnelState], update_available: bool) -> MenuModel {
+pub fn build_menu_model(tunnels: &[TunnelState], update_notice: Option<UpdateNotice>) -> MenuModel {
     let rows: Vec<TunnelMenuRow> = tunnels
         .iter()
         .map(|t| TunnelMenuRow {
@@ -115,7 +137,7 @@ pub fn build_menu_model(tunnels: &[TunnelState], update_available: bool) -> Menu
     });
 
     MenuModel {
-        update_available,
+        update_notice,
         tunnels: rows,
         show_start_all,
         show_stop_all,
@@ -182,12 +204,16 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
     // Boxed so heterogeneous item kinds (MenuItem/Submenu/separator) share a Vec.
     let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
 
-    // Update-notice slot (top). Empty until M6 sets `update_available`.
-    if model.update_available {
+    // Update-notice slot (top). Present only when an update is pending install.
+    if let Some(notice) = &model.update_notice {
+        let label = match &notice.version {
+            Some(v) => format!("Update available (v{v}) — Install"),
+            None => "Update available — Install".to_string(),
+        };
         items.push(Box::new(MenuItem::with_id(
             app,
             ID_UPDATE,
-            "Install update…",
+            label,
             true,
             None::<&str>,
         )?));
@@ -331,10 +357,20 @@ pub fn handle_menu_event(app: &AppHandle, item_id: &str) {
             let _ = crate::commands::forwards::run_stop_all(&state).await;
         }),
         ID_UPDATE => {
-            // Update-notice slot: the install command lands in M6. Until then the
-            // item is only ever present when `update_available` is forced false,
-            // so this branch is unreachable in M3 — logged for safety.
-            tracing::warn!("tray update-install clicked but updater lands in M6");
+            // Install the pending update via the same path as the `install_update`
+            // command (updater::run_install downloads → verifies minisign → installs
+            // → relaunches). Spawned onto the async runtime; errors are logged.
+            let Some(updater) = app.try_state::<Arc<UpdaterState>>() else {
+                tracing::error!("UpdaterState not managed; tray update-install dropped");
+                return;
+            };
+            let updater = updater.inner().clone();
+            let app_for_install = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = crate::updater::run_install(&app_for_install, &updater).await {
+                    tracing::error!(error = %e, "tray update-install failed");
+                }
+            });
         }
         other => {
             if let Some((action, id)) = parse_tunnel_item_id(other) {
@@ -382,12 +418,22 @@ where
 
 // --- rebuild + debounce -----------------------------------------------------
 
+/// Read the cached update availability from the managed [`UpdaterState`] into a
+/// tray [`UpdateNotice`]. Returns `None` if the updater state isn't managed yet
+/// or no update is pending. The `latest_status` lock is a brief std `Mutex` with
+/// no `.await` held across it.
+fn gather_update_notice(app: &AppHandle) -> Option<UpdateNotice> {
+    let updater = app.try_state::<Arc<UpdaterState>>()?;
+    let status = updater.latest_status();
+    update_notice_from_status(&status)
+}
+
 /// Rebuild the tray icon + menu from current state, on the main thread.
 pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>) {
     let tunnels = gather_tunnel_states(state);
     let count = connected_count(&tunnels);
-    // Update notice is empty until M6.
-    let model = build_menu_model(&tunnels, false);
+    let update_notice = gather_update_notice(app);
+    let model = build_menu_model(&tunnels, update_notice);
 
     let app_main = app.clone();
     let dispatch = app.run_on_main_thread(move || {
@@ -415,10 +461,17 @@ pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>) {
 pub fn spawn_tray_sync(app: AppHandle, state: Arc<AppState>) {
     let notify = Arc::new(Notify::new());
 
-    // Any status transition marks the tray dirty.
+    // Any tunnel status transition marks the tray dirty.
     let dirty = notify.clone();
     app.listen(events::TUNNEL_STATUS, move |_event| {
         dirty.notify_one();
+    });
+
+    // Update-availability changes also rebuild the tray (to show/hide the
+    // update-notice slot), coalesced through the same debounce.
+    let dirty_update = notify.clone();
+    app.listen(events::UPDATE_STATUS, move |_event| {
+        dirty_update.notify_one();
     });
 
     // Debounce loop: wake on the first change, wait out the window (coalescing
@@ -451,35 +504,35 @@ mod tests {
 
     #[test]
     fn empty_has_no_bulk() {
-        let m = build_menu_model(&[], false);
+        let m = build_menu_model(&[], None);
         assert!(m.tunnels.is_empty());
         assert!(!m.show_start_all);
         assert!(!m.show_stop_all);
-        assert!(!m.update_available);
+        assert!(m.update_notice.is_none());
     }
 
     #[test]
     fn error_row_exposes_retry() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], false);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], None);
         let row = &m.tunnels[0];
         assert!(row.actions.contains(&TunnelAction::Retry));
     }
 
     #[test]
     fn connected_row_offers_disconnect_only() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Connected)], false);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Connected)], None);
         assert_eq!(m.tunnels[0].actions, vec![TunnelAction::Disconnect]);
     }
 
     #[test]
     fn disconnected_row_offers_connect_only() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnected)], false);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnected)], None);
         assert_eq!(m.tunnels[0].actions, vec![TunnelAction::Connect]);
     }
 
     #[test]
     fn disconnecting_row_has_no_actions() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnecting)], false);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnecting)], None);
         assert!(m.tunnels[0].actions.is_empty());
     }
 
@@ -491,7 +544,7 @@ mod tests {
                 ts("a", ForwardStatus::Connected),
                 ts("b", ForwardStatus::Disconnected),
             ],
-            false,
+            None,
         );
         assert!(m.show_start_all);
         assert!(m.show_stop_all);
@@ -504,7 +557,7 @@ mod tests {
                 ts("a", ForwardStatus::Connected),
                 ts("b", ForwardStatus::Connected),
             ],
-            false,
+            None,
         );
         assert!(!m.show_start_all);
         assert!(m.show_stop_all);
@@ -517,7 +570,7 @@ mod tests {
                 ts("a", ForwardStatus::Disconnected),
                 ts("b", ForwardStatus::Error),
             ],
-            false,
+            None,
         );
         assert!(m.show_start_all);
         assert!(!m.show_stop_all);
@@ -525,14 +578,14 @@ mod tests {
 
     #[test]
     fn error_makes_start_all_available() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], false);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], None);
         assert!(m.show_start_all);
         assert!(!m.show_stop_all);
     }
 
     #[test]
     fn connecting_makes_stop_all_available() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Connecting)], false);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Connecting)], None);
         assert!(!m.show_start_all);
         assert!(m.show_stop_all);
     }
@@ -549,9 +602,67 @@ mod tests {
     }
 
     #[test]
-    fn update_slot_flows_through() {
-        let m = build_menu_model(&[], true);
-        assert!(m.update_available);
+    fn update_notice_flows_through_when_present() {
+        let notice = UpdateNotice {
+            version: Some("1.5.0".to_string()),
+        };
+        let m = build_menu_model(&[], Some(notice.clone()));
+        assert_eq!(m.update_notice, Some(notice));
+    }
+
+    #[test]
+    fn update_notice_absent_when_none() {
+        let m = build_menu_model(&[ts("a", ForwardStatus::Connected)], None);
+        assert!(m.update_notice.is_none());
+    }
+
+    #[test]
+    fn update_notice_from_status_offered_when_available_not_skipped() {
+        let status = UpdateStatus {
+            available: true,
+            version: Some("1.5.0".to_string()),
+            notes: Some("changelog".to_string()),
+            skipped: false,
+        };
+        let notice = update_notice_from_status(&status);
+        assert_eq!(
+            notice,
+            Some(UpdateNotice {
+                version: Some("1.5.0".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn update_notice_from_status_hidden_when_unavailable() {
+        let status = UpdateStatus::default();
+        assert!(update_notice_from_status(&status).is_none());
+    }
+
+    #[test]
+    fn update_notice_from_status_hidden_when_skipped() {
+        // Available but the user dismissed this version → not re-offered in tray.
+        let status = UpdateStatus {
+            available: true,
+            version: Some("1.5.0".to_string()),
+            notes: None,
+            skipped: true,
+        };
+        assert!(update_notice_from_status(&status).is_none());
+    }
+
+    #[test]
+    fn update_notice_carries_no_version_when_missing() {
+        let status = UpdateStatus {
+            available: true,
+            version: None,
+            notes: None,
+            skipped: false,
+        };
+        assert_eq!(
+            update_notice_from_status(&status),
+            Some(UpdateNotice { version: None })
+        );
     }
 
     #[test]

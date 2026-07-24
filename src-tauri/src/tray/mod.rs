@@ -27,9 +27,11 @@ pub fn setup(app: &App, state: Arc<AppState>) -> tauri::Result<()> {
     let idle_icon = icon::load_image(icon::TrayIcon::Idle)?;
 
     // Initial menu from current state so the tray is correct the instant it
-    // appears (before the first sync tick).
+    // appears (before the first sync tick). `spawn_tray_sync` immediately
+    // rebuilds (reading the cached update status too), so at boot the notice is
+    // absent unless the auto-check already found an update.
     let tunnels = menu::gather_tunnel_states(&state);
-    let model = menu::build_menu_model(&tunnels, false);
+    let model = menu::build_menu_model(&tunnels, None);
     let initial_menu = menu::build_tauri_menu(&handle, &model)?;
 
     #[allow(unused_mut)]
