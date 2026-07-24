@@ -74,7 +74,15 @@ pub fn run() {
 
             // The shared application state (source of truth, spec 02 §5). Owns
             // the tunnel registry + (M1) in-memory config/settings/credentials.
-            app.manage(Arc::new(AppState::new(app.handle().clone())));
+            let state = Arc::new(AppState::new(app.handle().clone()));
+            app.manage(state.clone());
+
+            // Sleep/wake watchdog (spec 03 §4): an app-lifetime monotonic-gap
+            // task that probes connected tunnels after a >30s gap (likely OS
+            // sleep). Best-effort; the russh session-future signal is the
+            // backstop (F15). The 3s stats sampler (health.rs) is NOT started
+            // here — it auto-starts on the first connect.
+            crate::ssh::wake::spawn_wake_watchdog(state);
 
             // macOS: sit in the tray as an agent app (baseline; the `showInDock`
             // activation-policy switching lands in M3, spec 03 §13). Mirrors the
