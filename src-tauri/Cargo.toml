@@ -30,6 +30,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["clock"] }
 
+# Tauri plugins (registered as no-ops in M0; wired to behavior in M3/M4/M6).
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+
 [features]
 # this feature is used for production builds or when a dev server is not specified,
 # DO NOT REMOVE!!

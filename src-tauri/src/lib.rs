@@ -31,9 +31,24 @@ pub mod window;
 /// boots straight into the tray.
 pub fn run() {
     tauri::Builder::default()
+        // single-instance MUST be registered first (spec 02 §8). On a second
+        // launch it re-shows the window; M3 wires show_window + window://focus.
+        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
+            // TODO(M3): show_window() + emit WINDOW_FOCUS.
+        }))
+        // Launch-at-login. Reconciled with the `launchAtLogin` setting in M3.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(tauri_plugin_notification::init())
+        // Updater endpoints/pubkey are configured in M6 (minisign signing).
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|_app| {
-            // Tray, plugins, and the tracing→log-buffer layer are registered in
-            // later M0 items. Window is hidden at start via tauri.conf.json.
+            // Tray and the tracing→log-buffer layer are registered in later M0
+            // items. Window is hidden at start via tauri.conf.json.
             Ok(())
         })
         // `expect` is acceptable at this binary edge: a failure here means the
