@@ -103,13 +103,46 @@ completed the persistence + migration + AppState-integration phase:
 - **configs is a `Vec`, not a `HashMap`** (M1 used a map): spec 04 §9 mandates array order =
   display order, so the RAM mirror preserves insertion order and lookups are a linear scan
   over the handful of configured forwards (`get_config` is not a hot path). No spec change.
-- **Mutations persist fire-and-forget** (`tauri::async_runtime::spawn`) so the sync accessors
-  (`upsert_config` etc.) stay infallible for the temporary debug command surface; the real
-  M4 command surface will report persistence failures to the user. Errors are logged (never
-  with the secret). No spec change.
+- **Mutations persist via a single ordered writer** (F37, was fire-and-forget spawns — see
+  post-review below). Sync accessors (`upsert_config` etc.) stay infallible for the temporary
+  debug command surface; the real M4 command surface will report persistence failures to the
+  user. Errors are logged (never with the secret). No spec change.
 - **No spec corrections needed** (AGENTS §9): the hardcoded per-OS paths, `.corrupted-<ts>`
   sidecar, `.v1-backup` copy, and `app_config_dir` single-dir rule were all implemented as
   written in 03 §7/§8 and 04 §9/§10/§12.
+
+### M2 post-review hardening (code-review fixes)
+- **F37 (MAJOR):** `persist_forwards`/`persist_settings` were fire-and-forget detached
+  `tauri::async_runtime::spawn`s that each snapshotted a section and raced for the config
+  store's write lock — two rapid mutations could land out of order, so an older snapshot
+  overwrote a newer one → silent data loss / stale config on next boot. Fixed: all
+  persistence now flows through ONE ordered writer task (`persist_writer_loop`, spawned in
+  `AppState::new_hydrated`) fed by an `mpsc::unbounded_channel`. Mutations enqueue the latest
+  full section snapshot; the single consumer serializes writes in enqueue order and coalesces
+  each wakeup's backlog to the newest per section (last-write-wins is correct — every save is
+  a whole-section write). Mutation accessor signatures are unchanged (M3 callers unaffected).
+  Tests `ordered_writer_persists_last_enqueued_snapshot` (burst of 200+ distinct snapshots →
+  on-disk == LAST enqueued) and `ordered_writer_coalesces_both_sections_to_latest`.
+  - **M4 FOLLOW-UP (explicit):** error handling stays `tracing::error!` for now. User-facing
+    surfacing of persist failures is deferred to M4, which introduces the real command surface
+    and can add an async save path returning `Result` from the mutation commands. Do not change
+    the (sync/void) mutation accessor signatures before then.
+- **F38 (MINOR):** the keychain password read ran synchronously on the async auth path
+  (`ssh/client.rs` → `AppState::get_password` → `keyring` get), and `keyring` does blocking OS
+  calls (macOS Security framework / Linux Secret Service D-Bus) that can stall a tokio worker.
+  Added `AppState::get_password_async` wrapping the read in `tokio::task::spawn_blocking`
+  (mirroring the identity-key `load_secret_key` already on `spawn_blocking`) and switched the
+  password auth branch to it. The sync `get_password` is retained for boot/migration/sync
+  commands.
+- **F39 (MINOR security):** the plaintext fallback secrets tmp was created with `std::fs::write`
+  (default umask ~0644) then chmod'd to 0600 — a brief window where the secret was
+  world-readable. Now created atomically at mode 0600 via
+  `OpenOptions::mode(0o600).create_new(true)` on unix (stale tmp cleared first); the atomic
+  rename preserves 0600. Non-unix behavior unchanged.
+- **NIT:** `AppSettings` gained per-field `#[serde(default)]` (correct v1 defaults via shared
+  free functions the `Default` impl also uses) so a partial/legacy settings block merges
+  field-by-field with defaults instead of the whole struct resetting to `Default`. Tests
+  `app_settings_partial_block_merges_with_defaults` + `app_settings_empty_block_equals_default`.
 
 ## Next action
 **M2 architect review, then M3** (tray/window/lifecycle/autostart/dock). Full test suite:
@@ -148,3 +181,7 @@ wake check remains deferred to M6 (F15).
 - `07665fb` feat(m2): credential store in-memory + fallback-only constructors
 - `fc65ffe` feat(m2): v1->v2 migration (hardcoded per-OS probe) + lenient v1-backup parse
 - `9901e4d` feat(m2): wire persisted config + credential store into AppState + boot migration
+- `60a07ad` fix(m2): create fallback secrets tmp atomically at 0600 (F39)
+- `2d8aa27` fix(m2): per-field serde defaults on AppSettings so partial blocks merge (NIT)
+- `4a92ee2` fix(m2): route persistence through a single ordered writer (F37)
+- `3f56aa1` fix(m2): run keychain password read off the async runtime (F38)
