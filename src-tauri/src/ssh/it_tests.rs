@@ -5,11 +5,16 @@
 //! spawn the in-process server, these are the tests to gate behind `#[ignore]`.
 //!
 //! Coverage: end-to-end forward + byte counters (§1/§6), connection-lost via
-//! session death → `error` with NO ping counter (F1/F7), dead-channel (3
-//! forward failures) tears down + reconnects without cancelling the parent
-//! (F26), teardown during `connecting` releases the local port fast and reaches
-//! `disconnected` (F24/F31), and retry from `error` reuses the same supervisor
-//! (F23).
+//! session death → `error` with NO ping counter (F1/F7), **silent drop →
+//! keepalive-timeout → `error`** (the real F1/F7 mechanism, via a black-hole
+//! relay), dead-channel (3 forward failures) tears down + reconnects without
+//! cancelling the parent (F26), teardown during `connecting` releases the local
+//! port fast and reaches `disconnected` (F24/F31), **user disconnect during a
+//! wedged RTT probe is still fast** (F32), retry from `error` reuses the same
+//! supervisor (F23), **rapid connect/disconnect with no double-bind**,
+//! **same-port conflict disconnects the first**, **disconnect while parked in
+//! error**, and **retry hammering the live supervisor never loses a wakeup**
+//! (F29).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -73,6 +78,10 @@ struct TestServerHandler {
     /// When true, refuse to open forwarded channels (drives the dead-channel
     /// test: the client's `channel_open_direct_tcpip` errors).
     reject_channels: Arc<AtomicBool>,
+    /// When true, stall session-channel opens (the client's RTT probe uses
+    /// `channel_open_session`) — simulates a WEDGED session where the probe
+    /// hangs to its timeout while TCP/keepalive stay alive (drives the F32 test).
+    hang_session_channel: Arc<AtomicBool>,
 }
 
 #[async_trait::async_trait]
@@ -85,6 +94,19 @@ impl russh::server::Handler for TestServerHandler {
         _password: &str,
     ) -> Result<russh::server::Auth, Self::Error> {
         Ok(russh::server::Auth::Accept)
+    }
+
+    async fn channel_open_session(
+        &mut self,
+        _channel: russh::Channel<russh::server::Msg>,
+        _session: &mut russh::server::Session,
+    ) -> Result<bool, Self::Error> {
+        // The client's 3s RTT probe opens a session channel. If wedged, delay
+        // the confirmation past the client's probe timeout (F32).
+        if self.hang_session_channel.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        }
+        Ok(true)
     }
 
     async fn channel_open_direct_tcpip(
@@ -114,13 +136,15 @@ impl russh::server::Handler for TestServerHandler {
 struct TestSsh {
     port: u16,
     reject: Arc<AtomicBool>,
+    hang: Arc<AtomicBool>,
     accept_cancel: CancellationToken,
     handles: Arc<Mutex<Vec<russh::server::Handle>>>,
 }
 
 impl TestSsh {
     /// Kill the server: stop accepting AND disconnect every live session so
-    /// connected clients see their session die (simulates `kill sshd`).
+    /// connected clients see their session die (simulates `kill sshd` with a
+    /// graceful SSH disconnect).
     async fn kill(&self) {
         self.accept_cancel.cancel();
         let handles = {
@@ -135,23 +159,31 @@ impl TestSsh {
     }
 }
 
-/// Start the SSH server on an ephemeral port (or `fixed_port` if given, for the
-/// retry test that must rebind the same port).
-async fn start_ssh_server(reject_channels: bool, fixed_port: Option<u16>) -> TestSsh {
+#[derive(Default)]
+struct StartOpts {
+    reject_channels: bool,
+    hang_session_channel: bool,
+    fixed_port: Option<u16>,
+}
+
+/// Start the SSH server. `fixed_port` lets the retry test rebind the same port.
+async fn start_ssh_server(opts: StartOpts) -> TestSsh {
     let config = Arc::new(russh::server::Config {
         keys: vec![russh::keys::key::KeyPair::generate_ed25519().expect("keygen")],
         inactivity_timeout: Some(Duration::from_secs(3600)),
         ..Default::default()
     });
-    let addr = format!("127.0.0.1:{}", fixed_port.unwrap_or(0));
+    let addr = format!("127.0.0.1:{}", opts.fixed_port.unwrap_or(0));
     let listener = TcpListener::bind(&addr).await.expect("bind ssh");
     let port = listener.local_addr().unwrap().port();
-    let reject = Arc::new(AtomicBool::new(reject_channels));
+    let reject = Arc::new(AtomicBool::new(opts.reject_channels));
+    let hang = Arc::new(AtomicBool::new(opts.hang_session_channel));
     let accept_cancel = CancellationToken::new();
     let handles: Arc<Mutex<Vec<russh::server::Handle>>> = Arc::new(Mutex::new(Vec::new()));
 
     let cfg = config.clone();
     let reject_c = reject.clone();
+    let hang_c = hang.clone();
     let cancel_c = accept_cancel.clone();
     let handles_c = handles.clone();
     tokio::spawn(async move {
@@ -161,7 +193,10 @@ async fn start_ssh_server(reject_channels: bool, fixed_port: Option<u16>) -> Tes
                 accept = listener.accept() => {
                     let Ok((socket, _)) = accept else { break };
                     let cfg = cfg.clone();
-                    let handler = TestServerHandler { reject_channels: reject_c.clone() };
+                    let handler = TestServerHandler {
+                        reject_channels: reject_c.clone(),
+                        hang_session_channel: hang_c.clone(),
+                    };
                     let handles_inner = handles_c.clone();
                     tokio::spawn(async move {
                         if let Ok(running) = russh::server::run_stream(cfg, socket, handler).await {
@@ -177,8 +212,83 @@ async fn start_ssh_server(reject_channels: bool, fixed_port: Option<u16>) -> Tes
     TestSsh {
         port,
         reject,
+        hang,
         accept_cancel,
         handles,
+    }
+}
+
+/// A switchable TCP relay: forwards `client <-> 127.0.0.1:target` until put into
+/// "black-hole" mode, after which it stops forwarding but HOLDS both sockets
+/// open (no FIN/RST) — simulating a silent network death (VPN drop). With the
+/// SSH connection black-holed, russh keepalives get no reply and the client
+/// session ends via keepalive-timeout (the real F1/F7 liveness mechanism).
+struct Relay {
+    port: u16,
+    blackhole: Arc<AtomicBool>,
+    _cancel: CancellationToken,
+}
+
+async fn start_relay(target: u16) -> Relay {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind relay");
+    let port = listener.local_addr().unwrap().port();
+    let blackhole = Arc::new(AtomicBool::new(false));
+    let cancel = CancellationToken::new();
+    let bh = blackhole.clone();
+    let cancel_c = cancel.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = cancel_c.cancelled() => break,
+                accept = listener.accept() => {
+                    let Ok((client, _)) = accept else { break };
+                    let Ok(server) = TcpStream::connect(("127.0.0.1", target)).await else { continue };
+                    let (cr, cw) = client.into_split();
+                    let (sr, sw) = server.into_split();
+                    let bh1 = bh.clone();
+                    let bh2 = bh.clone();
+                    let cc1 = cancel_c.clone();
+                    let cc2 = cancel_c.clone();
+                    tokio::spawn(relay_dir(cr, sw, bh1, cc1));
+                    tokio::spawn(relay_dir(sr, cw, bh2, cc2));
+                }
+            }
+        }
+    });
+    Relay {
+        port,
+        blackhole,
+        _cancel: cancel,
+    }
+}
+
+async fn relay_dir(
+    mut r: tokio::net::tcp::OwnedReadHalf,
+    mut w: tokio::net::tcp::OwnedWriteHalf,
+    blackhole: Arc<AtomicBool>,
+    cancel: CancellationToken,
+) {
+    let mut buf = vec![0u8; 16 * 1024];
+    loop {
+        if blackhole.load(Ordering::SeqCst) {
+            // Hold the socket halves open, forward nothing (silent death).
+            cancel.cancelled().await;
+            return;
+        }
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = tokio::time::sleep(Duration::from_millis(40)) => {}
+            res = r.read(&mut buf) => {
+                match res {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => {
+                        if w.write_all(&buf[..n]).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -254,7 +364,7 @@ async fn end_to_end_forward_and_byte_counters() {
     use crate::state::models::ForwardStatus;
 
     let echo = start_echo_target().await;
-    let ssh = start_ssh_server(false, None).await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
     let local_port = free_port().await;
 
     let state = make_state(false, 0);
@@ -318,7 +428,7 @@ async fn session_death_moves_to_error_no_ping_counter() {
 
     // auto_reconnect OFF → a dropped session parks in `error` (not reconnect).
     let echo = start_echo_target().await;
-    let ssh = start_ssh_server(false, None).await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
     let local_port = free_port().await;
 
     let state = make_state(false, 0);
@@ -364,7 +474,11 @@ async fn dead_channel_reconnects_without_cancelling_parent() {
 
     let echo = start_echo_target().await;
     // Start REJECTING forwarded channels so opens fail.
-    let ssh = start_ssh_server(true, None).await;
+    let ssh = start_ssh_server(StartOpts {
+        reject_channels: true,
+        ..StartOpts::default()
+    })
+    .await;
     let local_port = free_port().await;
 
     // auto_reconnect ON so the dead-channel teardown reconnects (F26).
@@ -502,7 +616,7 @@ async fn retry_from_error_reuses_same_supervisor() {
     use crate::state::models::ForwardStatus;
 
     let echo = start_echo_target().await;
-    let ssh = start_ssh_server(false, None).await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
     let ssh_port = ssh.port;
     let local_port = free_port().await;
 
@@ -540,7 +654,11 @@ async fn retry_from_error_reuses_same_supervisor() {
     );
 
     // Bring a fresh server up on the SAME port so a retry can succeed.
-    let ssh2 = start_ssh_server(false, Some(ssh_port)).await;
+    let ssh2 = start_ssh_server(StartOpts {
+        fixed_port: Some(ssh_port),
+        ..StartOpts::default()
+    })
+    .await;
 
     // Retry from error reuses the same supervisor (no respawn) → reconnects.
     engine::retry_forward(&state, "retry").await.unwrap();
@@ -557,6 +675,327 @@ async fn retry_from_error_reuses_same_supervisor() {
     assert!(state.registry.contains("retry"));
 
     engine::disconnect_forward(&state, "retry", true)
+        .await
+        .unwrap();
+    ssh2.kill().await;
+}
+
+#[tokio::test]
+async fn user_disconnect_during_wedged_probe_is_fast() {
+    use crate::state::models::ForwardStatus;
+
+    // F32: the RTT probe hangs on a wedged session. A user disconnect must NOT
+    // wait for the ~3s probe timeout — with the spawned-probe fix the accept
+    // loop stays responsive to attempt-cancel.
+    let echo = start_echo_target().await;
+    let ssh = start_ssh_server(StartOpts {
+        hang_session_channel: true,
+        ..StartOpts::default()
+    })
+    .await;
+    let local_port = free_port().await;
+
+    // Keepalive slow so the session itself doesn't die during the test window —
+    // we want ONLY the RTT probe to hang, not the session.
+    let state = make_state(false, 0);
+    let mut cfg = base_config("wedge", local_port, ssh.port, echo.port);
+    cfg.keep_alive_interval_sec = 3600;
+    cfg.keep_alive_max_count = 100;
+    state.upsert_config(cfg);
+    state.set_password("wedge", "pw".into());
+
+    engine::connect_forward(&state, "wedge").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "wedge",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+
+    // Let a probe get in flight (it will hang to 3s in its own spawned task).
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let t0 = Instant::now();
+    engine::disconnect_forward(&state, "wedge", true)
+        .await
+        .unwrap();
+    let elapsed = t0.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "user disconnect during a wedged probe must be fast, took {elapsed:?}"
+    );
+    assert!(state.registry.current_status("wedge").is_none());
+
+    ssh.kill().await;
+}
+
+#[tokio::test]
+async fn silent_drop_triggers_keepalive_timeout() {
+    use crate::state::models::ForwardStatus;
+
+    // F35 (the REAL F1/F7 mechanism): black-hole the SSH TCP connection WITHOUT
+    // a graceful disconnect. russh keepalives get no reply → after
+    // keepalive_max the client session ends via keepalive-timeout → error.
+    let echo = start_echo_target().await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
+    let relay = start_relay(ssh.port).await;
+    let local_port = free_port().await;
+
+    // auto_reconnect OFF so the tunnel parks in error once the session dies.
+    let state = make_state(false, 0);
+    // ssh_host/port point at the RELAY; keepalive 1s × 2 → dead within ~2-4s.
+    let mut cfg = base_config("silent", local_port, relay.port, echo.port);
+    cfg.keep_alive_interval_sec = 1;
+    cfg.keep_alive_max_count = 2;
+    state.upsert_config(cfg);
+    state.set_password("silent", "pw".into());
+
+    engine::connect_forward(&state, "silent").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "silent",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+
+    // Silent death: stop forwarding but hold sockets open (no FIN/RST).
+    relay.blackhole.store(true, Ordering::SeqCst);
+
+    // Must reach error within ~ keepalive_interval × keepalive_max (+ margin),
+    // proving liveness comes from keepalive-timeout, not a graceful disconnect
+    // and NOT any app-level ping counter (there is none).
+    assert!(
+        wait_status(
+            &state,
+            "silent",
+            ForwardStatus::Error,
+            Duration::from_secs(12)
+        )
+        .await,
+        "silent drop should trip keepalive-timeout → error"
+    );
+
+    engine::disconnect_forward(&state, "silent", true)
+        .await
+        .unwrap();
+    ssh.kill().await;
+}
+
+#[tokio::test]
+async fn rapid_connect_disconnect_connect_no_double_bind() {
+    use crate::state::models::ForwardStatus;
+
+    let echo = start_echo_target().await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
+    let local_port = free_port().await;
+
+    let state = make_state(false, 0);
+    state.upsert_config(base_config("rapid", local_port, ssh.port, echo.port));
+    state.set_password("rapid", "pw".into());
+
+    // Several fast connect→disconnect cycles on the SAME local port must never
+    // double-bind (F25/F21): each connect binds only after the prior release.
+    for _ in 0..4 {
+        engine::connect_forward(&state, "rapid").await.unwrap();
+        assert!(
+            wait_status(
+                &state,
+                "rapid",
+                ForwardStatus::Connected,
+                Duration::from_secs(10)
+            )
+            .await,
+            "each cycle should connect (no EADDRINUSE)"
+        );
+        engine::disconnect_forward(&state, "rapid", true)
+            .await
+            .unwrap();
+        assert!(state.registry.current_status("rapid").is_none());
+    }
+
+    // No leaked listener on the port after the final disconnect.
+    let rebind = TcpListener::bind(("127.0.0.1", local_port)).await;
+    assert!(rebind.is_ok(), "port free after rapid cycles");
+
+    ssh.kill().await;
+}
+
+#[tokio::test]
+async fn same_port_conflict_disconnects_first() {
+    use crate::state::models::ForwardStatus;
+
+    let echo = start_echo_target().await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
+    let local_port = free_port().await;
+
+    let state = make_state(false, 0);
+    // Two DISTINCT configs sharing the same local port.
+    state.upsert_config(base_config("first", local_port, ssh.port, echo.port));
+    state.set_password("first", "pw".into());
+    state.upsert_config(base_config("second", local_port, ssh.port, echo.port));
+    state.set_password("second", "pw".into());
+
+    engine::connect_forward(&state, "first").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "first",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+
+    // Connecting the second (same port) must disconnect the first (spec 03 §1).
+    engine::connect_forward(&state, "second").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "second",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+    assert!(
+        state.registry.current_status("first").is_none(),
+        "the first tunnel on the shared port was disconnected"
+    );
+
+    engine::disconnect_forward(&state, "second", true)
+        .await
+        .unwrap();
+    ssh.kill().await;
+}
+
+#[tokio::test]
+async fn disconnect_while_parked_in_error() {
+    use crate::state::models::ForwardStatus;
+
+    // End-to-end: a tunnel parked in `error` (auto_reconnect off) can be
+    // disconnected by the user and reaches disconnected/removed (F31/F23).
+    let echo = start_echo_target().await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
+    let local_port = free_port().await;
+
+    let state = make_state(false, 0);
+    state.upsert_config(base_config("parked", local_port, ssh.port, echo.port));
+    state.set_password("parked", "pw".into());
+
+    engine::connect_forward(&state, "parked").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "parked",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+    ssh.kill().await;
+    assert!(
+        wait_status(
+            &state,
+            "parked",
+            ForwardStatus::Error,
+            Duration::from_secs(10)
+        )
+        .await,
+        "parks in error after the drop"
+    );
+
+    // User disconnect while parked → cancels parent, awaits supervisor, removes.
+    engine::disconnect_forward(&state, "parked", true)
+        .await
+        .unwrap();
+    assert!(
+        state.registry.current_status("parked").is_none(),
+        "disconnect from error reaches disconnected/removed"
+    );
+    // Port released.
+    assert!(TcpListener::bind(("127.0.0.1", local_port)).await.is_ok());
+}
+
+#[tokio::test]
+async fn retry_racing_reconnect_attempts_never_lost() {
+    use crate::state::models::ForwardStatus;
+
+    // End-to-end F29/F23: hammer retry_forward through the LIVE supervisor while
+    // the server is down (each retry races the re-entry into error-park), then
+    // bring the server back and fire a final retry — the tunnel must reconnect,
+    // proving no retry-wakeup is permanently lost and the supervisor is reused.
+    let echo = start_echo_target().await;
+    let ssh = start_ssh_server(StartOpts::default()).await;
+    let ssh_port = ssh.port;
+    let local_port = free_port().await;
+
+    // auto_reconnect OFF → each failed attempt parks in error, so retries drive
+    // the attempts (exercises the flag/notify racing path).
+    let state = make_state(false, 0);
+    state.upsert_config(base_config("race", local_port, ssh_port, echo.port));
+    state.set_password("race", "pw".into());
+
+    engine::connect_forward(&state, "race").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "race",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+
+    ssh.kill().await;
+    assert!(
+        wait_status(
+            &state,
+            "race",
+            ForwardStatus::Error,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+
+    // Hammer retries while the server is DOWN: each wakes the supervisor, which
+    // attempts connect (fails fast: connection refused) and re-parks in error.
+    // None of these should panic, leak, or wedge the supervisor.
+    for _ in 0..20 {
+        engine::retry_forward(&state, "race").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(15)).await;
+    }
+    assert!(
+        state.registry.contains("race"),
+        "supervisor still alive (reused)"
+    );
+
+    // Bring the server back on the same port and fire a final retry.
+    let ssh2 = start_ssh_server(StartOpts {
+        fixed_port: Some(ssh_port),
+        ..StartOpts::default()
+    })
+    .await;
+    // Ensure we are parked in error before the deciding retry.
+    let _ = wait_status(&state, "race", ForwardStatus::Error, Duration::from_secs(5)).await;
+    engine::retry_forward(&state, "race").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "race",
+            ForwardStatus::Connected,
+            Duration::from_secs(15)
+        )
+        .await,
+        "a retry after the server returns must reconnect (no lost wakeup)"
+    );
+
+    engine::disconnect_forward(&state, "race", true)
         .await
         .unwrap();
     ssh2.kill().await;
