@@ -9,8 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "lint": "prettier --check . && eslint .",
-    "format": "prettier --write .",
+    "lint": "prettier --check \"src/**/*.{ts,svelte,css}\" \"*.{ts,js,json}\" && eslint .",
+    "format": "prettier --write \"src/**/*.{ts,svelte,css}\" \"*.{ts,js,json}\"",
     "tauri": "tauri"
   },
   "dependencies": {
