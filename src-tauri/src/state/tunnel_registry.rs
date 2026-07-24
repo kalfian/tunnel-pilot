@@ -11,6 +11,7 @@
 //! illegal `(current, new)` pair (F23/F28/F31).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use tokio::sync::{watch, Notify};
@@ -115,6 +116,10 @@ pub struct TunnelRegistry {
     /// `inner`. Ordering rule (no deadlock): `try_begin_start` is the ONLY method
     /// that holds both locks, and always takes `inner` first, then `starting`.
     starting: Mutex<std::collections::HashSet<TunnelId>>,
+    /// Whether the single shared stats sampler task (`ssh/health.rs`, M2) is
+    /// live. Guards auto-start (exactly one sampler regardless of tunnel count,
+    /// spec 03 §2) — NOT a lock, just a cheap presence flag.
+    sampler_running: AtomicBool,
 }
 
 impl TunnelRegistry {
@@ -340,6 +345,25 @@ impl TunnelRegistry {
     /// All live tunnel ids (for `stop_all` / shutdown).
     pub fn all_ids(&self) -> Vec<TunnelId> {
         self.lock().keys().cloned().collect()
+    }
+
+    /// Claim the shared-sampler slot (M2, spec 03 §2). Returns `true` iff the
+    /// caller transitioned it from stopped→running and MUST therefore spawn the
+    /// sampler; `false` means one is already live (idempotent auto-start).
+    pub fn try_start_sampler(&self) -> bool {
+        !self.sampler_running.swap(true, Ordering::SeqCst)
+    }
+
+    /// Release the shared-sampler slot (the sampler calls this before it exits
+    /// on seeing no connected tunnels, then re-checks to close the auto-restart
+    /// race — see `ssh/health.rs`).
+    pub fn stop_sampler(&self) {
+        self.sampler_running.store(false, Ordering::SeqCst);
+    }
+
+    /// Whether a shared sampler is currently claimed (tests / diagnostics).
+    pub fn is_sampler_running(&self) -> bool {
+        self.sampler_running.load(Ordering::SeqCst)
     }
 }
 
