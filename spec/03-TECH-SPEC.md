@@ -20,15 +20,32 @@
   lockstep on the same minor). This is the reference version for every API named below —
   **the channel stream surface and `client::Config` keepalive fields shifted across russh
   releases**, so an agent MUST verify against the pinned version before coding and, if a
-  newer version is adopted, re-verify these three surfaces and update this doc:
+  newer version is adopted, re-verify these surfaces and update this doc. **Verified against
+  0.45.0 source during the M1 F16 spike** (results below are ground-truth for 0.45.0):
   1. `client::Config { keepalive_interval: Option<Duration>, keepalive_max: usize, .. }`
-     (the liveness mechanism — see §2).
-  2. Channel byte-stream API: in 0.45 use `channel.into_stream()` → an
-     `AsyncRead + AsyncWrite` you can `tokio::io::copy` over. (`make_reader`/`make_writer`
-     existed in older releases; do not assume them.)
-  3. `session.channel_open_direct_tcpip(...)` argument shape (host as `&str`, ports as `u32`).
-  There is **no** `ping()` / `is_closed()` on the russh client handle (those are dartssh2-only) —
-  liveness/latency are derived differently (§2/§6).
+     (the liveness mechanism — see §2). ✓ confirmed (`keepalive_max` default 3).
+  2. Channel byte-stream API: in 0.45 use `channel.into_stream()` → `ChannelStream<S>` which
+     impls `AsyncRead + AsyncWrite` you can `tokio::io::copy` over. ✓ confirmed
+     (`make_reader`/`make_writer` also exist in 0.45 but `into_stream()` is what we use).
+  3. `session.channel_open_direct_tcpip<A: Into<String>, B: Into<String>>(host_to_connect,
+     port_to_connect: u32, originator_address, originator_port: u32)`. ✓ confirmed — host args
+     are `Into<String>` (pass an owned `String`/clone, not `&String`), ports are `u32`.
+  4. **`ping()` does NOT exist** on the client handle (correct — that was dartssh2). Latency is
+     the `channel_open_session()` RTT probe (§6). ✓ confirmed.
+  5. **CORRECTION (F16 spike): `is_closed()` DOES exist** on `client::Handle` in 0.45
+     (`Handle::is_closed(&self) -> bool`). The earlier claim "no `is_closed()`" was wrong. It
+     returns `true` once the internal session task has exited (see §2 for why that IS the
+     liveness signal).
+  6. **CORRECTION (F16 spike): the session future is NOT awaitable.** `client::connect` spawns
+     the session in a **private** `join: JoinHandle` field inside `Handle`; there is no public
+     method to await it. So "the supervisor awaits the session future" (F7) is realized by
+     **polling `Handle::is_closed()`** (a tiny poll-interval arm in the supervisor `select!`),
+     NOT by awaiting a future. The design intent is unchanged — keepalive is still the teardown
+     authority and there is no app-level ping counter — only the observation mechanism differs.
+  7. **CORRECTION (F16 spike): publickey auth in 0.45 takes `Arc<russh::keys::key::KeyPair>`,
+     NOT `PrivateKeyWithHashAlg`.** See §1 (the F22 note is corrected there). `russh` re-exports
+     keys as `russh::keys`; `load_secret_key(path, Option<&str>) -> Result<KeyPair>` is a
+     **blocking** call (reads the file synchronously) → wrap in `spawn_blocking`.
 
 ---
 
@@ -83,11 +100,17 @@ Conflict handling: connecting an already-connected config disconnects it first; 
 disconnect any **other** tunnel bound to the same local port before rebinding.
 
 **Connection-lost detection (F7):** the supervisor **owns its russh session internally** and,
-within its own task, awaits the session future. When russh's built-in keepalive (§2) sees the
-peer miss `keepalive_max` consecutive keepalives, the session future **completes/errors** —
-that completion IS the "connection lost" signal. The supervisor treats it as: set status
-`error`, then loop to the next auto-reconnect attempt (§3) if eligible. **This is the single
-source of truth for liveness** — there is no separate ping-failure counter.
+within its own task, watches for session death. When russh's built-in keepalive (§2) sees the
+peer miss `keepalive_max` consecutive keepalives, russh's internal `session.run()` returns
+`Err(KeepaliveTimeout)` and the session task exits — that exit IS the "connection lost" signal.
+**F16-spike correction:** that session task is a **private** `join` handle inside
+`client::Handle` and cannot be awaited directly, so the supervisor observes the exit by
+**polling `Handle::is_closed()`** (which flips to `true` once the task ends) via a short
+poll-interval arm in its `select!`. Semantically this is the "session future" arm; mechanically
+it is an `is_closed()` poll. On detection the supervisor sets status `error`, then loops to the
+next auto-reconnect attempt (§3) if eligible. **This is the single source of truth for
+liveness** — there is no separate app-level ping-failure counter (a transient RTT-probe failure
+does NOT flip `is_closed()`, so probe failures never cause teardown; §6).
 
 **Supervisor & session lifecycle across reconnect (F21) — PREFERRED shape, follow this:**
 The per-tunnel supervisor is a **single long-lived tokio task** that owns its russh session
@@ -266,25 +289,30 @@ async fn bind_local(addr: SocketAddr) -> Result<TcpListener, AppError> {
 - **Auth (mutually exclusive)**:
 ```rust
 if let Some(key_path) = &cfg.identity_file_path {
-    let key = russh_keys::load_secret_key(key_path, None)?; // PEM
-    // russh 0.45 keys refactor: wrap the key in PrivateKeyWithHashAlg (F22).
-    session.authenticate_publickey(
-        &cfg.ssh_username,
-        PrivateKeyWithHashAlg::new(Arc::new(key), None),
-    ).await?
+    // load_secret_key is BLOCKING (sync file read) → run on a blocking thread.
+    let path = key_path.clone();
+    let key = tokio::task::spawn_blocking(move || russh::keys::load_secret_key(&path, None))
+        .await
+        .map_err(|e| AppError::Ssh(e.to_string()))??; // KeyPair
+    // russh 0.45: authenticate_publickey takes Arc<keys::key::KeyPair> directly (F22-corrected).
+    let accepted = session.authenticate_publickey(&cfg.ssh_username, Arc::new(key)).await?;
+    if !accepted { return Err(AppError::Ssh("publickey auth rejected".into())); }
 } else {
     let pw = credentials::get_password(&cfg.id)?; // keychain or fallback
-    session.authenticate_password(&cfg.ssh_username, &pw).await?
+    let accepted = session.authenticate_password(&cfg.ssh_username, pw).await?;
+    if !accepted { return Err(AppError::Ssh("password auth rejected".into())); }
 }
 ```
   Wrap the whole auth in `timeout(Duration::from_secs(30), ...)`. The accept loop is simply
   the code that runs after `authenticate_*().await?` returns — russh makes the ordering
   automatic (you cannot open a channel pre-auth).
-  - **russh 0.45 API notes (F22 — saves a compile cycle; F16's "verify against pinned
-    version" still governs):** publickey auth uses `PrivateKeyWithHashAlg::new(Arc::new(key), None)`
-    (0.45 keys refactor), not a bare `Arc<KeyPair>`; and `channel_open_direct_tcpip` takes
-    `Into<String>` for the host args — pass an owned `String`/clone (or `&str`), **not**
-    `&String`.
+  - **russh 0.45 API notes (F22 — CORRECTED by the M1 F16 spike):** `authenticate_publickey`
+    in 0.45 has signature `authenticate_publickey<U: Into<String>>(&mut self, user: U,
+    key: Arc<keys::key::KeyPair>)` — it takes a **bare `Arc<KeyPair>`**, NOT
+    `PrivateKeyWithHashAlg` (that type belongs to a later russh version and does not exist in
+    0.45). Both `authenticate_*` return `Result<bool>` where `bool == accepted` — **you MUST
+    check it** (`false` = credentials rejected). `channel_open_direct_tcpip` takes `Into<String>`
+    for the host args — pass an owned `String`/clone (or `&str`), **not** `&String`.
 
 - **Per-attempt setup (F27a/F30):** at the **start of each attempt** the supervisor mints a
   **fresh `attempt_fail_notify = Arc::new(Notify::new())`** AND a **fresh
@@ -296,12 +324,15 @@ if let Some(key_path) = &cfg.identity_file_path {
   durable `StatsInner`; only the failure-teardown counter is per-attempt.)
 
 - **Accept loop** (inside the long-lived supervisor task, owning `session` locally): `select!`
-  over **five** arms — `attempt_cancel.cancelled()`, `listener.accept()`, the **session future
-  completing** (F7: awaiting the in-task session), **`attempt_fail_notify.notified()`**
-  (F26 dead-channel WAKE), and the **wake-probe `Notify` arm** (NIT-1: the sleep/resume nudge
-  from §4 — `request_wake_probe` pokes this so the supervisor runs an immediate RTT probe and
-  reconnects if dead; do NOT omit it when building strictly from §1). Handling:
-  - **session future completes** → `set_status(error)`, break to reconnect step (§3).
+  over **five** arms — `attempt_cancel.cancelled()`, `listener.accept()`, the **session-lost
+  poll** (F7-corrected: a short `interval` tick that checks `handle.is_closed()`, since the
+  session future is a private `join` and cannot be awaited — see Conventions/§2),
+  **`attempt_fail_notify.notified()`** (F26 dead-channel WAKE), and the **wake-probe `Notify`
+  arm** (NIT-1: the sleep/resume nudge from §4 — `request_wake_probe` pokes this so the
+  supervisor runs an immediate RTT probe and reconnects if dead; do NOT omit it when building
+  strictly from §1). Handling:
+  - **session-lost poll sees `is_closed() == true`** → `set_status(error)`, break to reconnect
+    step (§3). (This fires on keepalive timeout / hard drop; it is the F7 signal.)
   - **`attempt_fail_notify` fires** → it is a **WAKE only (F27b)**: re-check the authoritative
     **per-attempt** counter `attempt_fail_count.load() >= 3`. If true → `set_status(error)`,
     break to reconnect; **if < 3 (spurious/stale wake) → ignore and keep serving.**
