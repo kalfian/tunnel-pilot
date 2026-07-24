@@ -197,9 +197,11 @@ async fn supervise(
     let cfg = match state.get_config(&id) {
         Some(c) => Arc::new(c),
         None => {
-            let out = state
-                .registry
-                .set_status(&id, ForwardStatus::Error, Some("config not found".into()));
+            let out = state.registry.set_status(
+                &id,
+                ForwardStatus::Error,
+                Some("config not found".into()),
+            );
             if out.applied {
                 state.emit_status(&id, ForwardStatus::Error, Some("config not found".into()));
             }
@@ -236,7 +238,9 @@ async fn supervise(
         let fail = ForwardFailSignal::new();
 
         // ---- status → connecting ----
-        let out = state.registry.set_status(&id, ForwardStatus::Connecting, None);
+        let out = state
+            .registry
+            .set_status(&id, ForwardStatus::Connecting, None);
         if out.applied {
             state.emit_status(&id, ForwardStatus::Connecting, None);
         } else {
@@ -285,7 +289,9 @@ async fn supervise(
         // ---- CONNECTED ----
         reconnect_attempt = 0; // success resets backoff
         stats.mark_connected();
-        let out = state.registry.set_status(&id, ForwardStatus::Connected, None);
+        let out = state
+            .registry
+            .set_status(&id, ForwardStatus::Connected, None);
         if !out.applied {
             // Lost the race to a user disconnect (now disconnecting) → tear this
             // session down and let the command handler finish to disconnected.
@@ -527,7 +533,9 @@ async fn handle_teardown(
         // next attempt sets connecting. NOTE: status IS `error` during backoff,
         // but a retry fired now is absorbed — the top-of-attempt flag clear means
         // it cannot un-park a FUTURE error (F27c).
-        let out = state.registry.set_status(id, ForwardStatus::Error, Some(msg.clone()));
+        let out = state
+            .registry
+            .set_status(id, ForwardStatus::Error, Some(msg.clone()));
         if out.applied {
             state.emit_status(id, ForwardStatus::Error, Some(msg));
         }

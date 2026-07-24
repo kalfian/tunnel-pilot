@@ -119,10 +119,7 @@ impl AppState {
     }
 
     pub fn settings_snapshot(&self) -> AppSettings {
-        self.settings
-            .read()
-            .map(|g| g.clone())
-            .unwrap_or_default()
+        self.settings.read().map(|g| g.clone()).unwrap_or_default()
     }
 
     pub fn set_password(&self, id: &str, pw: String) {

@@ -60,10 +60,17 @@ pub fn build_config(cfg: &ForwardConfig) -> client::Config {
 pub async fn connect(cfg: &ForwardConfig) -> Result<Session, AppError> {
     let config = Arc::new(build_config(cfg));
     let addr = (cfg.ssh_host.as_str(), cfg.ssh_port);
-    match timeout(CONNECT_TIMEOUT, client::connect(config, addr, ClientHandler)).await {
+    match timeout(
+        CONNECT_TIMEOUT,
+        client::connect(config, addr, ClientHandler),
+    )
+    .await
+    {
         Ok(Ok(session)) => Ok(session),
         Ok(Err(e)) => Err(AppError::Ssh(format!("connect failed: {e}"))),
-        Err(_) => Err(AppError::Connection("SSH connect timed out after 15s".into())),
+        Err(_) => Err(AppError::Connection(
+            "SSH connect timed out after 15s".into(),
+        )),
     }
 }
 
@@ -77,7 +84,9 @@ pub async fn authenticate(
 ) -> Result<(), AppError> {
     match timeout(AUTH_TIMEOUT, authenticate_inner(session, cfg, state)).await {
         Ok(res) => res,
-        Err(_) => Err(AppError::Connection("SSH authentication timed out after 30s".into())),
+        Err(_) => Err(AppError::Connection(
+            "SSH authentication timed out after 30s".into(),
+        )),
     }
 }
 

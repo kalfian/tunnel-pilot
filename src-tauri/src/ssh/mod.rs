@@ -13,3 +13,7 @@ pub mod health;
 pub mod reconnect;
 pub mod stats;
 pub mod wake;
+
+/// In-process russh integration tests (spec 03 acceptance). See the module doc.
+#[cfg(test)]
+mod it_tests;

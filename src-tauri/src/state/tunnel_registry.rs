@@ -40,7 +40,7 @@ pub fn transition_allowed(from: ForwardStatus, to: ForwardStatus) -> bool {
             | (Connected, Disconnecting) // command: user disconnect
             | (Disconnecting, Disconnected) // command: cleanup done
             | (Error, Connecting)       // supervisor: retry / auto-reconnect next attempt
-            | (Error, Disconnecting)    // command: user disconnect while parked in error
+            | (Error, Disconnecting) // command: user disconnect while parked in error
     )
 }
 
@@ -243,16 +243,20 @@ impl TunnelRegistry {
             ForwardStatus::Connected => h.last_error = None,
             _ => {}
         }
-        // watch::send only errors if there are no receivers; the status is still
-        // the source of truth in the sender, so a send failure is non-fatal.
-        let _ = h.status.send(new);
+        // send_replace updates the value regardless of whether any receiver is
+        // alive (plain `send` would fail-and-not-update with zero receivers).
+        h.status.send_replace(new);
         StatusOutcome { applied: true, new }
     }
 
     /// Enter terminal `error` AND check-and-clear the retry flag in the SAME
     /// critical section (F29, spec 03 §1). If `retry_already_requested`, the
     /// supervisor must loop into a new attempt instead of parking.
-    pub fn begin_terminal_error(&self, id: &str, last_error: Option<String>) -> TerminalErrorOutcome {
+    pub fn begin_terminal_error(
+        &self,
+        id: &str,
+        last_error: Option<String>,
+    ) -> TerminalErrorOutcome {
         let mut g = self.lock();
         let Some(h) = g.get_mut(id) else {
             return TerminalErrorOutcome {
@@ -264,7 +268,7 @@ impl TunnelRegistry {
         let applied = transition_allowed(current, ForwardStatus::Error);
         if applied {
             h.last_error = last_error;
-            let _ = h.status.send(ForwardStatus::Error);
+            h.status.send_replace(ForwardStatus::Error);
         }
         // Defensive in-section check-and-clear (F29 NIT-2): effectively always
         // false because a retry cannot set the flag before status==error (set on
@@ -346,5 +350,128 @@ mod tests {
         for &s in &ALL {
             assert!(!transition_allowed(s, s), "{s:?} -> {s:?} must be a no-op");
         }
+    }
+
+    // ---- handle-based state-machine tests (need a tokio runtime for the
+    // dummy JoinHandle + watch/Notify) ----
+
+    fn make_handle(id: &str, initial: ForwardStatus) -> TunnelHandle {
+        let parent = CancellationToken::new();
+        let attempt = parent.child_token();
+        let (status_tx, _rx) = watch::channel(initial);
+        let (_stats_tx, stats_rx) = watch::channel(TunnelStats::default());
+        TunnelHandle {
+            id: id.to_string(),
+            parent_cancel: parent,
+            attempt_cancel: attempt,
+            join: tokio::spawn(async {}),
+            status: status_tx,
+            last_error: None,
+            retry_requested: false,
+            retry_notify: Arc::new(Notify::new()),
+            wake_notify: Arc::new(Notify::new()),
+            stats_cell: stats_rx,
+            stats: Arc::new(StatsInner::default()),
+        }
+    }
+
+    #[tokio::test]
+    async fn lifecycle_happy_path() {
+        let reg = TunnelRegistry::new();
+        reg.insert(make_handle("a", Disconnected));
+        // connect -> connecting -> connected -> disconnecting -> disconnected.
+        assert!(reg.set_status("a", Connecting, None).applied);
+        assert!(reg.set_status("a", Connected, None).applied);
+        assert!(reg.set_status("a", Disconnecting, None).applied);
+        assert!(reg.set_status("a", Disconnected, None).applied);
+        assert_eq!(reg.current_status("a"), Some(Disconnected));
+    }
+
+    #[tokio::test]
+    async fn clicks_during_disconnecting_are_no_ops() {
+        let reg = TunnelRegistry::new();
+        reg.insert(make_handle("a", Disconnecting));
+        // F23: connect/error/connected while disconnecting are all dropped.
+        assert!(!reg.set_status("a", Connecting, None).applied);
+        assert!(!reg.set_status("a", Error, Some("x".into())).applied);
+        assert!(!reg.set_status("a", Connected, None).applied);
+        assert_eq!(reg.current_status("a"), Some(Disconnecting));
+        // Only disconnecting -> disconnected advances it.
+        assert!(reg.set_status("a", Disconnected, None).applied);
+    }
+
+    #[tokio::test]
+    async fn session_drop_racing_user_disconnect_never_flashes_error() {
+        // F28: user disconnect moved connected -> disconnecting; a session drop
+        // arriving after must NOT produce disconnecting -> error.
+        let reg = TunnelRegistry::new();
+        reg.insert(make_handle("a", Connected));
+        assert!(reg.set_status("a", Disconnecting, None).applied);
+        assert!(!reg.set_status("a", Error, Some("drop".into())).applied);
+        assert_eq!(reg.current_status("a"), Some(Disconnecting));
+    }
+
+    #[tokio::test]
+    async fn disconnect_while_connecting_is_allowed_f31() {
+        // F31: a user disconnecting a still-connecting tunnel is not stranded.
+        let reg = TunnelRegistry::new();
+        reg.insert(make_handle("a", Connecting));
+        assert!(reg.set_status("a", Disconnecting, None).applied);
+        assert!(reg.set_status("a", Disconnected, None).applied);
+    }
+
+    #[tokio::test]
+    async fn two_level_token_semantics_f6() {
+        let reg = TunnelRegistry::new();
+        reg.insert(make_handle("a", Connected));
+        let parent = reg.parent_token("a").unwrap();
+
+        // A reconnect swaps only the child token; the parent stays alive.
+        let t1 = reg.mint_fresh_attempt("a").unwrap();
+        assert!(!parent.is_cancelled() && !t1.is_cancelled());
+        t1.cancel(); // attempt reset
+        assert!(t1.is_cancelled());
+        assert!(
+            !parent.is_cancelled(),
+            "attempt cancel must NOT touch parent"
+        );
+
+        let t2 = reg.mint_fresh_attempt("a").unwrap();
+        assert!(!t2.is_cancelled(), "fresh child of a live parent");
+
+        // Cancelling the parent kills the current child too.
+        reg.cancel_parent("a");
+        assert!(parent.is_cancelled() && t2.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn retry_only_acts_when_parked_in_error_f27c() {
+        let reg = TunnelRegistry::new();
+        reg.insert(make_handle("a", Connecting));
+        // Not in error → request_retry is a no-op (no flag, no wakeup).
+        assert!(reg.request_retry("a").is_none());
+        assert!(!reg.take_retry_requested("a"));
+
+        // Move to error → retry is accepted and the flag becomes the truth.
+        reg.insert(make_handle("b", Error));
+        assert!(reg.request_retry("b").is_some());
+        assert!(reg.take_retry_requested("b"));
+        // Consumed once.
+        assert!(!reg.take_retry_requested("b"));
+    }
+
+    #[tokio::test]
+    async fn retry_racing_final_failure_is_honored_f29() {
+        // Enter terminal error (defensive in-section check clears nothing yet),
+        // then a retry arrives; the load-bearing take_retry_requested sees it.
+        let reg = TunnelRegistry::new();
+        reg.insert(make_handle("a", Connected));
+        let term = reg.begin_terminal_error("a", Some("final".into()));
+        assert!(term.applied);
+        assert!(!term.retry_already_requested);
+        // retry the instant after error was set:
+        assert!(reg.request_retry("a").is_some());
+        // supervisor's on-wake re-check honors it — never lost:
+        assert!(reg.take_retry_requested("a"));
     }
 }
