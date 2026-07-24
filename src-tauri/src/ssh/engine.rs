@@ -58,8 +58,11 @@ enum Flow {
 enum Disposition {
     /// Parent token cancelled → user teardown.
     UserExit,
-    /// Session drop / dead-channel / failed wake probe → reconnect path.
+    /// Session drop / dead-channel → reconnect via the normal backoff path.
     Reconnect,
+    /// A wake probe found the session dead (§4) → reconnect NOW, skipping the
+    /// backoff wait (the machine just resumed; recover immediately).
+    ReconnectImmediate,
 }
 
 /// Start (or restart) a tunnel: launch its supervisor task (spec 03 §1).
@@ -95,6 +98,13 @@ pub async fn connect_forward(state: &Arc<AppState>, id: &str) -> Result<(), AppE
     if !state.registry.try_begin_start(id) {
         return Ok(());
     }
+    // F36: RAII-release the reservation if this fn panics/returns before the
+    // handle is inserted. Disarmed on the success path (insert clears it).
+    let reservation = StartReservation {
+        registry: state.registry.clone(),
+        id: id.to_string(),
+        armed: true,
+    };
 
     // Shared per-tunnel state. The status starts Disconnected; the supervisor's
     // first guarded write moves it to Connecting (a legal transition).
@@ -124,9 +134,35 @@ pub async fn connect_forward(state: &Arc<AppState>, id: &str) -> Result<(), AppE
         stats_cell: stats_rx,
         stats,
     };
-    state.registry.insert(handle);
+    state.registry.insert(handle); // clears the "starting" reservation
+    reservation.disarm(); // insert already released it; don't double-release
     let _ = go_tx.send(());
     Ok(())
+}
+
+/// RAII release of a [`TunnelRegistry::try_begin_start`] reservation (F36). If
+/// `connect_forward` unwinds or returns between the reserve and the `insert`,
+/// the drop clears the "starting" flag so the id can be started again — the
+/// reservation can never leak on a panic path. Disarmed once `insert` (which
+/// clears the reservation itself) has run on the success path.
+struct StartReservation {
+    registry: Arc<crate::state::tunnel_registry::TunnelRegistry>,
+    id: String,
+    armed: bool,
+}
+
+impl StartReservation {
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for StartReservation {
+    fn drop(&mut self) {
+        if self.armed {
+            self.registry.finish_start(&self.id);
+        }
+    }
 }
 
 /// User (or conflict) disconnect: cancel the parent, await the supervisor's
@@ -282,13 +318,16 @@ async fn supervise(
             Some(Ok(pair)) => pair,
             Some(Err(e)) => {
                 match handle_teardown(
-                    &state,
-                    &id,
-                    &parent,
-                    &retry_notify,
-                    &settings,
+                    TeardownCtx {
+                        state: &state,
+                        id: &id,
+                        parent: &parent,
+                        retry_notify: &retry_notify,
+                        settings: &settings,
+                    },
                     &mut reconnect_attempt,
                     e.to_string(),
+                    false,
                 )
                 .await
                 {
@@ -316,8 +355,13 @@ async fn supervise(
             break 'supervisor;
         }
         state.emit_status(&id, ForwardStatus::Connected, None);
+        // Publish the fresh snapshot into the cell; the shared sampler
+        // (health.rs) is the SOLE emitter of `tunnel://stats` (spec 03 §2), so
+        // the supervisor does NOT emit here — it only feeds the cell.
         let _ = stats_tx.send(stats.snapshot());
-        state.emit_stats(&id, stats.snapshot());
+        // Auto-start the single shared stats sampler on (re)connect; idempotent
+        // while one is already running (spec 03 §2).
+        crate::ssh::health::ensure_sampler(&state);
 
         let session = Arc::new(session);
 
@@ -351,13 +395,40 @@ async fn supervise(
             Disposition::UserExit => break 'supervisor,
             Disposition::Reconnect => {
                 match handle_teardown(
-                    &state,
-                    &id,
-                    &parent,
-                    &retry_notify,
-                    &settings,
+                    TeardownCtx {
+                        state: &state,
+                        id: &id,
+                        parent: &parent,
+                        retry_notify: &retry_notify,
+                        settings: &settings,
+                    },
                     &mut reconnect_attempt,
                     "connection lost".to_string(),
+                    false,
+                )
+                .await
+                {
+                    Flow::Exit => break 'supervisor,
+                    Flow::Reconnect => continue 'supervisor,
+                }
+            }
+            // Wake probe found the session dead (§4): recover NOW, skipping the
+            // backoff wait (`immediate = true`). Still routed through
+            // `handle_teardown` so it sets `error` first (the legal pre-reconnect
+            // transition), honors `auto_reconnect=false` (park in error, not a
+            // silent stall), and yields to a concurrent user disconnect.
+            Disposition::ReconnectImmediate => {
+                match handle_teardown(
+                    TeardownCtx {
+                        state: &state,
+                        id: &id,
+                        parent: &parent,
+                        retry_notify: &retry_notify,
+                        settings: &settings,
+                    },
+                    &mut reconnect_attempt,
+                    "connection lost (wake probe)".to_string(),
+                    true,
                 )
                 .await
                 {
@@ -488,11 +559,12 @@ async fn accept_loop(ctx: AcceptCtx<'_>) -> Disposition {
                 }
             }
 
-            // A SPAWNED wake probe found the session dead → reconnect fast
-            // (bypassing backoff). Non-blocking: the probe ran off the loop.
+            // A SPAWNED wake probe found the session dead → reconnect fast,
+            // bypassing the backoff wait (§4). Non-blocking: the probe ran off
+            // the loop.
             _ = wake_dead.notified() => {
-                tracing::info!(tunnel = %ctx.id, "wake probe failed -> reconnect");
-                return Disposition::Reconnect;
+                tracing::info!(tunnel = %ctx.id, "wake probe failed -> immediate reconnect");
+                return Disposition::ReconnectImmediate;
             }
 
             // Wake-from-sleep nudge (NIT-1/§4): SPAWN an immediate RTT probe that
@@ -510,9 +582,11 @@ async fn accept_loop(ctx: AcceptCtx<'_>) -> Disposition {
             // `probe_in_flight` guard prevents 3s-cadence pile-up on a wedged
             // session (one probe at a time).
             _ = probe.tick() => {
-                let snap = ctx.stats.snapshot();
-                let _ = ctx.stats_tx.send(snap.clone());
-                ctx.state.emit_stats(ctx.id, snap);
+                // Publish the current snapshot into the cell for the shared
+                // sampler to emit (spec 03 §2 — supervisor feeds the cell, never
+                // emits). Then SPAWN a latency probe whose result lands in the
+                // cell for the NEXT tick (F32: off-loop, never blocks here).
+                let _ = ctx.stats_tx.send(ctx.stats.snapshot());
                 spawn_rtt_probe(ctx.session.clone(), ctx.stats.clone(), Some(probe_in_flight.clone()), None);
             }
         }
@@ -535,16 +609,30 @@ fn spawn_rtt_probe(
         }
     }
     tokio::spawn(async move {
+        // F36: RAII-clear the in-flight flag on drop so a panic in the probe
+        // can't leak it (which would wedge the pile-up guard forever). Cleared
+        // on the normal path too, when the guard drops at end of scope.
+        let _guard = InFlightGuard(in_flight);
         let ok = run_rtt_probe(&session, &stats).await;
         if !ok {
             if let Some(d) = dead {
                 d.notify_one();
             }
         }
-        if let Some(flag) = in_flight {
+    });
+}
+
+/// RAII clear of the periodic-probe in-flight flag (F36). Holds the flag that
+/// `spawn_rtt_probe` already `swap(true)`'d; the drop stores `false` — on the
+/// normal path at end of scope, and during unwind if the probe panics.
+struct InFlightGuard(Option<Arc<AtomicBool>>);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Some(flag) = &self.0 {
             flag.store(false, Ordering::SeqCst);
         }
-    });
+    }
 }
 
 /// Channel-open RTT probe on the OWNED session (spec 03 §6). There is no
@@ -571,15 +659,35 @@ async fn run_rtt_probe(session: &Session, stats: &StatsInner) -> bool {
 /// set error + check-and-clear the retry flag in the SAME critical section
 /// (F29), then `select!` parent-cancel vs the retry wakeup (re-checking the flag
 /// on wake — the load-bearing check). Returns whether to exit or reconnect.
+///
+/// `immediate` (wake-probe recovery, §4): when eligible, still enter `error`
+/// (the legal pre-`connecting` transition) but SKIP the backoff wait and do not
+/// consume a retry-budget slot — the machine just resumed, so reconnect at once.
+/// A subsequent failure on that fresh attempt falls back to the normal backoff.
+/// The stable per-tunnel environment for a teardown decision (grouped to keep
+/// the signature within clippy's arg budget, mirroring `AcceptCtx`).
+struct TeardownCtx<'a> {
+    state: &'a Arc<AppState>,
+    id: &'a str,
+    parent: &'a CancellationToken,
+    retry_notify: &'a Notify,
+    settings: &'a crate::state::models::AppSettings,
+}
+
 async fn handle_teardown(
-    state: &Arc<AppState>,
-    id: &str,
-    parent: &CancellationToken,
-    retry_notify: &Notify,
-    settings: &crate::state::models::AppSettings,
+    ctx: TeardownCtx<'_>,
     reconnect_attempt: &mut u32,
     msg: String,
+    immediate: bool,
 ) -> Flow {
+    let TeardownCtx {
+        state,
+        id,
+        parent,
+        retry_notify,
+        settings,
+    } = ctx;
+
     // A concurrent user disconnect already cancelled the parent → just exit; the
     // command handler owns the disconnecting/disconnected transitions (never
     // flash disconnecting -> error, F28).
@@ -600,6 +708,13 @@ async fn handle_teardown(
             .set_status(id, ForwardStatus::Error, Some(msg.clone()));
         if out.applied {
             state.emit_status(id, ForwardStatus::Error, Some(msg));
+        }
+        if immediate {
+            // Wake recovery (§4): the `error` above is the legal pre-`connecting`
+            // transition; loop straight into a fresh attempt with no backoff wait
+            // and no budget consumed. A concurrent user disconnect still wins on
+            // the next attempt's cancellation-aware connect.
+            return Flow::Reconnect;
         }
         let delay = backoff(settings.auto_reconnect_delay_sec, *reconnect_attempt);
         *reconnect_attempt += 1;
