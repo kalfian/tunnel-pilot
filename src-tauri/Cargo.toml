@@ -41,6 +41,24 @@ russh = "0.45"
 russh-keys = "0.45"
 async-trait = "0.1.91"
 
+# OS keychain (credentials/, M2). keyring v3 ships NO backend by default (F9):
+# each target MUST pin its native backend feature or `keychain_available()` is
+# always false and every secret silently hits the plaintext fallback. See the
+# per-target dependency blocks below.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux Secret Service backend. Needs a running D-Bus/keyring daemon at runtime;
+# on headless Linux the boot probe fails and we fall back to the secrets file.
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 # this feature is used for production builds or when a dev server is not specified,
 # DO NOT REMOVE!!
