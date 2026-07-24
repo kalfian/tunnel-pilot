@@ -1,0 +1,249 @@
+/*
+ * Tunnel Pilot v2 — Design tokens (single source of truth).
+ * Transcribed verbatim from spec/design-tokens.md. Components consume the
+ * SEMANTIC tokens only (--bg, --text, --accent, --sp-*, …); the raw scale
+ * (--blue-500, --neutral-*, …) exists only to derive semantics and must not be
+ * referenced directly. Do NOT hardcode hex/px in components — use var(--…).
+ *
+ * Theme: :root = light (default). [data-theme="dark"] overrides. The 3-way
+ * picker (system/light/dark) resolves `system` to a concrete data-theme in JS
+ * (see src/lib/ui/theme.ts) so tokens never depend on the media query directly.
+ */
+
+:root {
+  /* --- 2. Raw scale (private) --- */
+  --blue-400: #4aa5e0;
+  --blue-500: #288dcc;
+  --blue-600: #147abd;
+  --blue-700: #0f6ba8;
+  --blue-800: #0c5c90;
+
+  --neutral-0: #ffffff;
+  --neutral-25: #f8f9fb;
+  --neutral-50: #f1f3f6;
+  --neutral-100: #e9ecf1;
+  --neutral-200: #e2e5ea;
+  --neutral-300: #cdd2da;
+  --neutral-400: #9ca3af;
+  --neutral-500: #6b7280;
+  --neutral-600: #4b5563;
+  --neutral-700: #374151;
+  --neutral-800: #1a1d23;
+  --neutral-900: #111318;
+
+  --ink-900: #0d0f13;
+  --ink-850: #111318;
+  --ink-800: #1a1d24;
+  --ink-750: #22262f;
+  --ink-700: #2a2f39;
+  --ink-border: #2e333d;
+  --ink-text: #e5e7eb;
+  --ink-text-2: #8b919a;
+  --ink-text-3: #646b75;
+
+  --green-500: #16a34a;
+  --green-400: #34d399;
+  --green-700: #15803d;
+  --amber-500: #d97706;
+  --amber-400: #fbbf24;
+  --amber-700: #b45309;
+  --red-500: #dc2626;
+  --red-400: #f87171;
+  --red-700: #b91c1c;
+
+  /* --- 3. Semantic — light --- */
+  --bg: #f8f9fb;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --surface-3: #e9ecf1;
+  --surface-overlay: #ffffff;
+
+  --text: #1a1d23;
+  --text-2: #6b7280;
+  --text-3: #868c96;
+  --text-on-accent: #ffffff;
+
+  --border: #e2e5ea;
+  --border-strong: #cdd2da;
+  --divider: #e9ecf1;
+
+  --accent: #288dcc;
+  --accent-solid: #147abd;
+  --accent-hover: #0f6ba8;
+  --accent-active: #0c5c90;
+  --accent-text: #147abd;
+  --accent-subtle: rgba(40, 141, 204, 0.08);
+  --accent-subtle-2: rgba(40, 141, 204, 0.14);
+
+  --hover: rgba(0, 0, 0, 0.04);
+  --active: rgba(0, 0, 0, 0.08);
+
+  --status-connected: #16a34a;
+  --status-pending: #d97706;
+  --status-error: #dc2626;
+  --status-idle: #9ca3af;
+  --status-connected-bg: #e7f6ec;
+  --status-connected-fg: #15803d;
+  --status-pending-bg: #fdf0dd;
+  --status-pending-fg: #b45309;
+  --status-error-bg: #fdecec;
+  --status-error-fg: #b91c1c;
+  --status-idle-bg: #eef0f3;
+  --status-idle-fg: #4b5563;
+
+  --focus-ring: #288dcc;
+  --focus-ring-halo: rgba(40, 141, 204, 0.32);
+
+  --scrim: rgba(17, 19, 24, 0.32);
+
+  /* --- 4. Typography --- */
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Segoe UI Variable", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --fs-title-lg: 18px;
+  --lh-title-lg: 24px;
+  --fw-title-lg: 700;
+  --fs-title-md: 15px;
+  --lh-title-md: 20px;
+  --fw-title-md: 600;
+  --fs-title-sm: 13px;
+  --lh-title-sm: 18px;
+  --fw-title-sm: 600;
+  --fs-body-lg: 14px;
+  --lh-body-lg: 20px;
+  --fw-body: 400;
+  --fs-body: 13px;
+  --lh-body: 18px;
+  --fs-body-sm: 12px;
+  --lh-body-sm: 16px;
+  --fs-label: 11px;
+  --lh-label: 14px;
+  --fw-label: 500;
+  --fs-mono: 12px;
+  --lh-mono: 16px;
+  --fs-mono-sm: 11px;
+  --lh-mono-sm: 14px;
+
+  --tracking-label: 0.4px;
+  --tracking-tight: -0.1px;
+
+  /* --- 5. Spacing (4/8 grid) --- */
+  --sp-0: 0;
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 8px;
+  --sp-4: 12px;
+  --sp-5: 16px;
+  --sp-6: 20px;
+  --sp-7: 24px;
+  --sp-8: 32px;
+  --sp-9: 40px;
+  --sp-10: 48px;
+  --sp-11: 64px;
+
+  /* --- 6. Radii, borders, sizing --- */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  --border-w: 1px;
+  --border-w-emph: 1.5px;
+
+  --toggle-w: 36px;
+  --toggle-h: 20px;
+  --toggle-knob: 16px;
+  --toggle-pad: 2px;
+  --input-h: 34px;
+  --btn-h: 32px;
+  --btn-h-sm: 26px;
+  --row-h: 56px;
+  --log-row-h: 24px;
+  --titlebar-h: 40px;
+  --tab-h: 38px;
+  --hit-min: 28px;
+
+  /* --- 7. Shadows / elevation (light) --- */
+  --shadow-1:
+    0 1px 2px rgba(17, 19, 24, 0.06), 0 1px 1px rgba(17, 19, 24, 0.04);
+  --shadow-2:
+    0 4px 12px rgba(17, 19, 24, 0.1), 0 1px 3px rgba(17, 19, 24, 0.06);
+  --shadow-3:
+    0 12px 32px rgba(17, 19, 24, 0.16), 0 4px 8px rgba(17, 19, 24, 0.08);
+
+  /* --- 8. Z-index layers --- */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 100;
+  --z-toast: 200;
+  --z-scrim: 1000;
+  --z-dialog: 1001;
+  --z-palette: 1100;
+  --z-tooltip: 1200;
+
+  /* --- 9. Motion --- */
+  --dur-instant: 80ms;
+  --dur-fast: 120ms;
+  --dur-base: 150ms;
+  --dur-slow: 200ms;
+  --dur-reorder: 240ms;
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-decel: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-accel: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+[data-theme="dark"] {
+  --bg: #111318;
+  --surface: #1a1d24;
+  --surface-2: #22262f;
+  --surface-3: #2a2f39;
+  --surface-overlay: #1e222a;
+
+  --text: #e5e7eb;
+  --text-2: #8b919a;
+  --text-3: #646b75;
+  --text-on-accent: #0d1015;
+
+  --border: #2e333d;
+  --border-strong: #3a404b;
+  --divider: #22262f;
+
+  --accent: #4aa5e0;
+  --accent-solid: #4aa5e0;
+  --accent-hover: #63b4e8;
+  --accent-active: #7cc2ee;
+  --accent-text: #4aa5e0;
+  --accent-subtle: rgba(74, 165, 224, 0.12);
+  --accent-subtle-2: rgba(74, 165, 224, 0.2);
+
+  --hover: rgba(255, 255, 255, 0.05);
+  --active: rgba(255, 255, 255, 0.09);
+
+  --status-connected: #34d399;
+  --status-pending: #fbbf24;
+  --status-error: #f87171;
+  --status-idle: #6b7280;
+  --status-connected-bg: rgba(52, 211, 153, 0.14);
+  --status-connected-fg: #34d399;
+  --status-pending-bg: rgba(251, 191, 36, 0.14);
+  --status-pending-fg: #fbbf24;
+  --status-error-bg: rgba(248, 113, 113, 0.14);
+  --status-error-fg: #f87171;
+  --status-idle-bg: rgba(139, 145, 154, 0.14);
+  --status-idle-fg: #a2a8b2;
+
+  --focus-ring: #4aa5e0;
+  --focus-ring-halo: rgba(74, 165, 224, 0.4);
+
+  --scrim: rgba(0, 0, 0, 0.55);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 6px 16px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.6), 0 4px 10px rgba(0, 0, 0, 0.45);
+}

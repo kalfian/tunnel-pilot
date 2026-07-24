@@ -1,25 +1,8 @@
 /*
- * Global base styles. Visual design tokens (spacing, color, monospace stack,
- * component states) are owned by the design agent — see spec/05-UI-UX-SPEC.md.
- * This file only carries the minimum needed for the M0 shell.
+ * Global stylesheet entry. The design system lives in ./styles/*:
+ *   - tokens.css : design tokens (spec/design-tokens.md, verbatim)
+ *   - base.css   : reset, canvas, focus ring, reduced-motion
+ * Component-level styling is scoped inside each .svelte <style>.
  */
-:root {
-  color-scheme: light dark;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-}
-
-html,
-body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-}
-
-#app {
-  height: 100%;
-}
+@import "./styles/tokens.css";
+@import "./styles/base.css";
