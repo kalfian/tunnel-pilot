@@ -13,6 +13,7 @@
   import StatusDot from "./ui/StatusDot.svelte";
   import Toggle from "./ui/Toggle.svelte";
   import StatChips from "./StatChips.svelte";
+  import TagPill from "./ui/TagPill.svelte";
   import Menu, { type MenuItem } from "./ui/Menu.svelte";
   import Icon from "./ui/Icon.svelte";
 
@@ -22,6 +23,9 @@
     stats: TunnelStats;
     lastError: string | null;
     selected: boolean;
+    /** When false, the drag grip + ⌥↑/↓ reorder are suppressed (e.g. while a
+        filter is active — reorder would corrupt the persisted order, F43). */
+    reorderable?: boolean;
     onSelect: () => void;
     onEdit: () => void;
     onDelete: () => void;
@@ -38,6 +42,7 @@
     stats,
     lastError,
     selected,
+    reorderable = true,
     onSelect,
     onEdit,
     onDelete,
@@ -47,6 +52,10 @@
   }: Props = $props();
 
   let menuOpen = $state(false);
+
+  // Show at most 3 tag pills; overflow collapses into a "+N" pill.
+  const shownTags = $derived(forward.tags.slice(0, 3));
+  const extraTags = $derived(Math.max(0, forward.tags.length - 3));
 
   const pending = $derived(
     status === "connecting" || status === "disconnecting",
@@ -131,20 +140,18 @@
         onDelete();
         break;
       case "ArrowDown":
+        e.preventDefault();
         if (e.altKey) {
-          e.preventDefault();
-          onReorder?.(1);
+          if (reorderable) onReorder?.(1);
         } else {
-          e.preventDefault();
           onNav?.(1);
         }
         break;
       case "ArrowUp":
+        e.preventDefault();
         if (e.altKey) {
-          e.preventDefault();
-          onReorder?.(-1);
+          if (reorderable) onReorder?.(-1);
         } else {
-          e.preventDefault();
           onNav?.(-1);
         }
         break;
@@ -158,15 +165,20 @@
   class:connected={status === "connected"}
   class:error={status === "error"}
 >
-  <span class="grip" aria-hidden="true"
-    ><Icon name="grip-vertical" size={14} /></span
-  >
+  {#if reorderable}
+    <span class="grip" aria-hidden="true"
+      ><Icon name="grip-vertical" size={14} /></span
+    >
+  {:else}
+    <span class="grip-spacer" aria-hidden="true"></span>
+  {/if}
 
   <button
     type="button"
     class="body"
     aria-pressed={selected}
     data-testid="row-body"
+    data-row-id={forward.id}
     onclick={onSelect}
     onkeydown={onBodyKeydown}
     oncontextmenu={(e) => {
@@ -179,6 +191,16 @@
     <span class="info">
       <span class="name-line">
         <span class="name">{forward.name}</span>
+        {#if shownTags.length > 0}
+          <span class="tags">
+            {#each shownTags as tag (tag)}
+              <TagPill label={tag} />
+            {/each}
+            {#if extraTags > 0}
+              <TagPill label={`+${extraTags}`} />
+            {/if}
+          </span>
+        {/if}
       </span>
       {#if status === "error"}
         <span class="route mono selectable">{route}</span>
@@ -289,6 +311,18 @@
   .card:hover .grip {
     opacity: 1;
   }
+  /* Keep the grid column stable when reorder is suppressed (filter active). */
+  .grip-spacer {
+    width: 14px;
+  }
+
+  .tags {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    min-width: 0;
+    overflow: hidden;
+  }
 
   .body {
     display: flex;
@@ -325,6 +359,7 @@
     min-width: 0;
   }
   .name {
+    min-width: 0;
     font-size: var(--fs-title-sm);
     line-height: var(--lh-title-sm);
     font-weight: var(--fw-title-sm);

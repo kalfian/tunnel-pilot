@@ -8,6 +8,8 @@
     connectedCount,
   } from "../stores/forwards";
   import { settings } from "../stores/settings";
+  import { groups } from "../stores/groups";
+  import { activeTag } from "../stores/groups";
   import { deleteForward, duplicateForward, copySshCommand } from "../ipc";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { activeView } from "../ui/view";
@@ -15,6 +17,7 @@
   import { pendingForm, pendingDelete } from "../stores/commands";
   import { pushToast } from "../ui/toast";
   import ConnectionList from "../components/ConnectionList.svelte";
+  import TagFilterBar from "../components/TagFilterBar.svelte";
   import ForwardForm from "../components/ForwardForm.svelte";
   import ConfirmDialog from "../components/ConfirmDialog.svelte";
   import Button from "../components/ui/Button.svelte";
@@ -44,14 +47,29 @@
   });
 
   const q = $derived(filter.trim().toLowerCase());
-  const visible = $derived(
-    q === ""
-      ? $forwards
-      : $forwards.filter((f) => {
-          const hay =
-            `${f.name} ${f.sshHost} ${f.localBindAddress}:${f.localPort} ${f.remoteHost}:${f.remotePort}`.toLowerCase();
-          return hay.includes(q);
-        }),
+  const filterActive = $derived(q !== "" || $activeTag !== null);
+
+  function matchesFilter(f: ForwardConfig): boolean {
+    if ($activeTag !== null && !f.tags.includes($activeTag)) return false;
+    if (q === "") return true;
+    const hay =
+      `${f.name} ${f.sshHost} ${f.localBindAddress}:${f.localPort} ${f.remoteHost}:${f.remotePort} ${f.tags.join(" ")}`.toLowerCase();
+    return hay.includes(q);
+  }
+
+  // How many forwards survive the current filter — decides the empty state.
+  const visibleCount = $derived($forwards.filter(matchesFilter).length);
+
+  // Tags in use, with counts, for the toolbar tag filter (auto-pruned to 0).
+  const tagCounts = $derived(
+    (() => {
+      const counts: Record<string, number> = {};
+      for (const f of $forwards)
+        for (const t of f.tags) counts[t] = (counts[t] ?? 0) + 1;
+      return Object.entries(counts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    })(),
   );
 
   const selected = $derived($forwards.find((f) => f.id === selectedId) ?? null);
@@ -78,6 +96,13 @@
     if (target) {
       confirmTarget = target;
       pendingDelete.set(null);
+    }
+  });
+
+  // Auto-prune a tag filter that no longer matches any tunnel (spec §4.2).
+  $effect(() => {
+    if ($activeTag !== null && !tagCounts.some((t) => t.name === $activeTag)) {
+      activeTag.set(null);
     }
   });
 
@@ -177,6 +202,13 @@
           bind:value={filter}
         />
       </div>
+      {#if tagCounts.length > 0}
+        <TagFilterBar
+          tags={tagCounts}
+          activeTag={$activeTag}
+          onSelect={(t) => activeTag.set(t)}
+        />
+      {/if}
       <Button
         variant="ghost"
         iconOnly="files"
@@ -233,23 +265,35 @@
           </button>
         {/snippet}
       </EmptyState>
-    {:else if visible.length === 0}
+    {:else if filterActive && visibleCount === 0}
       <EmptyState
         icon="search"
         title="No matches"
-        body={`No tunnels match “${filter.trim()}”.`}
+        body={$activeTag !== null && q === ""
+          ? `No tunnels tagged “${$activeTag}”.`
+          : `No tunnels match “${filter.trim()}”.`}
       >
         {#snippet action()}
-          <Button onclick={() => (filter = "")}>Clear filter</Button>
+          <Button
+            onclick={() => {
+              filter = "";
+              activeTag.set(null);
+            }}
+          >
+            Clear filter
+          </Button>
         {/snippet}
       </EmptyState>
     {:else}
       <ConnectionList
-        forwards={visible}
+        forwards={$forwards}
+        groups={$groups}
         statusById={$statusById}
         statsById={$statsById}
         lastErrorById={$lastErrorById}
         {selectedId}
+        filterQuery={filter}
+        activeTag={$activeTag}
         onSelect={(id) => (selectedId = id)}
         onEdit={(f) => (form = { mode: "edit", forward: f })}
         onDelete={(f) => (confirmTarget = f)}

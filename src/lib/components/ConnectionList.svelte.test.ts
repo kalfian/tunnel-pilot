@@ -1,0 +1,162 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/svelte";
+import type {
+  ForwardConfig,
+  ForwardStatus,
+  TunnelGroup,
+  TunnelStats,
+} from "../types";
+import ConnectionList from "./ConnectionList.svelte";
+
+vi.mock("../ipc", () => ({
+  reorderForwards: vi.fn(() => Promise.resolve()),
+  updateGroup: vi.fn(() => Promise.resolve({})),
+  assignForwardGroup: vi.fn(() => Promise.resolve()),
+  startGroup: vi.fn(() => Promise.resolve()),
+  stopGroup: vi.fn(() => Promise.resolve()),
+  connectForward: vi.fn(() => Promise.resolve()),
+  disconnectForward: vi.fn(() => Promise.resolve()),
+  retryForward: vi.fn(() => Promise.resolve()),
+  duplicateForward: vi.fn(() => Promise.resolve()),
+  copySshCommand: vi.fn(() => Promise.resolve("ssh ...")),
+}));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  writeText: vi.fn(() => Promise.resolve()),
+}));
+
+import { reorderForwards, updateGroup, startGroup } from "../ipc";
+
+function mk(id: string, name: string, groupId: string | null, tags: string[] = []): ForwardConfig {
+  return {
+    id,
+    name,
+    sshHost: "bastion.example.com",
+    sshPort: 22,
+    sshUsername: "deploy",
+    identityFilePath: null,
+    hasStoredPassword: true,
+    localBindAddress: "127.0.0.1",
+    localPort: 5432,
+    remoteHost: "10.0.4.12",
+    remotePort: 5432,
+    keepAliveIntervalSec: 30,
+    keepAliveMaxCount: 5,
+    groupId,
+    tags,
+  };
+}
+
+const GROUPS: TunnelGroup[] = [
+  { id: "g1", name: "Production", color: null, order: 0, collapsed: false },
+];
+// a,b live in Production; c is ungrouped.
+const FORWARDS = [
+  mk("a", "Alpha", "g1", ["db"]),
+  mk("b", "Bravo", "g1"),
+  mk("c", "Charlie", null),
+];
+
+const EMPTY: TunnelStats = {
+  activeConnections: 0,
+  totalBytesUp: 0,
+  totalBytesDown: 0,
+  lastPingLatencyMs: null,
+  connectedSince: null,
+};
+
+function renderList(
+  over: {
+    groups?: TunnelGroup[];
+    filterQuery?: string;
+    activeTag?: string | null;
+    status?: Record<string, ForwardStatus>;
+  } = {},
+) {
+  return render(ConnectionList, {
+    props: {
+      forwards: FORWARDS,
+      groups: over.groups ?? GROUPS,
+      statusById: over.status ?? {},
+      statsById: { a: EMPTY, b: EMPTY, c: EMPTY },
+      lastErrorById: {},
+      selectedId: null,
+      filterQuery: over.filterQuery ?? "",
+      activeTag: over.activeTag ?? null,
+      onSelect: vi.fn(),
+      onEdit: vi.fn(),
+      onDelete: vi.fn(),
+      onViewLog: vi.fn(),
+    },
+  });
+}
+
+function rowBody(id: string): HTMLElement {
+  return document.querySelector(`[data-row-id="${id}"]`) as HTMLElement;
+}
+
+describe("ConnectionList — groups", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("renders a group header + an ungrouped section", () => {
+    renderList();
+    expect(screen.getByText("Production")).toBeInTheDocument();
+    expect(screen.getByText("Ungrouped")).toBeInTheDocument();
+  });
+
+  it("shows a flat list (no headers) when there are no groups", () => {
+    renderList({ groups: [] });
+    expect(screen.queryByText("Ungrouped")).not.toBeInTheDocument();
+    expect(screen.getByText("Alpha")).toBeInTheDocument();
+  });
+
+  it("persists a collapse toggle via update_group", async () => {
+    renderList();
+    const header = screen.getByRole("button", { name: /production/i });
+    await fireEvent.click(header);
+    expect(updateGroup).toHaveBeenCalledWith("g1", {
+      name: "Production",
+      color: null,
+      collapsed: true,
+    });
+  });
+
+  it("starts a group from its header", async () => {
+    renderList();
+    await fireEvent.click(screen.getByRole("button", { name: /start all/i }));
+    expect(startGroup).toHaveBeenCalledWith("g1");
+  });
+
+  it("filters by tag to just the tagged tunnel", () => {
+    renderList({ activeTag: "db" });
+    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    expect(screen.queryByText("Bravo")).not.toBeInTheDocument();
+    expect(screen.queryByText("Charlie")).not.toBeInTheDocument();
+  });
+});
+
+describe("ConnectionList — F43 reorder safety", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("keyboard reorder persists the FULL ordered id list", async () => {
+    renderList();
+    rowBody("a").focus();
+    await fireEvent.keyDown(rowBody("a"), { key: "ArrowDown", altKey: true });
+    expect(reorderForwards).toHaveBeenCalledTimes(1);
+    const arg = vi.mocked(reorderForwards).mock.calls[0][0];
+    // Every id is present (never a filtered subset) and Alpha/Bravo swapped.
+    expect([...arg].sort()).toEqual(["a", "b", "c"]);
+    expect(arg).toEqual(["b", "a", "c"]);
+  });
+
+  it("disables drag + keyboard reorder while a filter is active", async () => {
+    renderList({ filterQuery: "alpha" });
+    const li = rowBody("a").closest("li") as HTMLElement;
+    // Under a filter the row must not be draggable (F43).
+    expect(li.getAttribute("draggable")).toBe("false");
+    rowBody("a").focus();
+    await fireEvent.keyDown(rowBody("a"), { key: "ArrowDown", altKey: true });
+    expect(reorderForwards).not.toHaveBeenCalled();
+  });
+});
