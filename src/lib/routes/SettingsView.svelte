@@ -2,14 +2,20 @@
   import { save, open } from "@tauri-apps/plugin-dialog";
   import type { AppSettings, ThemeMode } from "../types";
   import { settings } from "../stores/settings";
-  import { updateStatus, updateProgress } from "../stores/updater";
+  import {
+    updateStatus,
+    updateProgress,
+    clearUpdateProgress,
+  } from "../stores/updater";
   import { importMode } from "../stores/backup";
+  import { activeView } from "../ui/view";
   import {
     updateSettings,
     exportBackup,
     importBackup,
     checkUpdate,
     installUpdate,
+    skipUpdate,
   } from "../ipc";
   import { pushToast } from "../ui/toast";
   import Toggle from "../components/ui/Toggle.svelte";
@@ -22,6 +28,7 @@
   const VERSION = "2.0.0";
 
   let checking = $state(false);
+  let updateError = $state<string | null>(null);
   let importPath = $state<string | null>(null);
 
   // Settings write: send the whole struct with one field changed. The store is
@@ -46,19 +53,50 @@
     label: `${n}s`,
   }));
 
-  // --- Update banner state (renders all six; updater behavior is M6) ---
+  // --- Update banner state machine (spec §8) ---
+  //
+  // State is derived from live store signals plus two ephemeral local flags:
+  //   - `checking`     — a `check_update()` call is in flight
+  //   - `updateError`  — the last check/install rejected (backend AppError)
+  // The backend never re-emits `update://status` on skip (it only persists
+  // `lastSkippedVersion` + emits `settings://changed`), so `available` also
+  // reconciles against `settings.lastSkippedVersion` — skipping a version hides
+  // the banner as soon as the settings store advances.
+  //
+  // `install_update()` downloads (→ `update://progress`) then relaunches the app
+  // itself on success, so there is no user-actionable "ready-then-restart" step:
+  // `ready` is the download-complete → relaunching moment (no button), and a
+  // failed install lands in `error`.
   type UpdateState =
-    "idle" | "available" | "downloading" | "installing" | "ready" | "error";
+    | "idle"
+    | "checking"
+    | "available"
+    | "downloading"
+    | "installing"
+    | "ready"
+    | "error";
 
   const updateState = $derived<UpdateState>(
     (() => {
+      if (updateError !== null) return "error";
       const prog = $updateProgress;
       if (prog) {
-        const [, total] = prog;
-        return total === null ? "installing" : "downloading";
+        const [downloaded, total] = prog;
+        if (total === null) return "installing";
+        if (total > 0 && downloaded >= total) return "ready";
+        return "downloading";
       }
+      if (checking) return "checking";
       const st = $updateStatus;
-      if (st?.available && !st.skipped) return "available";
+      const skippedVersion = $settings?.lastSkippedVersion ?? null;
+      if (
+        st?.available &&
+        st.version !== null &&
+        !st.skipped &&
+        st.version !== skippedVersion
+      ) {
+        return "available";
+      }
       return "idle";
     })(),
   );
@@ -72,27 +110,48 @@
   );
 
   async function checkNow(): Promise<void> {
+    clearUpdateProgress();
+    updateError = null;
     checking = true;
     try {
       const st = await checkUpdate();
-      pushToast(
-        st.available
-          ? `Version ${st.version} available`
-          : "You're on the latest version",
-        { tone: "info" },
-      );
-    } catch {
-      pushToast("Update checks arrive in a later build", { tone: "info" });
+      // `update://status` drives the banner; only the up-to-date case needs a
+      // toast (there is no banner state for "no update found").
+      if (!st.available) {
+        pushToast("You're on the latest version", { tone: "info" });
+      }
+    } catch (err) {
+      updateError = String(err);
     } finally {
       checking = false;
     }
   }
 
   async function doInstall(): Promise<void> {
+    clearUpdateProgress();
+    updateError = null;
     try {
+      // On success the backend verifies + installs + relaunches the app, so this
+      // promise typically never resolves here — progress events drive the UI and
+      // the process restarts. A rejection means the install/verify failed.
       await installUpdate();
-    } catch {
-      pushToast("Updates arrive in a later build", { tone: "info" });
+    } catch (err) {
+      updateError = String(err);
+      clearUpdateProgress();
+    }
+  }
+
+  async function doSkip(): Promise<void> {
+    const version = $updateStatus?.version;
+    if (!version) return;
+    try {
+      // Persists `lastSkippedVersion`; the resulting settings://changed advances
+      // the settings store, which drops the banner back to `idle`.
+      await skipUpdate(version);
+    } catch (err) {
+      pushToast(`Couldn't skip this version: ${String(err)}`, {
+        tone: "error",
+      });
     }
   }
 
@@ -151,23 +210,58 @@
 
       <!-- Update banner (spec §8) -->
       {#if updateState !== "idle"}
-        <div class="banner {updateState}" role="status" aria-live="polite">
-          {#if updateState === "available"}
+        <div
+          class="banner {updateState}"
+          role={updateState === "error" ? "alert" : "status"}
+          aria-live={updateState === "error" ? "assertive" : "polite"}
+        >
+          {#if updateState === "checking"}
+            <div class="banner-main">
+              <p class="banner-title">Checking for updates…</p>
+              <div class="progress indet" aria-hidden="true">
+                <span class="bar"></span>
+              </div>
+            </div>
+          {:else if updateState === "available"}
             <div class="banner-main">
               <p class="banner-title">
                 Version {$updateStatus?.version} available
               </p>
               {#if $updateStatus?.notes}
-                <p class="banner-notes">{$updateStatus.notes}</p>
+                <details class="notes">
+                  <summary>Release notes</summary>
+                  <p class="banner-notes">{$updateStatus.notes}</p>
+                </details>
               {/if}
             </div>
-            <Button variant="primary" onclick={() => void doInstall()}>
-              Download
-            </Button>
+            <div class="banner-actions">
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={() => void doSkip()}
+              >
+                Skip this version
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                iconLeft="download"
+                onclick={() => void doInstall()}
+              >
+                Install &amp; restart
+              </Button>
+            </div>
           {:else if updateState === "downloading"}
             <div class="banner-main">
               <p class="banner-title mono">Downloading… {downloadPct}%</p>
-              <div class="progress" aria-hidden="true">
+              <div
+                class="progress"
+                role="progressbar"
+                aria-label="Update download progress"
+                aria-valuenow={downloadPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
                 <span class="bar" style="width: {downloadPct}%"></span>
               </div>
             </div>
@@ -180,16 +274,30 @@
             </div>
           {:else if updateState === "ready"}
             <div class="banner-main">
-              <p class="banner-title">Update ready</p>
+              <p class="banner-title">Update ready — restarting…</p>
+              <div class="progress indet" aria-hidden="true">
+                <span class="bar"></span>
+              </div>
             </div>
-            <Button variant="primary" onclick={() => void doInstall()}>
-              Restart to update
-            </Button>
           {:else if updateState === "error"}
             <div class="banner-main">
               <p class="banner-title">Update failed</p>
+              {#if updateError}
+                <p class="banner-notes">{updateError}</p>
+              {/if}
             </div>
-            <Button onclick={() => void checkNow()}>Retry</Button>
+            <div class="banner-actions">
+              <button
+                type="button"
+                class="link"
+                onclick={() => activeView.set("activity")}
+              >
+                View log
+              </button>
+              <Button variant="primary" size="sm" onclick={() => void checkNow()}>
+                Retry
+              </Button>
+            </div>
           {/if}
         </div>
       {/if}
@@ -546,7 +654,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--sp-4);
+    flex-wrap: wrap;
+    gap: var(--sp-3) var(--sp-4);
     padding: var(--sp-4) var(--sp-5);
     border-radius: var(--radius-md);
     border: var(--border-w) solid var(--border);
@@ -564,8 +673,14 @@
     border-color: transparent;
   }
   .banner-main {
-    min-width: 0;
-    flex: 1;
+    min-width: 12rem;
+    flex: 1 1 12rem;
+  }
+  .banner-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex: none;
   }
   .banner-title {
     margin: 0;
@@ -576,7 +691,31 @@
   .banner-notes {
     margin: var(--sp-1) 0 0;
     font-size: var(--fs-body-sm);
+    line-height: var(--lh-body-sm);
     color: var(--text-2);
+    white-space: pre-line;
+  }
+  .notes {
+    margin-top: var(--sp-1);
+  }
+  .notes summary {
+    display: inline-flex;
+    align-items: center;
+    font-size: var(--fs-body-sm);
+    color: var(--accent-text);
+    cursor: pointer;
+    list-style: none;
+    border-radius: var(--radius-sm);
+  }
+  .notes summary::-webkit-details-marker {
+    display: none;
+  }
+  .notes summary:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  .notes summary:hover {
+    text-decoration: underline;
   }
   .progress {
     margin-top: var(--sp-2);
