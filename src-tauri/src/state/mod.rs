@@ -231,7 +231,9 @@ impl AppState {
         }
     }
 
-    fn app_handle(&self) -> Option<tauri::AppHandle> {
+    /// The `AppHandle` for emitting events / firing notifications; `None` in
+    /// headless engine tests (event emission + notifications are no-ops).
+    pub fn app_handle(&self) -> Option<tauri::AppHandle> {
         self.app.read().ok().and_then(|g| g.clone())
     }
 

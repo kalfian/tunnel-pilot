@@ -355,6 +355,10 @@ async fn supervise(
             break 'supervisor;
         }
         state.emit_status(&id, ForwardStatus::Connected, None);
+        // Notify on connect (user connect OR auto-reconnect success), matching
+        // v1 `showConnected`; honors `showNotifications` + best-effort on
+        // unsigned macOS (spec 03 §15).
+        crate::platform::notify::notify_connected(&state, &cfg.name);
         // Publish the fresh snapshot into the cell; the shared sampler
         // (health.rs) is the SOLE emitter of `tunnel://stats` (spec 03 §2), so
         // the supervisor does NOT emit here — it only feeds the cell.
@@ -727,7 +731,17 @@ async fn handle_teardown(
         // section (F29 defensive in-section check).
         let term = state.registry.begin_terminal_error(id, Some(msg.clone()));
         if term.applied {
-            state.emit_status(id, ForwardStatus::Error, Some(msg));
+            state.emit_status(id, ForwardStatus::Error, Some(msg.clone()));
+            // Terminal error (retries exhausted / auto-reconnect off) — notify,
+            // matching v1's "notify only when no retry was scheduled" (spec 03
+            // §15). The transient-error branch above deliberately does NOT
+            // notify. Resolve the display name from the config (linear scan; not
+            // a hot path), falling back to the id.
+            let name = state
+                .get_config(id)
+                .map(|c| c.name)
+                .unwrap_or_else(|| id.to_string());
+            crate::platform::notify::notify_error(state, &name, &msg);
         }
         if term.retry_already_requested {
             *reconnect_attempt = 0;
