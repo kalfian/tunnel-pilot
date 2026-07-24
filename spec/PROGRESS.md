@@ -360,6 +360,18 @@ Frontend (ui-ux, `5c95728..1812a43`):
       ConnectionList groups + collapse + tag filter + **F43 full-order/disabled-under-filter**
       (7), F46 validation. Gates: `pnpm check`/`lint`/`test`/`build` all clean.
 
+### M5 review outcome (2026-07-25) — CLEAN after 1 fix
+- **F49 (Medium, FIXED):** ⌘K opened OVER a dialog leaked owned keys — the palette
+  `preventDefault`'d but didn't `stopPropagation`, so Escape/Tab bubbled to
+  `Dialog.svelte`'s `<svelte:window>` handler and closed the dialog behind (and in
+  submenu mode closed it instead of stepping back). Fix: palette `stopPropagation()`
+  on its owned keys (arrows/Enter/Escape/Tab) + trap Tab on the input. Tests added
+  (window listener never fires; Escape steps out of the sub-menu). Commit below.
+- **F50 (Low, backlog note only):** `lib/fuzzy.ts` matches over UTF-16 code units →
+  astral/emoji queries can align to half a surrogate (imperfect ranking, no crash).
+  Documented in-code; revisit (segment by code point) only if emoji command labels
+  appear. Acceptable for an ASCII-ish tunnel/action launcher.
+
 ### M5 findings / deviations (AGENTS §9)
 - **No `05`/`design-tokens` spec corrections needed.** Implemented within spec.
 - **Tag filter is single-tag** (per the `activeTag: string|null` store contract), not the

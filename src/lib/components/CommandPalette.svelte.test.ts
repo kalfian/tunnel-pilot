@@ -95,4 +95,26 @@ describe("CommandPalette", () => {
     await fireEvent.input(input(), { target: { value: "zzzznomatch" } });
     expect(screen.getByText(/no results for/i)).toBeInTheDocument();
   });
+
+  it("does not let owned keys reach a dialog behind (F49)", async () => {
+    render(CommandPalette);
+    const winSpy = vi.fn();
+    window.addEventListener("keydown", winSpy);
+    await fireEvent.keyDown(input(), { key: "Escape" });
+    await fireEvent.keyDown(input(), { key: "Tab" });
+    window.removeEventListener("keydown", winSpy);
+    // stopPropagation means the palette's own keys never reach window listeners
+    // (e.g. Dialog.svelte's Escape/Tab handler when ⌘K is opened over a dialog).
+    expect(winSpy).not.toHaveBeenCalled();
+  });
+
+  it("Escape steps out of a tunnel sub-menu instead of closing (F49)", async () => {
+    render(CommandPalette);
+    // First result is a tunnel; → opens its action sub-menu.
+    await fireEvent.keyDown(input(), { key: "ArrowRight" });
+    expect(input().placeholder).toMatch(/actions for/i);
+    await fireEvent.keyDown(input(), { key: "Escape" });
+    // Back to the main list rather than closing the palette (and the dialog).
+    expect(input().placeholder).toMatch(/search tunnels/i);
+  });
 });

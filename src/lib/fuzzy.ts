@@ -11,6 +11,11 @@
  *   - Score rewards prefix / word-boundary / camelCase / consecutive hits and
  *     lightly penalises longer targets, so exact and prefix matches float up.
  *   - Empty query matches everything with score 0 (callers show recents / all).
+ *
+ * BACKLOG (F50, Low): matching is over UTF-16 code units, so an astral-plane /
+ * emoji query can align to half a surrogate pair — imperfect ranking, never a
+ * crash. Acceptable for a tunnel/action launcher (labels are ASCII-ish);
+ * revisit (segment by code point) only if emoji command labels ever appear.
  */
 
 export interface FuzzyResult {

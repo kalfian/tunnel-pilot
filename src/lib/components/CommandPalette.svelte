@@ -389,7 +389,23 @@
     }
   }
 
+  // Keys the palette owns. When ⌘K is opened OVER a dialog (a supported path),
+  // these must NOT reach Dialog.svelte's window Escape/Tab handlers — otherwise
+  // a single Escape closes the dialog behind (or, in submenu mode, closes it
+  // instead of stepping back) and Tab leaks into the dialog's focus trap (F49).
+  // We stopPropagation so the palette handles them alone.
+  const OWNED_KEYS = new Set([
+    "ArrowDown",
+    "ArrowUp",
+    "ArrowRight",
+    "ArrowLeft",
+    "Enter",
+    "Escape",
+    "Tab",
+  ]);
+
   function onKeydown(e: KeyboardEvent): void {
+    if (OWNED_KEYS.has(e.key)) e.stopPropagation();
     const item = flat[activeIndex];
     switch (e.key) {
       case "ArrowDown":
@@ -399,6 +415,11 @@
       case "ArrowUp":
         e.preventDefault();
         activeIndex = flat.length === 0 ? 0 : (activeIndex - 1 + flat.length) % flat.length;
+        break;
+      case "Tab":
+        // Palette navigation is arrow-driven; trap Tab so focus stays on the
+        // input and never escapes into an underlying dialog's focus trap.
+        e.preventDefault();
         break;
       case "Enter":
         e.preventDefault();
