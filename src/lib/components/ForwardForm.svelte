@@ -171,22 +171,37 @@
       return;
     }
     saving = true;
+    let result: ForwardConfig;
     try {
       const input = toInput();
-      const result =
+      result =
         mode === "add"
           ? await createForward(input)
           : await updateForward(c!.id, input);
-      await applyPassword(result.id);
-      pushToast(mode === "add" ? "Tunnel added" : "Changes saved", {
-        tone: "success",
-      });
-      onSaved?.();
-      onClose();
     } catch (err) {
       pushToast(`Save failed: ${String(err)}`, { tone: "error" });
       saving = false;
+      return;
     }
+    // The config is now persisted. A failure applying the password is a
+    // SEPARATE, softer failure — the tunnel exists, it just has no stored
+    // secret (F47: don't report "Save failed" when the config saved fine).
+    try {
+      await applyPassword(result.id);
+    } catch (err) {
+      pushToast(
+        `Tunnel ${mode === "add" ? "created" : "saved"}, but the password wasn't stored: ${String(err)}`,
+        { tone: "error" },
+      );
+      onSaved?.();
+      onClose();
+      return;
+    }
+    pushToast(mode === "add" ? "Tunnel added" : "Changes saved", {
+      tone: "success",
+    });
+    onSaved?.();
+    onClose();
   }
 
   function focusFirstError(): void {
