@@ -24,7 +24,7 @@
 | M1 | SSH core engine (russh) | ✅ done | e2d42e9..560e799 (4 commits) |
 | M2 | Reconnect/wake/stats/persistence/keychain | ✅ done | 8214cdb..9901e4d (10 commits) |
 | M3 | Tray/window/lifecycle/autostart/dock | ✅ done | 6610ce8..331a2d4 (5 commits) |
-| M4 | Full UI parity | ⬜ pending | — |
+| M4 | Full UI parity | 🚧 in-progress | Phase 1 (backend surface + FE contract): `08c2e35` |
 | M5 | UX improvements | ⬜ pending | — |
 | M6 | Signed updater + notifications | ⬜ pending | — |
 | M7 | Packaging + cutover | ⬜ pending | — |
@@ -193,13 +193,72 @@ completed the persistence + migration + AppState-integration phase:
   requirement) from the debounced tokio task; state is gathered off-thread, only the
   icon/menu apply is dispatched.
 
+## M4 Phase 1 — backend command surface + FE contract (commit per item)
+- [x] `commands/forwards.rs`: full §6.1 surface — CRUD, reorder, duplicate,
+      connect/disconnect/retry, `get_forward_runtime`, `copy_ssh_command` (pure
+      `build_ssh_command`, v1-exact token order, always `-p`, identity quoted
+      only on a space, never a password), `set/clear_forward_password` (route
+      through `CredentialStore`; config holds only `hasStoredPassword`).
+      `update_forward` force-disconnects a live tunnel first (v1 parity). Kept
+      `start_all`/`stop_all` + their `run_*` helpers (reused by the tray).
+- [x] `commands/groups.rs`: §6.2 — CRUD (persists `collapsed`; `delete_group`
+      clears `groupId` on its forwards), `assign_forward_group` (rejects an
+      unknown target group), per-group `start_group`/`stop_group` (distinct from
+      global bulk, AGENTS §1), `list_tags` (derived, sorted, de-duped).
+- [x] `commands/settings.rs`: §6.3 — `get_settings` + `update_settings` (persist
+      then autostart reconcile + dock refresh + `settings://changed`).
+- [x] `state/log_buffer.rs` + `logging.rs`: real 500-cap newest-first `LogBuffer`
+      (push/snapshot/clear/formatted text, emits `log://line`/`log://cleared`);
+      `LogBufferLayer` forwards OUR crate's INFO/WARN/ERROR events (extracts
+      `message` + `tunnel` field) into the buffer. Buffer is a process-global
+      `Arc` shared with `AppState` (created before tracing init in `lib.rs`).
+- [x] `commands/logs.rs`: §6.4 — `get_logs`/`clear_logs`/`get_logs_text`.
+- [x] `storage/backup.rs` + `commands/backup.rs`: §6.5 — `export_backup`
+      (password-stripped) + `import_backup` via pure `plan_import` (replace|merge,
+      natural-key dedupe on merge; version>current rejected in `parse_backup`).
+      A REPLACE stops live tunnels first (no orphaned bound ports).
+- [x] `commands/updater.rs`: §6.6 — `skip_update` real (sets `lastSkippedVersion`);
+      `check_update`/`install_update` are M6-deferred stubs (surface complete).
+- [x] `commands/app.rs`: §6.7 — `app_hydrate` returns the full `AppSnapshot`
+      (forwards+groups+settings+logs+live runtimes+update+keychainAvailable);
+      `show_window`/`hide_window`/`quit_app` wrap `window/`.
+- [x] **F37 (M2 follow-up done):** mutation commands return `Result` and AWAIT
+      the ordered writer's outcome. `PersistMsg` now carries a per-message ack;
+      the single writer sends the real save result to every coalesced ack — the
+      ordering guarantee is untouched, but a persist failure now propagates to
+      the UI as `AppError::Storage`. Sync RAM mutators (`upsert_config` etc.,
+      used by headless it_tests) no longer auto-enqueue; commands drive
+      `persist_forwards/settings/groups().await?` explicitly. `AppError: Clone`.
+- [x] `lib.rs`: register the entire §6 surface in one `invoke_handler`; removed
+      the temporary M1 debug commands (`commands/debug.rs`).
+- [x] FE contract (`src/lib/types.ts`/`ipc.ts`/`events.ts`) verified complete +
+      1:1 with the Rust models/commands/events (was scaffolded at M0; no change
+      needed — every §6 command, §7 event, and §04 model is present and matches).
+- [x] Capabilities (`capabilities/default.json`) already scope the needed plugin
+      permissions; app-defined `#[tauri::command]`s are not ACL-gated in Tauri v2,
+      so no per-command permission entries are required (AGENTS §8).
+- [x] Gates: `cargo build`, `cargo test` (**106 pass**, +17 over M3), `cargo clippy
+      --all-targets -D warnings`, `cargo fmt --check`, `pnpm check`, `pnpm lint`
+      all clean.
+
+### M4 Phase 1 findings / deviations
+- **No spec correction needed** (AGENTS §9). Names/signatures follow 02 §6 exactly
+  (settings command is `update_settings`, not the "set_settings" wording in the
+  task brief; logs include `get_logs_text`; `app_hydrate` returns `AppSnapshot`
+  WITH the `update` field per 04 §8 even though the brief's prose omitted it —
+  the FE type requires it).
+- **Updater `check_update`/`install_update` deferred to M6** (signed-bundle flow,
+  spec 03 §16): registered + typed now so the surface + ACL are complete;
+  `install_update` returns a clear `AppError::Updater` rather than a silent no-op.
+- **F38 reuse:** `set/clear_forward_password` credential writes run on
+  `spawn_blocking` (blocking keyring calls) via new `set/delete_password_checked`.
+
 ## Next action
-**M4 — Full UI parity** (connections/logs/settings/forms/backup), after the F37/F38/F39
-M2-hardening lands. M3 backend lifecycle is complete: full test suite **89 Rust tests pass**
-(`cargo test`), `cargo clippy --all-targets -D warnings` + `cargo fmt --check` + `pnpm check`
-+ `pnpm lint` all clean. Interactive tray/window/dock/single-instance/autostart verification
-is deferred to a real desktop session; the real-OS-sleep wake check remains deferred to M6
-(F15).
+**M4 Phase 2** — coder stores (`src/lib/stores/*`) + ui-ux components/views built
+on top of this contract (the stores/components scaffolded at M0 wire to the now-live
+`ipc.ts`/`events.ts`). Backend command surface for M4 is complete: **106 Rust tests
+pass**, all six gates clean. Interactive tray/window/dock verification and the
+real-OS-sleep wake check remain deferred to a real desktop session / M6 (F15).
 
 ## Commit log (append hash + item as they land)
 - `4aac549` docs: spec package v1 (pre-build baseline)
@@ -240,6 +299,7 @@ is deferred to a real desktop session; the real-OS-sleep wake check remains defe
 - `fdf6ab9` feat(m3): dock/taskbar visibility + autostart reconcile
 - `d5b5e83` feat(m3): global bulk start_all/stop_all commands (F3)
 - `331a2d4` feat(m3): wire tray/window/dock/autostart + bulk commands into setup
+- `08c2e35` feat(m4): full IPC command surface + F37 error surfacing + log buffer
 
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).
