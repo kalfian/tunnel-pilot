@@ -34,7 +34,9 @@ use tauri::{
     Manager,
 };
 
+use crate::credentials::CredentialStore;
 use crate::state::AppState;
+use crate::storage::config_file::{ConfigDocument, ConfigStore};
 
 /// Build and run the Tauri application.
 ///
@@ -65,6 +67,7 @@ pub fn run() {
             crate::commands::debug::debug_disconnect,
             crate::commands::debug::debug_retry,
             crate::commands::debug::debug_runtime,
+            crate::commands::debug::debug_hydrate,
         ])
         .setup(|app| {
             // Initialize tracing + the (stubbed) tracing→log-buffer layer first
@@ -72,9 +75,52 @@ pub fn run() {
             crate::logging::init_tracing();
             tracing::info!("Tunnel Pilot v{} starting", env!("CARGO_PKG_VERSION"));
 
+            // Persistence + credentials live in the single canonical v2 config
+            // dir (`app_config_dir`, F2 — spec 03 §7). The keychain-fallback
+            // secrets file lives in the same directory.
+            let config_dir = app
+                .path()
+                .app_config_dir()
+                .expect("app_config_dir must resolve");
+            let config_store = Arc::new(ConfigStore::from_config_dir(&config_dir));
+            let credentials = Arc::new(CredentialStore::from_app_dir(&config_dir));
+
+            // First-run v1→v2 migration (hardcoded per-OS v1 probe, plaintext
+            // passwords → keychain), then load the v2 document. Bad config never
+            // crashes the app (spec 03 §7): on error we log and start with
+            // defaults. `block_on` at this binary edge is fine — it is a one-
+            // time boot step before the event loop spins up.
+            let doc = tauri::async_runtime::block_on(async {
+                if let Err(e) = crate::storage::migration::migrate_if_needed(
+                    config_store.as_ref(),
+                    credentials.as_ref(),
+                )
+                .await
+                {
+                    tracing::error!(error = %e, "v1→v2 migration failed; continuing");
+                }
+                config_store.load().await
+            })
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "failed to load config; starting with defaults");
+                ConfigDocument::default()
+            });
+
+            if !credentials.keychain_available() {
+                tracing::warn!(
+                    "OS keychain unavailable — SSH passwords use the plaintext fallback file; \
+                     the UI will surface a warning (M4)"
+                );
+            }
+
             // The shared application state (source of truth, spec 02 §5). Owns
-            // the tunnel registry + (M1) in-memory config/settings/credentials.
-            let state = Arc::new(AppState::new(app.handle().clone()));
+            // the tunnel registry + the persisted config mirror + credentials.
+            let state = Arc::new(AppState::new_hydrated(
+                app.handle().clone(),
+                config_store,
+                credentials,
+                doc,
+            ));
             app.manage(state.clone());
 
             // Sleep/wake watchdog (spec 03 §4): an app-lifetime monotonic-gap

@@ -10,7 +10,7 @@ use tauri::State;
 use crate::error::AppError;
 use crate::ssh::engine;
 use crate::state::models::{ForwardConfig, ForwardRuntime};
-use crate::state::AppState;
+use crate::state::{AppState, HydrateSnapshot};
 
 /// Inject/replace a config in the in-memory store (M1 stand-in for persistence).
 #[tauri::command]
@@ -46,4 +46,12 @@ pub async fn debug_retry(state: State<'_, Arc<AppState>>, id: String) -> Result<
 #[tauri::command]
 pub fn debug_runtime(state: State<'_, Arc<AppState>>, id: String) -> Option<ForwardRuntime> {
     state.registry.runtime(&id)
+}
+
+/// Startup snapshot (persisted forwards/groups/settings + keychain
+/// availability). Stand-in for the M4 `app_hydrate` command — proves the
+/// persisted config + credential availability are reachable from IPC.
+#[tauri::command]
+pub fn debug_hydrate(state: State<'_, Arc<AppState>>) -> HydrateSnapshot {
+    state.hydrate_snapshot()
 }

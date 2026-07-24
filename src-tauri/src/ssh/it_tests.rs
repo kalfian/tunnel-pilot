@@ -343,15 +343,12 @@ async fn wait_status(
 
 fn make_state(auto_reconnect: bool, max_retries: u32) -> Arc<AppState> {
     let state = Arc::new(AppState::new_headless());
-    {
-        let mut s = state.settings.write().unwrap();
-        *s = AppSettings {
-            auto_reconnect,
-            auto_reconnect_delay_sec: 1,
-            auto_reconnect_max_retries: max_retries,
-            ..AppSettings::default()
-        };
-    }
+    state.set_settings(AppSettings {
+        auto_reconnect,
+        auto_reconnect_delay_sec: 1,
+        auto_reconnect_max_retries: max_retries,
+        ..AppSettings::default()
+    });
     state
 }
 
