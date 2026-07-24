@@ -1,16 +1,73 @@
 //! Tracing initialization + the tracing→log-buffer bridge (spec 03 §18).
 //!
-//! M0 wires a real `tracing_subscriber` registry (env filter + fmt layer) plus
-//! a **stub** `LogBufferLayer`. M2 fleshes the layer out to format each event
-//! into a `LogEntry`, push it into the 500-cap ring buffer
-//! (`state/log_buffer.rs`), and emit `log://line`.
+//! A real `tracing_subscriber` registry (env filter + fmt layer) plus the
+//! [`LogBufferLayer`], which formats each of OUR crate's `INFO`/`WARN`/`ERROR`
+//! events into a [`LogEntry`], pushes it into the 500-cap ring buffer
+//! (`state/log_buffer.rs`), and emits `log://line`.
+//!
+//! The buffer is a process-global `Arc<LogBuffer>` set via [`set_log_buffer`]
+//! before `init_tracing` runs, so the layer (installed globally, no access to
+//! `AppState`) can reach it. `lib.rs` shares the SAME `Arc` with `AppState` so
+//! the `get_logs` command reads the exact buffer the layer writes.
 
+use std::sync::{Arc, OnceLock};
+
+use tracing::field::{Field, Visit};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, Layer};
 
-/// A `tracing` layer that will forward user-visible events into the in-memory
-/// log ring buffer. **Stub for M0** — currently a no-op.
+use crate::state::log_buffer::LogBuffer;
+use crate::state::models::{LogEntry, LogLevel};
+
+/// Only events from our own crate reach the user-facing Logs tab; third-party
+/// `INFO` lines (tao/wry/russh) are noise the user should not see.
+const CRATE_TARGET_PREFIX: &str = "tunnel_pilot_lib";
+
+/// Process-global log buffer the tracing layer writes into. Set once at boot
+/// (before `init_tracing`) and shared with `AppState` so reads and writes hit
+/// the same ring buffer.
+static LOG_BUFFER: OnceLock<Arc<LogBuffer>> = OnceLock::new();
+
+/// Install the shared log buffer for the tracing layer. Idempotent — a second
+/// call (e.g. in tests) is ignored.
+pub fn set_log_buffer(buffer: Arc<LogBuffer>) {
+    let _ = LOG_BUFFER.set(buffer);
+}
+
+/// Extracts the `message` and an optional `tunnel`/`tunnel_name` field from a
+/// tracing event's fields (the engine logs `tracing::info!(tunnel = %id, "...")`).
+#[derive(Default)]
+struct FieldExtractor {
+    message: Option<String>,
+    tunnel: Option<String>,
+}
+
+impl Visit for FieldExtractor {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        match field.name() {
+            "message" => self.message = Some(value.to_string()),
+            "tunnel" | "tunnel_name" => self.tunnel = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        let rendered = format!("{value:?}");
+        match field.name() {
+            "message" => self.message = Some(rendered),
+            "tunnel" | "tunnel_name" => {
+                // A `%id` / `?id` field renders quoted for strings via Debug;
+                // strip the surrounding quotes so the tunnel name reads cleanly.
+                self.tunnel = Some(rendered.trim_matches('"').to_string());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A `tracing` layer that forwards our crate's user-visible events into the
+/// in-memory log ring buffer and emits `log://line`.
 #[derive(Default)]
 pub struct LogBufferLayer;
 
@@ -21,9 +78,38 @@ impl LogBufferLayer {
 }
 
 impl<S: tracing::Subscriber> Layer<S> for LogBufferLayer {
-    fn on_event(&self, _event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
-        // TODO(M2): format into a LogEntry (level/tunnel/message/HH:mm:ss),
-        // push onto the 500-cap ring buffer, and emit `log://line`.
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        let Some(buffer) = LOG_BUFFER.get() else {
+            return; // buffer not installed yet (very early boot) — skip.
+        };
+        let meta = event.metadata();
+
+        // Only surface our own crate's events (skip noisy third-party logs).
+        if !meta.target().starts_with(CRATE_TARGET_PREFIX) {
+            return;
+        }
+
+        // Map the tracing level to the user-facing LogLevel; DEBUG/TRACE never
+        // reach the Logs tab.
+        let level = match *meta.level() {
+            tracing::Level::ERROR => LogLevel::Error,
+            tracing::Level::WARN => LogLevel::Warning,
+            tracing::Level::INFO => LogLevel::Info,
+            _ => return,
+        };
+
+        let mut extractor = FieldExtractor::default();
+        event.record(&mut extractor);
+        let Some(message) = extractor.message else {
+            return; // no human message — nothing useful to show.
+        };
+
+        buffer.push(LogEntry {
+            level,
+            tunnel_name: extractor.tunnel,
+            message,
+            timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+        });
     }
 }
 

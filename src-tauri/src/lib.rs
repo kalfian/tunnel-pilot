@@ -56,22 +56,64 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        // M1: temporary debug commands to drive the SSH engine (replaced at M4).
+        // Full M4 command surface (spec 02 §6). Kept in lockstep with
+        // `src/lib/ipc.ts` + `src/lib/types.ts` + the spec 02 tables (AGENTS §1);
+        // the capabilities in `capabilities/default.json` scope these to the
+        // main window (AGENTS §8).
         .invoke_handler(tauri::generate_handler![
-            crate::commands::debug::debug_upsert_config,
-            crate::commands::debug::debug_set_password,
-            crate::commands::debug::debug_connect,
-            crate::commands::debug::debug_disconnect,
-            crate::commands::debug::debug_retry,
-            crate::commands::debug::debug_runtime,
-            crate::commands::debug::debug_hydrate,
-            // M3: global bulk connect/disconnect (spec 02 §6.1, F3).
+            // Forwards (§6.1)
+            crate::commands::forwards::list_forwards,
+            crate::commands::forwards::create_forward,
+            crate::commands::forwards::update_forward,
+            crate::commands::forwards::delete_forward,
+            crate::commands::forwards::duplicate_forward,
+            crate::commands::forwards::reorder_forwards,
+            crate::commands::forwards::connect_forward,
+            crate::commands::forwards::disconnect_forward,
+            crate::commands::forwards::retry_forward,
             crate::commands::forwards::start_all,
             crate::commands::forwards::stop_all,
+            crate::commands::forwards::get_forward_runtime,
+            crate::commands::forwards::copy_ssh_command,
+            crate::commands::forwards::set_forward_password,
+            crate::commands::forwards::clear_forward_password,
+            // Groups & tags (§6.2)
+            crate::commands::groups::list_groups,
+            crate::commands::groups::create_group,
+            crate::commands::groups::update_group,
+            crate::commands::groups::delete_group,
+            crate::commands::groups::assign_forward_group,
+            crate::commands::groups::start_group,
+            crate::commands::groups::stop_group,
+            crate::commands::groups::list_tags,
+            // Settings (§6.3)
+            crate::commands::settings::get_settings,
+            crate::commands::settings::update_settings,
+            // Logs (§6.4)
+            crate::commands::logs::get_logs,
+            crate::commands::logs::clear_logs,
+            crate::commands::logs::get_logs_text,
+            // Backup (§6.5)
+            crate::commands::backup::export_backup,
+            crate::commands::backup::import_backup,
+            // Updater (§6.6)
+            crate::commands::updater::check_update,
+            crate::commands::updater::install_update,
+            crate::commands::updater::skip_update,
+            // App / window (§6.7)
+            crate::commands::app::app_hydrate,
+            crate::commands::app::show_window,
+            crate::commands::app::hide_window,
+            crate::commands::app::quit_app,
         ])
         .setup(|app| {
-            // Initialize tracing + the (stubbed) tracing→log-buffer layer first
-            // so subsequent setup steps are captured (spec 03 §18).
+            // The log ring buffer must exist BEFORE tracing init so the layer
+            // can write into it; the SAME Arc is shared with `AppState` below so
+            // the `get_logs` command reads exactly what the layer writes (spec
+            // 03 §18). The app handle is attached inside `new_hydrated` so
+            // appends start emitting `log://line`.
+            let logs = Arc::new(crate::state::log_buffer::LogBuffer::new());
+            crate::logging::set_log_buffer(logs.clone());
             crate::logging::init_tracing();
             tracing::info!("Tunnel Pilot v{} starting", env!("CARGO_PKG_VERSION"));
 
@@ -119,6 +161,7 @@ pub fn run() {
                 app.handle().clone(),
                 config_store,
                 credentials,
+                logs,
                 doc,
             ));
             app.manage(state.clone());

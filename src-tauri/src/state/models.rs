@@ -99,6 +99,18 @@ pub struct TunnelGroup {
     pub collapsed: bool,
 }
 
+/// Create/update payload for a group (spec 04 §2) — no `id`, no `order`
+/// (assigned by the backend on create; preserved on update).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupInput {
+    pub name: String,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
 /// Create/update payload — no `id`, no live state, no secret (spec 04 §1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -218,6 +230,71 @@ pub enum ThemeMode {
     System,
     Light,
     Dark,
+}
+
+/// A single in-memory log line (spec 04 §6). Not persisted; the ring buffer is
+/// capped at 500 newest-first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+    pub level: LogLevel,
+    /// `None` for app-level (non-tunnel) logs.
+    pub tunnel_name: Option<String>,
+    pub message: String,
+    /// Formatted local time `HH:mm:ss`.
+    pub timestamp: String,
+}
+
+impl LogEntry {
+    /// The Copy-All line format (spec 04 §6): `[HH:mm:ss] [LEVEL] [tunnel] message`
+    /// — the `[tunnel]` segment is omitted when there is no tunnel name.
+    pub fn formatted(&self) -> String {
+        let level = match self.level {
+            LogLevel::Info => "INFO",
+            LogLevel::Warning => "WARNING",
+            LogLevel::Error => "ERROR",
+        };
+        match &self.tunnel_name {
+            Some(t) => format!("[{}] [{}] [{}] {}", self.timestamp, level, t, self.message),
+            None => format!("[{}] [{}] {}", self.timestamp, level, self.message),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+/// Self-update availability snapshot (spec 04 §7). Returned by `check_update`
+/// and carried in [`AppSnapshot`]; the real check is wired in M6.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStatus {
+    pub available: bool,
+    pub version: Option<String>,
+    pub notes: Option<String>,
+    /// `version == settings.last_skipped_version`.
+    pub skipped: bool,
+}
+
+/// One-shot boot/rehydrate snapshot returned by `app_hydrate` (spec 04 §8). The
+/// frontend fully rehydrates from this on window show — it holds no
+/// authoritative state of its own (spec 02 §5).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSnapshot {
+    pub forwards: Vec<ForwardConfig>,
+    pub groups: Vec<TunnelGroup>,
+    pub settings: AppSettings,
+    pub logs: Vec<LogEntry>,
+    /// `(forwardId, runtime)` pairs for every currently-live tunnel.
+    pub runtimes: Vec<(String, ForwardRuntime)>,
+    pub update: UpdateStatus,
+    pub keychain_available: bool,
 }
 
 #[cfg(test)]

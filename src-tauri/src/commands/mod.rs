@@ -2,16 +2,13 @@
 //! (spec 02 §6, AGENTS.md §1). Handlers stay thin: parse args → call a service
 //! in `ssh/`/`storage/`/`credentials/`/etc.
 //!
-//! Every command has a matching typed wrapper in `src/lib/ipc.ts`. As commands
-//! land (M3/M4+), register them in one `tauri::generate_handler![...]` list and
-//! keep Rust + `lib/ipc.ts` + `lib/types.ts` + spec 02 tables in lockstep.
-//!
-//! TODO(M3/M4): implement + register the commands catalogued in spec 02 §6.
+//! Every command has a matching typed wrapper in `src/lib/ipc.ts`. The Rust
+//! command, its `invoke_handler` registration, `lib/ipc.ts`, `lib/types.ts`, and
+//! the spec 02 tables are kept in lockstep (AGENTS.md §1). The full M4 surface is
+//! registered in one `tauri::generate_handler![...]` list in `lib.rs`.
 
 pub mod app;
 pub mod backup;
-/// TEMPORARY (M1): debug commands to drive the engine; removed at M4.
-pub mod debug;
 pub mod forwards;
 pub mod groups;
 pub mod logs;

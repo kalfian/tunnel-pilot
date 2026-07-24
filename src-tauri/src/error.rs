@@ -13,7 +13,7 @@ use serde::Serialize;
 ///
 /// Serialized as an internally-tagged object, e.g. a `Ssh` variant becomes
 /// `{ "kind": "ssh", "message": "connection refused" }`.
-#[derive(Debug, thiserror::Error, Serialize)]
+#[derive(Debug, Clone, thiserror::Error, Serialize)]
 #[serde(tag = "kind", content = "message", rename_all = "camelCase")]
 pub enum AppError {
     /// SSH transport / protocol failure (russh).

@@ -347,6 +347,15 @@ impl TunnelRegistry {
         self.lock().keys().cloned().collect()
     }
 
+    /// `(id, runtime)` for every live tunnel — the runtime half of the
+    /// `app_hydrate` snapshot (spec 04 §8). Reads only.
+    pub fn all_runtimes(&self) -> Vec<(TunnelId, ForwardRuntime)> {
+        self.lock()
+            .iter()
+            .map(|(id, h)| (id.clone(), h.runtime()))
+            .collect()
+    }
+
     /// Claim the shared-sampler slot (M2, spec 03 §2). Returns `true` iff the
     /// caller transitioned it from stopped→running and MUST therefore spawn the
     /// sampler; `false` means one is already live (idempotent auto-start).
@@ -364,6 +373,32 @@ impl TunnelRegistry {
     /// Whether a shared sampler is currently claimed (tests / diagnostics).
     pub fn is_sampler_running(&self) -> bool {
         self.sampler_running.load(Ordering::SeqCst)
+    }
+}
+
+/// Build a minimal live `TunnelHandle` for a given status — test-only, used by
+/// command-layer tests (e.g. `update_forward` force-disconnect) that need a
+/// tunnel to appear "live" in the registry without a real SSH session. The
+/// supervisor `JoinHandle` is an already-complete no-op task so a disconnect's
+/// `join.await` returns immediately.
+#[cfg(test)]
+pub(crate) fn fake_handle(id: &str, status: ForwardStatus) -> TunnelHandle {
+    let parent = CancellationToken::new();
+    let attempt = parent.child_token();
+    let (status_tx, _rx) = watch::channel(status);
+    let (_stats_tx, stats_rx) = watch::channel(TunnelStats::default());
+    TunnelHandle {
+        id: id.to_string(),
+        parent_cancel: parent,
+        attempt_cancel: attempt,
+        join: tokio::spawn(async {}),
+        status: status_tx,
+        last_error: None,
+        retry_requested: false,
+        retry_notify: Arc::new(Notify::new()),
+        wake_notify: Arc::new(Notify::new()),
+        stats_cell: stats_rx,
+        stats: Arc::new(StatsInner::default()),
     }
 }
 
@@ -426,23 +461,7 @@ mod tests {
     // dummy JoinHandle + watch/Notify) ----
 
     fn make_handle(id: &str, initial: ForwardStatus) -> TunnelHandle {
-        let parent = CancellationToken::new();
-        let attempt = parent.child_token();
-        let (status_tx, _rx) = watch::channel(initial);
-        let (_stats_tx, stats_rx) = watch::channel(TunnelStats::default());
-        TunnelHandle {
-            id: id.to_string(),
-            parent_cancel: parent,
-            attempt_cancel: attempt,
-            join: tokio::spawn(async {}),
-            status: status_tx,
-            last_error: None,
-            retry_requested: false,
-            retry_notify: Arc::new(Notify::new()),
-            wake_notify: Arc::new(Notify::new()),
-            stats_cell: stats_rx,
-            stats: Arc::new(StatsInner::default()),
-        }
+        super::fake_handle(id, initial)
     }
 
     #[tokio::test]
