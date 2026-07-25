@@ -27,6 +27,7 @@ vi.mock("./events", () => {
     onUpdateStatus: register("onUpdateStatus"),
     onUpdateProgress: register("onUpdateProgress"),
     onWindowFocus: register("onWindowFocus"),
+    onTrayOpened: register("onTrayOpened"),
   };
 });
 
@@ -196,6 +197,16 @@ describe("subscribeEvents", () => {
     expect(vi.mocked(appHydrate)).not.toHaveBeenCalled();
 
     handlers.onWindowFocus(null);
+    await Promise.resolve();
+    expect(vi.mocked(appHydrate)).toHaveBeenCalledOnce();
+  });
+
+  it("re-hydrates on tray://opened (popover show)", async () => {
+    vi.mocked(appHydrate).mockResolvedValue(SNAPSHOT);
+    await subscribeEvents();
+    expect(vi.mocked(appHydrate)).not.toHaveBeenCalled();
+
+    handlers.onTrayOpened(null);
     await Promise.resolve();
     expect(vi.mocked(appHydrate)).toHaveBeenCalledOnce();
   });

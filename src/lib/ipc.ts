@@ -143,4 +143,13 @@ export const showWindow = (): Promise<void> => invoke("show_window");
 
 export const hideWindow = (): Promise<void> => invoke("hide_window");
 
+/**
+ * Hide the tray popover window (label `tray_popover`). Matches the Rust command
+ * `hide_tray_popover`. Used by the popover panel's Esc / after Settings so the
+ * webview dismisses without quitting the app. (Coordinate the exact name with
+ * the Rust agent — a mismatch is a one-line rename here.)
+ */
+export const hideTrayPopover = (): Promise<void> =>
+  invoke("hide_tray_popover");
+
 export const quitApp = (): Promise<void> => invoke("quit_app");

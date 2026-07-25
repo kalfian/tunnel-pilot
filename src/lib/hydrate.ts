@@ -24,6 +24,7 @@ import {
   onSettingsChanged,
   onTunnelStats,
   onTunnelStatus,
+  onTrayOpened,
   onUpdateProgress,
   onUpdateStatus,
   onWindowFocus,
@@ -73,6 +74,12 @@ export async function subscribeEvents(): Promise<UnlistenFn> {
     onUpdateStatus((e) => applyUpdateStatus(e.payload)),
     onUpdateProgress((e) => applyUpdateProgress(e.payload)),
     onWindowFocus(() => {
+      void hydrateAll();
+    }),
+    // The tray popover reuses this webview boot; on every open the backend
+    // emits `tray://opened` so the panel re-pulls fresh state (spec: hydrate
+    // on show).
+    onTrayOpened(() => {
       void hydrateAll();
     }),
   ]);

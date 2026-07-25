@@ -48,6 +48,12 @@ body {
   height: 100%;
 }
 
+/* Tray popover webview: the window is transparent + rounded, so the canvas must
+   not paint an opaque background — the panel supplies its own surface/shadow. */
+body.popover {
+  background: transparent;
+}
+
 /* Numeric/technical values everywhere use the mono stack with tabular figures
    so columns (ports, bytes, latency) align. */
 .mono {

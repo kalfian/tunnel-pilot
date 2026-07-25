@@ -33,6 +33,8 @@ export const EVENTS = {
   updateStatus: "update://status",
   updateProgress: "update://progress",
   windowFocus: "window://focus",
+  /** Emitted to the `tray_popover` webview on every open (re-hydrate trigger). */
+  trayOpened: "tray://opened",
 } as const;
 
 // --- Payload types (mirror the Rust emit structs, spec 02 §7) ---
@@ -91,3 +93,6 @@ export const onUpdateProgress = (
 
 export const onWindowFocus = (cb: EventCallback<null>): Promise<UnlistenFn> =>
   listen(EVENTS.windowFocus, cb);
+
+export const onTrayOpened = (cb: EventCallback<null>): Promise<UnlistenFn> =>
+  listen(EVENTS.trayOpened, cb);
