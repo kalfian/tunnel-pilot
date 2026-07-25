@@ -211,6 +211,71 @@ describe("ConnectionList — group management (Feature A)", () => {
   });
 });
 
+describe("ConnectionList — drag tunnels between groups (Feature #1)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function sectionEl(id: string): HTMLElement {
+    return document.querySelector(`[data-section="${id}"]`) as HTMLElement;
+  }
+  function liOf(id: string): HTMLElement {
+    return rowBody(id).closest("li") as HTMLElement;
+  }
+
+  it("dropping a tunnel on a different group's section reassigns it", async () => {
+    renderList();
+    // Charlie (ungrouped) dragged onto the Production (g1) section.
+    await fireEvent.dragStart(liOf("c"));
+    const target = sectionEl("g1");
+    await fireEvent.dragOver(target);
+    await fireEvent.drop(target);
+    expect(assignForwardGroup).toHaveBeenCalledWith("c", "g1");
+    // A cross-group move must not also fire a reorder.
+    expect(reorderForwards).not.toHaveBeenCalled();
+  });
+
+  it("dropping a tunnel on the Ungrouped section clears its group (null)", async () => {
+    renderList();
+    // Alpha (in g1) dragged onto the Ungrouped section.
+    await fireEvent.dragStart(liOf("a"));
+    const target = sectionEl("__ungrouped__");
+    await fireEvent.dragOver(target);
+    await fireEvent.drop(target);
+    expect(assignForwardGroup).toHaveBeenCalledWith("a", null);
+    expect(reorderForwards).not.toHaveBeenCalled();
+  });
+
+  it("dropping on a different group's row (not just header) reassigns", async () => {
+    renderList();
+    // Charlie dropped onto Alpha's row — Alpha lives in g1, so this reassigns.
+    await fireEvent.dragStart(liOf("c"));
+    await fireEvent.dragOver(liOf("a"));
+    await fireEvent.drop(liOf("a"));
+    expect(assignForwardGroup).toHaveBeenCalledWith("c", "g1");
+    expect(reorderForwards).not.toHaveBeenCalled();
+  });
+
+  it("dragging within the same group still reorders (no reassign)", async () => {
+    renderList();
+    // Alpha over Bravo — both in g1 → reorder, not reassign.
+    await fireEvent.dragStart(liOf("a"));
+    await fireEvent.dragOver(liOf("b"));
+    await fireEvent.dragEnd(liOf("a"));
+    expect(reorderForwards).toHaveBeenCalledTimes(1);
+    const arg = vi.mocked(reorderForwards).mock.calls[0][0];
+    expect([...arg].sort()).toEqual(["a", "b", "c"]);
+    expect(arg).toEqual(["b", "a", "c"]);
+    expect(assignForwardGroup).not.toHaveBeenCalled();
+  });
+
+  it("a no-move drag persists nothing", async () => {
+    renderList();
+    await fireEvent.dragStart(liOf("a"));
+    await fireEvent.dragEnd(liOf("a"));
+    expect(reorderForwards).not.toHaveBeenCalled();
+    expect(assignForwardGroup).not.toHaveBeenCalled();
+  });
+});
+
 describe("ConnectionList — F43 reorder safety", () => {
   beforeEach(() => vi.clearAllMocks());
 

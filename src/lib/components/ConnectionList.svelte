@@ -158,6 +158,14 @@
     sections.flatMap((s) => s.visible.map((f) => f.id)),
   );
 
+  // DnD model (two disjoint gestures, disambiguated by drop target):
+  //  • REORDER — hover a row in the SAME group → live-splice `orderedIds`,
+  //    committed on `dragend` via `reorderForwards` (the one optimistic path).
+  //  • REASSIGN — drop onto a DIFFERENT group's section (header / body / gap)
+  //    → `assignForwardGroup`, committed on the explicit `drop` (never on
+  //    `dragend`, so releasing outside the list can't silently move a tunnel).
+  //  Both are gated by `reorderable` (disabled under a filter — F43) via the
+  //  row's `draggable` attribute, so neither gesture starts while filtering.
   let draggingId = $state<string | null>(null);
   let dragOverGroup = $state<string | null>(null);
   let dragStartOrder = "";
@@ -180,29 +188,50 @@
     }
   }
 
-  async function onDragEnd(): Promise<void> {
+  // Highlight a section only when a drop there would actually REASSIGN — i.e.
+  // dragging over a different group than the tunnel's current one. No highlight
+  // while reordering within the same group.
+  function isDropTarget(gid: string | null): boolean {
+    if (draggingId === null || !hasGroups) return false;
+    if (gid !== dragOverGroup) return false;
+    return effectiveGroup(byId.get(draggingId)) !== gid;
+  }
+
+  // Row hover during a drag: same group → live reorder; different group → just
+  // mark the reassign target (the section's `drop` commits it).
+  function onRowDragOver(forward: ForwardConfig): void {
+    if (!draggingId) return;
+    const draggedGroup = effectiveGroup(byId.get(draggingId));
+    const rowGroup = effectiveGroup(forward);
+    dragOverGroup = rowGroup;
+    if (draggedGroup === rowGroup && draggingId !== forward.id) {
+      reorderTo(draggingId, orderedIds.indexOf(forward.id));
+    }
+  }
+
+  // Explicit drop onto a section → reassign to that group (or Ungrouped=null).
+  // Same-section drops are no-ops here (the reorder path already handled them).
+  async function dropOnSection(targetGroupId: string | null): Promise<void> {
     const dragged = draggingId;
-    const overGroup = dragOverGroup;
+    if (!dragged || !hasGroups) return;
+    const f = byId.get(dragged);
+    if (f === undefined || effectiveGroup(f) === targetGroupId) return;
+    try {
+      await assignForwardGroup(dragged, targetGroupId);
+    } catch (err) {
+      pushToast(`Move to group failed: ${String(err)}`, { tone: "error" });
+    }
+  }
+
+  async function onDragEnd(): Promise<void> {
     draggingId = null;
     dragOverGroup = null;
-    if (!dragged) return;
-
-    const f = byId.get(dragged);
-    const changedGroup =
-      hasGroups && f !== undefined && effectiveGroup(f) !== overGroup;
-    const changedOrder = orderedIds.join(",") !== dragStartOrder;
-
-    // Guard the no-op drag (dragstart→dragend with no move) — don't persist.
-    if (!changedGroup && !changedOrder) return;
-
-    if (changedGroup) {
-      try {
-        await assignForwardGroup(dragged, overGroup);
-      } catch (err) {
-        pushToast(`Move to group failed: ${String(err)}`, { tone: "error" });
-      }
+    // Commit a REORDER (orderedIds mutated live during dragover). A cross-group
+    // move is committed on `drop`, not here, and leaves the order untouched — so
+    // a no-op drag (no move) stays a guarded no-op.
+    if (orderedIds.join(",") !== dragStartOrder) {
+      await persistOrder();
     }
-    await persistOrder();
   }
 
   function focusRow(id: string): void {
@@ -264,6 +293,27 @@
 
 <div bind:this={listEl} class="wrap">
   {#each sections as section (section.group?.id ?? "__ungrouped__")}
+    {@const gid = section.group?.id ?? null}
+    <!-- Section wraps header + body so a drag can be dropped anywhere in the
+         group (incl. an empty/collapsed group's header) to reassign. Pointer-
+         only affordance; the keyboard path is the row ⋯ "Assign group" menu. -->
+    <div
+      class="section"
+      class:drop-target={isDropTarget(gid)}
+      data-section={gid ?? "__ungrouped__"}
+      role="group"
+      aria-label={section.group?.name ?? "Ungrouped"}
+      ondragover={(e) => {
+        if (!reorderable || !draggingId) return;
+        e.preventDefault();
+        dragOverGroup = gid;
+      }}
+      ondrop={(e) => {
+        if (!reorderable || !draggingId) return;
+        e.preventDefault();
+        void dropOnSection(gid);
+      }}
+    >
     {#if hasGroups}
       <GroupHeader
         name={section.group?.name ?? "Ungrouped"}
@@ -307,10 +357,7 @@
             ondragover={(e) => {
               if (!reorderable || !draggingId) return;
               e.preventDefault();
-              dragOverGroup = effectiveGroup(forward);
-              if (draggingId !== forward.id) {
-                reorderTo(draggingId, orderedIds.indexOf(forward.id));
-              }
+              onRowDragOver(forward);
             }}
           >
             <ConnectionRow
@@ -332,6 +379,7 @@
         {/each}
       </ul>
     {/if}
+    </div>
   {/each}
 </div>
 
@@ -341,7 +389,27 @@
   .wrap {
     display: flex;
     flex-direction: column;
+    gap: var(--sp-4);
+  }
+  .section {
+    display: flex;
+    flex-direction: column;
     gap: var(--sp-3);
+    border-radius: var(--radius-md);
+    /* Outline (not border/padding) so the drop highlight never reflows the
+       list. Only the tint transitions — the ring is a state cue, not motion. */
+    outline: var(--border-w-emph) solid transparent;
+    outline-offset: var(--sp-1);
+    transition: background-color var(--dur-fast) var(--ease-standard);
+  }
+  .section.drop-target {
+    background: var(--accent-subtle);
+    outline-color: var(--accent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .section {
+      transition: none;
+    }
   }
   .list {
     display: flex;
