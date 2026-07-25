@@ -203,11 +203,11 @@
         {/if}
       </span>
       {#if status === "error"}
-        <span class="route mono selectable">{route}</span>
+        <span class="route mono selectable" title={route}>{route}</span>
       {:else if SUBTITLE[status]}
         <span class="subtitle">{SUBTITLE[status]}</span>
       {:else}
-        <span class="route mono selectable">{route}</span>
+        <span class="route mono selectable" title={route}>{route}</span>
       {/if}
       {#if status === "connected"}
         <StatChips {stats} />
@@ -258,7 +258,9 @@
     position: relative;
     display: grid;
     grid-template-columns: auto 1fr auto;
-    align-items: center;
+    /* Top-align so a 2-line and a 3-line (stats) row share one top rhythm and
+       the dot / name / toggle land on the same line whatever the card height. */
+    align-items: start;
     gap: var(--sp-2);
     min-height: var(--row-h);
     padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-2);
@@ -303,6 +305,8 @@
   .grip {
     display: flex;
     align-items: center;
+    /* Centre the grip on the name line (matches the dot + toggle). */
+    height: var(--lh-title-sm);
     color: var(--text-3);
     opacity: 0;
     cursor: grab;
@@ -385,7 +389,10 @@
   .actions {
     display: flex;
     align-items: center;
-    gap: var(--sp-2);
+    /* Pin controls to the name line; overflow (28px hit target) stays centred
+       on it so the toggle never drifts to the middle of a tall connected row. */
+    height: var(--lh-title-sm);
+    gap: var(--sp-3);
   }
   .menu-wrap {
     position: relative;
