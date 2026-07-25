@@ -103,6 +103,14 @@
 
   <link rel="icon" type="image/png" href="favicon.png">
 
+  <!-- Without JS, the scroll-reveal/bar/hero animations never trigger — show final state. -->
+  <noscript><style>
+    .reveal { opacity:1 !important; transform:none !important; }
+    .bar-fill.v1 { width:100% !important; } .bar-fill.v2 { width:16% !important; }
+    .hero .eyebrow, .hero h1, .hero .lede, .hero .cta-row, .hero .hero-meta, .hero-figure { animation:none !important; }
+    .zoom-hint { display:none !important; }
+  </style></noscript>
+
   <script>
     // Set theme before first paint to avoid flash. Dark-first; honor saved pref, else system.
     (function () {
@@ -229,8 +237,15 @@
     .brand img { width:26px; height:26px; border-radius:7px; }
     .brand .ver { font-family:var(--font-mono); font-size:11px; color:var(--accent-text); background:var(--accent-subtle); padding:1px var(--sp-2); border-radius:var(--radius-xs); font-weight:600; }
     .nav-links { margin-left:auto; display:flex; align-items:center; gap:var(--sp-6); }
-    .nav-links a:not(.btn) { color:var(--text-2); font-size:13.5px; font-weight:500; }
+    .nav-links a:not(.btn) { color:var(--text-2); font-size:13.5px; font-weight:500; position:relative; transition:color var(--dur-fast); }
     .nav-links a:not(.btn):hover { color:var(--text); text-decoration:none; }
+    .nav-links a:not(.btn)::after {
+      content:""; position:absolute; left:0; right:0; bottom:-5px; height:2px;
+      background:var(--accent); border-radius:var(--radius-full);
+      transform:scaleX(0); transform-origin:left;
+      transition:transform var(--dur-base) var(--ease-standard);
+    }
+    .nav-links a:not(.btn):hover::after, .nav-links a:not(.btn):focus-visible::after { transform:scaleX(1); }
     .theme-toggle {
       display:inline-flex; align-items:center; justify-content:center;
       width:34px; height:34px; border-radius:var(--radius-sm);
@@ -259,20 +274,36 @@
     .os-inline .icon { width:18px; height:18px; }
 
     /* ---------- Real app screenshots (framed) ----------
-       The raw captures carry a thin strip of terminal/desktop bleed at
-       their edges. Each is placed in an overflow-clipped rounded frame
-       and slightly up-scaled (transform: scale) so the outer ~2.8% —
-       the bleed — is cropped by the frame. transform is resolution-
-       independent, so the crop holds at every responsive width. */
+       Captures are already tightly cropped (no bleed), so images display
+       at their natural aspect ratio — full, un-zoomed — inside a rounded
+       card. width/height attrs on each <img> reserve the box (no CLS). */
     .shot {
+      display:block;
       border:1px solid var(--border); border-radius:var(--radius-lg);
       box-shadow:var(--shadow-3); background:var(--surface);
       overflow:hidden; position:relative;
     }
-    .shot img { display:block; width:100%; height:auto; }
-    /* landscape window shots (891×667): scale 1.06 crops ~19px top/bottom,
-       ~25px left/right — hides the edge bleed, keeps the app title bar. */
-    .shot.win img { transform:scale(1.06); transform-origin:center; }
+    .shot img { display:block; width:100%; height:auto; max-width:100%; transition:transform var(--dur-slow) var(--ease-standard); }
+
+    /* Click-to-enlarge affordance on every screenshot trigger */
+    .zoom { display:block; cursor:zoom-in; border:0; padding:0; margin:0; background:none; width:100%; font:inherit; color:inherit; border-radius:inherit; }
+    .zoom .shot { transition:border-color var(--dur-fast), box-shadow var(--dur-base) var(--ease-standard), transform var(--dur-base) var(--ease-standard); }
+    .zoom:hover .shot, .zoom:focus-visible .shot { border-color:var(--border-strong); box-shadow:var(--shadow-3), 0 0 0 3px var(--accent-subtle); transform:translateY(-3px); }
+    .zoom:active .shot { transform:translateY(-1px); }
+    .zoom:hover .shot img, .zoom:focus-visible .shot img { transform:scale(1.02); }
+    .zoom .zoom-hint {
+      position:absolute; right:var(--sp-3); bottom:var(--sp-3); z-index:2;
+      display:inline-flex; align-items:center; gap:var(--sp-2);
+      height:26px; padding:0 var(--sp-3); border-radius:var(--radius-full);
+      background:color-mix(in srgb, var(--surface-overlay) 88%, transparent);
+      border:1px solid var(--border); color:var(--text-2);
+      font-size:11px; font-weight:600;
+      opacity:0; transform:translateY(4px);
+      transition:opacity var(--dur-base), transform var(--dur-base);
+      pointer-events:none;
+    }
+    .zoom .zoom-hint .icon { width:13px; height:13px; }
+    .zoom:hover .zoom-hint, .zoom:focus-visible .zoom-hint { opacity:1; transform:none; }
 
     /* Hero: backdrop panel so the screenshot reads as a marketing shot */
     .hero-figure { position:relative; margin:0; }
@@ -282,10 +313,42 @@
       filter:blur(8px); z-index:-1; pointer-events:none;
     }
 
-    /* Tray menu (native macOS menu): pre-cropped to the menu card itself
-       (menu-bar strip + desktop bleed removed from the PNG), shown as a
-       floating card with shadow. */
-    .tray-shot { max-width:280px; margin:0 auto; border-radius:var(--radius-md); }
+    /* Tray menu (native macOS menu): a compact floating card. */
+    .tray-shot { max-width:299px; margin:0 auto; border-radius:var(--radius-md); }
+
+    /* ---------- Lightbox ---------- */
+    .lightbox {
+      position:fixed; inset:0; z-index:100; display:none;
+      align-items:center; justify-content:center; padding:var(--sp-7);
+      background:var(--scrim); backdrop-filter:blur(4px);
+    }
+    .lightbox[open], .lightbox.open { display:flex; }
+    .lightbox.open { animation:fadeIn var(--dur-slow) var(--ease-standard); }
+    @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+    .lightbox.closing { animation:fadeOut var(--dur-base) var(--ease-standard) forwards; }
+    @keyframes fadeOut { from { opacity:1; } to { opacity:0; } }
+    .lightbox.closing .lightbox-img { animation:lb-out var(--dur-base) var(--ease-standard) forwards; }
+    @keyframes lb-out { from { opacity:1; transform:none; } to { opacity:0; transform:scale(0.97); } }
+    .lightbox-img {
+      max-width:min(1100px, 96vw); max-height:92vh; width:auto; height:auto;
+      border-radius:var(--radius-md); border:1px solid var(--border-strong);
+      box-shadow:var(--shadow-3); background:var(--surface);
+      animation:lb-in var(--dur-slow) var(--ease-standard);
+    }
+    @keyframes lb-in { from { opacity:0; transform:scale(0.97); } to { opacity:1; transform:none; } }
+    .lightbox-close {
+      position:absolute; top:var(--sp-6); right:var(--sp-6);
+      width:40px; height:40px; border-radius:var(--radius-full);
+      display:inline-flex; align-items:center; justify-content:center;
+      background:var(--surface); border:1px solid var(--border); color:var(--text);
+      cursor:pointer; transition:background var(--dur-fast), border-color var(--dur-fast);
+    }
+    .lightbox-close:hover { background:var(--hover); border-color:var(--border-strong); }
+    .lightbox-close .icon { width:20px; height:20px; }
+    .lightbox-cap {
+      position:absolute; left:0; right:0; bottom:var(--sp-6);
+      text-align:center; color:var(--text-2); font-size:13px; padding:0 var(--sp-7);
+    }
 
     /* Gallery of secondary screens */
     .gallery { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-6); }
@@ -311,16 +374,20 @@
     .bar-row .bl span { color:var(--text-2); font-weight:400; }
     .bar-row .bv { font-family:var(--font-mono); font-size:14px; font-weight:700; }
     .bar-track { height:14px; border-radius:var(--radius-full); background:var(--surface-3); overflow:hidden; }
-    .bar-fill { height:100%; border-radius:var(--radius-full); }
-    .bar-fill.v1 { width:100%; background:var(--status-idle); opacity:0.55; }
-    .bar-fill.v2 { width:16%; background:var(--accent); }
+    .bar-fill { height:100%; border-radius:var(--radius-full); width:0; transition:width 0.9s var(--ease-standard); }
+    .bar-fill.v1 { background:var(--status-idle); opacity:0.55; }
+    .bar-fill.v2 { background:var(--accent); }
+    .bars.in .bar-fill.v1 { width:100%; }
+    .bars.in .bar-fill.v2 { width:16%; transition-delay:0.12s; }
     .ram .kicker { font-family:var(--font-mono); font-size:13px; color:var(--text-2); margin-top:var(--sp-6); }
     .ram .kicker b { color:var(--accent-text); }
 
     /* ---------- Features ---------- */
     .fgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-4); }
-    .fcard { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:var(--sp-6); transition:border-color var(--dur-fast), background var(--dur-fast); }
-    .fcard:hover { border-color:var(--border-strong); background:var(--surface-2); }
+    .fcard { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:var(--sp-6); transition:border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard); }
+    .fcard:hover { border-color:var(--border-strong); background:var(--surface-2); transform:translateY(-3px); box-shadow:var(--shadow-2); }
+    .fcard .ic { transition:transform var(--dur-base) var(--ease-spring), background var(--dur-fast); }
+    .fcard:hover .ic { transform:scale(1.08); }
     .fcard .ic { width:38px; height:38px; border-radius:var(--radius-sm); background:var(--accent-subtle); color:var(--accent); display:flex; align-items:center; justify-content:center; margin-bottom:var(--sp-5); }
     .fcard .ic .icon { width:19px; height:19px; }
     .fcard h3 { font-size:15px; font-weight:600; margin-bottom:var(--sp-2); }
@@ -339,8 +406,8 @@
 
     /* ---------- Download ---------- */
     .dl-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-4); margin-bottom:var(--sp-6); }
-    .dl-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:var(--sp-6); display:flex; flex-direction:column; transition:border-color var(--dur-fast); }
-    .dl-card:hover { border-color:var(--border-strong); }
+    .dl-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:var(--sp-6); display:flex; flex-direction:column; transition:border-color var(--dur-fast), transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard); }
+    .dl-card:hover { border-color:var(--border-strong); transform:translateY(-3px); box-shadow:var(--shadow-2); }
     .dl-card.detected { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-subtle); }
     .dl-os { display:flex; align-items:center; gap:var(--sp-3); }
     .dl-os .icon { width:22px; height:22px; color:var(--text); }
@@ -384,6 +451,8 @@
     .faq { border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); margin-bottom:var(--sp-3); overflow:hidden; }
     .faq summary { list-style:none; cursor:pointer; padding:var(--sp-5) var(--sp-6); font-size:15px; font-weight:600; display:flex; align-items:center; justify-content:space-between; gap:var(--sp-4); }
     .faq summary::-webkit-details-marker { display:none; }
+    .faq summary .q-text { flex:1; min-width:0; }
+    .faq summary .q-text code { font-family:var(--font-mono); font-size:0.88em; background:var(--surface-2); border-radius:var(--radius-xs); padding:1px var(--sp-2); color:var(--accent-text); }
     .faq summary .icon { width:18px; height:18px; color:var(--text-2); transition:transform var(--dur-base); flex-shrink:0; }
     .faq[open] summary .icon { transform:rotate(180deg); color:var(--accent); }
     .faq p { padding:0 var(--sp-6) var(--sp-5); font-size:14px; color:var(--text-2); line-height:1.7; }
@@ -402,6 +471,21 @@
     /* ---------- Reveal ---------- */
     .reveal { opacity:0; transform:translateY(16px); transition:opacity 0.5s var(--ease-standard), transform 0.5s var(--ease-standard); }
     .reveal.in { opacity:1; transform:none; }
+    /* staggered entrance within a group */
+    .fgrid .reveal:nth-child(2), .gallery .reveal:nth-child(2), .dl-grid .reveal:nth-child(2), .fgrid .reveal:nth-child(4) { transition-delay:70ms; }
+    .fgrid .reveal:nth-child(3), .gallery .reveal:nth-child(3), .dl-grid .reveal:nth-child(3), .fgrid .reveal:nth-child(5) { transition-delay:140ms; }
+    .fgrid .reveal:nth-child(6) { transition-delay:210ms; }
+
+    /* hero entrance on load (text fades/slides; the LCP screenshot only
+       slides — opacity stays 1 so first paint isn't delayed) */
+    @keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+    @keyframes riseIn { from { transform:translateY(12px); } to { transform:none; } }
+    .hero .eyebrow  { animation:fadeUp 0.5s var(--ease-standard) both; }
+    .hero h1        { animation:fadeUp 0.5s var(--ease-standard) 0.06s both; }
+    .hero .lede     { animation:fadeUp 0.5s var(--ease-standard) 0.12s both; }
+    .hero .cta-row  { animation:fadeUp 0.5s var(--ease-standard) 0.18s both; }
+    .hero .hero-meta{ animation:fadeUp 0.5s var(--ease-standard) 0.24s both; }
+    .hero-figure    { animation:riseIn 0.6s var(--ease-standard) 0.1s both; }
 
     /* ---------- Responsive ---------- */
     @media (max-width:960px) {
@@ -429,7 +513,12 @@
     @media (prefers-reduced-motion:reduce) {
       html { scroll-behavior:auto; }
       *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
-      .reveal { opacity:1; transform:none; }
+      .reveal { opacity:1 !important; transform:none !important; }
+      /* no translate/scale on hover/entrance — keep colour/shadow cues only */
+      .fcard:hover, .dl-card:hover, .zoom:hover .shot, .zoom:focus-visible .shot,
+      .zoom:active .shot, .zoom:hover .shot img, .zoom:focus-visible .shot img,
+      .fcard:hover .ic { transform:none !important; }
+      .hero .eyebrow, .hero h1, .hero .lede, .hero .cta-row, .hero .hero-meta, .hero-figure { animation:none !important; }
     }
   </style>
 </head>
@@ -454,6 +543,8 @@
     <symbol id="i-linux" viewBox="0 0 24 24"><path d="M9 3a3 3 0 0 1 6 0c0 1.5-.5 2.3-.5 3.5 0 1 .8 1.7 1.5 3 1 1.8 2 3.4 2 5.5 0 2-1 3.5-1.8 4.7-.4.6-1 .8-1.6.5-.5-.2-.8-.8-1.4-.8h-3.4c-.6 0-.9.6-1.4.8-.6.3-1.2.1-1.6-.5C4.9 18.5 4 17 4 15c0-2.1 1-3.7 2-5.5.7-1.3 1.5-2 1.5-3C7.5 5.3 7 4.5 9 3Z"/><path d="M10 8h.01M14 8h.01"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M16 21h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></symbol>
     <symbol id="i-chevron-down" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
     <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
@@ -530,11 +621,16 @@
 
         <!-- Real app screenshot: the Connections tab -->
         <figure class="hero-figure">
-          <div class="shot win">
-            <img src="screenshots/connections.png" width="891" height="667"
-                 loading="eager" fetchpriority="high" decoding="async"
-                 alt="Tunnel Pilot's Connections window: a sidebar with Connections, Activity and Settings; a toolbar with Filter, Tag, New group and Add; and SSH tunnels grouped under Production, Staging and Ungrouped — each row shows a status dot, a name with tags, and a 127.0.0.1 local-to-remote forwarding route with an on/off toggle.">
-          </div>
+          <button type="button" class="zoom" data-full="screenshots/connections.png"
+                  data-cap="The Connections tab — SSH tunnels grouped by environment"
+                  aria-label="Enlarge the Connections screenshot">
+            <span class="shot">
+              <img src="screenshots/connections.png" width="862" height="645"
+                   loading="eager" fetchpriority="high" decoding="async"
+                   alt="Tunnel Pilot's Connections window: a sidebar with Connections, Activity and Settings; a toolbar with Filter, Tag, New group and Add; and SSH tunnels grouped under Production, Staging and Ungrouped — each row shows a status dot, a name with tags, and a 127.0.0.1 local-to-remote forwarding route with an on/off toggle.">
+              <span class="zoom-hint"><svg class="icon" aria-hidden="true"><use href="#i-maximize"/></svg> Click to enlarge</span>
+            </span>
+          </button>
         </figure>
       </div>
     </section>
@@ -628,11 +724,16 @@
           </ul>
         </div>
         <div class="reveal">
-          <figure class="shot tray-shot">
-            <img src="screenshots/tray-menu.png" width="267" height="464"
-                 loading="lazy" decoding="async"
-                 alt="Tunnel Pilot's native macOS menu-bar menu: a 'Tunnel Pilot' title with a status line, tunnels grouped under Production (Postgres :5432, Redis Cache :6379, Analytics DB :5433), Staging (Postgres (staging) :6432, Elasticsearch :9200) and Ungrouped (Grafana :3000, Prometheus :9090), then Start All, Settings ⌘comma, Check for Updates ⌘U, and Quit ⌘Q.">
-          </figure>
+          <button type="button" class="zoom tray-shot" data-full="screenshots/tray-menu.png"
+                  data-cap="The native macOS menu-bar menu"
+                  aria-label="Enlarge the menu-bar menu screenshot">
+            <span class="shot tray-shot">
+              <img src="screenshots/tray-menu.png" width="299" height="424"
+                   loading="lazy" decoding="async"
+                   alt="Tunnel Pilot's native macOS menu-bar menu: a 'Tunnel Pilot' title with a status line, tunnels grouped under Production (Postgres :5432, Redis Cache :6379, Analytics DB :5433), Staging (Postgres (staging) :6432, Elasticsearch :9200) and Ungrouped (Grafana :3000, Prometheus :9090), then Start All, Settings ⌘comma, Check for Updates ⌘U, and Quit ⌘Q.">
+              <span class="zoom-hint"><svg class="icon" aria-hidden="true"><use href="#i-maximize"/></svg> Click to enlarge</span>
+            </span>
+          </button>
         </div>
       </div>
     </section>
@@ -651,11 +752,16 @@
           </ul>
         </div>
         <div class="reveal">
-          <figure class="shot win" style="margin:0;">
-            <img src="screenshots/command-palette.png" width="891" height="667"
-                 loading="lazy" decoding="async"
-                 alt="Tunnel Pilot's ⌘K command palette open over the Connections window: a 'Search tunnels and actions' field, a TUNNELS list where each tunnel shows its 127.0.0.1 route and a Connect action, an ACTIONS section with 'Add tunnel ⌘N', and a footer of keyboard hints — navigate, run, edit, actions, esc close.">
-          </figure>
+          <button type="button" class="zoom" data-full="screenshots/command-palette.png"
+                  data-cap="The ⌘K command palette"
+                  aria-label="Enlarge the command palette screenshot">
+            <span class="shot">
+              <img src="screenshots/command-palette.png" width="862" height="643"
+                   loading="lazy" decoding="async"
+                   alt="Tunnel Pilot's ⌘K command palette open over the Connections window: a 'Search tunnels and actions' field, a TUNNELS list where each tunnel shows its 127.0.0.1 route and a Connect action, an ACTIONS section with 'Add tunnel ⌘N', and a footer of keyboard hints — navigate, run, edit, actions, esc close.">
+              <span class="zoom-hint"><svg class="icon" aria-hidden="true"><use href="#i-maximize"/></svg> Click to enlarge</span>
+            </span>
+          </button>
         </div>
       </div>
     </section>
@@ -670,27 +776,39 @@
         </div>
         <div class="gallery">
           <figure class="gcard reveal">
-            <div class="shot win">
-              <img src="screenshots/add-tunnel.png" width="891" height="667"
-                   loading="lazy" decoding="async"
-                   alt="Tunnel Pilot's Add tunnel dialog with General and Advanced tabs: a Name field, a Group & Tags section (Group set to Ungrouped, a free-form Tags field), and an SSH Server section with Host (bastion.example.com), Port 22, Username, and Password / Identity file authentication.">
-            </div>
+            <button type="button" class="zoom" data-full="screenshots/add-tunnel.png"
+                    data-cap="Add tunnel dialog" aria-label="Enlarge the Add tunnel dialog screenshot">
+              <span class="shot">
+                <img src="screenshots/add-tunnel.png" width="860" height="641"
+                     loading="lazy" decoding="async"
+                     alt="Tunnel Pilot's Add tunnel dialog with General and Advanced tabs: a Name field, a Group & Tags section (Group set to Ungrouped, a free-form Tags field), and an SSH Server section with Host (bastion.example.com), Port 22, Username, and Password / Identity file authentication.">
+                <span class="zoom-hint"><svg class="icon" aria-hidden="true"><use href="#i-maximize"/></svg> Enlarge</span>
+              </span>
+            </button>
             <figcaption><b>Add a tunnel</b><span>Name it, drop it in a group, add tags, point it at an SSH server. Password or identity-file auth.</span></figcaption>
           </figure>
           <figure class="gcard reveal">
-            <div class="shot win">
-              <img src="screenshots/settings.png" width="891" height="667"
-                   loading="lazy" decoding="async"
-                   alt="Tunnel Pilot's Settings screen: Startup (Launch at login, Show in Dock / taskbar), Connections (Desktop notifications, Auto-reconnect with Retries and Delay controls), and Updates (Automatically check for updates, with a Check now button).">
-            </div>
+            <button type="button" class="zoom" data-full="screenshots/settings.png"
+                    data-cap="Settings" aria-label="Enlarge the Settings screenshot">
+              <span class="shot">
+                <img src="screenshots/settings.png" width="863" height="645"
+                     loading="lazy" decoding="async"
+                     alt="Tunnel Pilot's Settings screen: Startup (Launch at login, Show in Dock / taskbar), Connections (Desktop notifications, Auto-reconnect with Retries and Delay controls), and Updates (Automatically check for updates, with a Check now button).">
+                <span class="zoom-hint"><svg class="icon" aria-hidden="true"><use href="#i-maximize"/></svg> Enlarge</span>
+              </span>
+            </button>
             <figcaption><b>Settings that matter</b><span>Launch at login, Dock visibility, desktop notifications, auto-reconnect retries and delay, and update checks.</span></figcaption>
           </figure>
           <figure class="gcard reveal">
-            <div class="shot win">
-              <img src="screenshots/activity.png" width="891" height="667"
-                   loading="lazy" decoding="async"
-                   alt="Tunnel Pilot's Activity log: timestamped entries with level tags (WARN, INFO), a level filter, a search field, and Copy all and Clear actions.">
-            </div>
+            <button type="button" class="zoom" data-full="screenshots/activity.png"
+                    data-cap="Activity log" aria-label="Enlarge the Activity log screenshot">
+              <span class="shot">
+                <img src="screenshots/activity.png" width="862" height="641"
+                     loading="lazy" decoding="async"
+                     alt="Tunnel Pilot's Activity log: timestamped entries with level tags (WARN, INFO), a level filter, a search field, and Copy all and Clear actions.">
+                <span class="zoom-hint"><svg class="icon" aria-hidden="true"><use href="#i-maximize"/></svg> Enlarge</span>
+              </span>
+            </button>
             <figcaption><b>Activity log</b><span>Filter by level, search, and copy the log — so a connection issue is never a mystery.</span></figcaption>
           </figure>
         </div>
@@ -842,27 +960,27 @@
         </div>
         <div class="faq-list">
           <details class="faq reveal">
-            <summary>What is SSH local port forwarding? <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <summary><span class="q-text">What is SSH local port forwarding?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
             <p>SSH local port forwarding (<code>ssh -L</code>) creates a secure encrypted tunnel that forwards traffic from a local port on your machine to a remote host through an SSH server. It's how developers reach remote databases, internal dashboards, admin panels, or any TCP service behind a bastion &mdash; without exposing it to the public internet. Tunnel Pilot gives you a GUI to manage those tunnels instead of retyping terminal commands.</p>
           </details>
           <details class="faq reveal">
-            <summary>How lightweight is version 2, really? <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <summary><span class="q-text">How lightweight is version 2, really?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
             <p>Version 2 is rewritten in Rust + Tauri. It renders through the OS webview only when the window is open and does its real work in a lean Rust core, so it idles in roughly <code>15–30 MB</code> of RAM while sitting in the tray &mdash; versus the old Flutter build's ~100–200 MB. That footprint is measured with the window hidden after 60s idle, which is how the app spends 99% of its life.</p>
           </details>
           <details class="faq reveal">
-            <summary>Why is the app unsigned — is it safe? <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <summary><span class="q-text">Why is the app unsigned — is it safe?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
             <p>Tunnel Pilot is open-source and unfunded, and OS code-signing certificates cost money (Apple Developer ID ~$99/yr, Windows certs cost hundreds), so the installer isn't code-signed. Your OS will warn on first launch: on macOS right-click &rarr; Open; on Windows click More info &rarr; Run anyway. Everything after that &mdash; the automatic updates &mdash; is cryptographically signed and verified with minisign.</p>
           </details>
           <details class="faq reveal">
-            <summary>Will I lose my tunnels upgrading from v1? <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <summary><span class="q-text">Will I lose my tunnels upgrading from v1?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
             <p>No. Your configuration lives in the OS app-support directory, outside the app bundle, so replacing the app never touches it. On first launch, v2 detects your v1 config and imports it automatically, and moves saved passwords into your OS keychain. See the upgrade steps above for the one-time per-OS install.</p>
           </details>
           <details class="faq reveal">
-            <summary>How is this different from typing <code>ssh -L</code>? <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <summary><span class="q-text">How is this different from typing <code>ssh -L</code>?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
             <p>Manual <code>ssh -L</code> is fine for one-offs. Tunnel Pilot saves your definitions, toggles them with one click, shows live status and stats, auto-reconnects across drops, organizes forwards into groups/tags, and gives you a Cmd/Ctrl+K command palette. It's the GUI the command deserves when tunneling is part of your daily workflow.</p>
           </details>
           <details class="faq reveal">
-            <summary>Is Tunnel Pilot free and open source? <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <summary><span class="q-text">Is Tunnel Pilot free and open source?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
             <p>Yes &mdash; completely free and open source under the MIT License. No paid plans, subscriptions, telemetry, or accounts. The full source is on GitHub; build it yourself or download prebuilt releases for macOS, Windows, and Linux.</p>
           </details>
         </div>
@@ -870,6 +988,15 @@
     </section>
 
   </main>
+
+  <!-- Lightbox overlay (screenshot zoom) -->
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot preview">
+    <button type="button" class="lightbox-close" id="lightboxClose" aria-label="Close preview">
+      <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+    </button>
+    <img class="lightbox-img" id="lightboxImg" src="" alt="">
+    <p class="lightbox-cap" id="lightboxCap"></p>
+  </div>
 
   <footer>
     <div class="wrap foot">
@@ -951,6 +1078,55 @@
       });
     }, { threshold: 0.12 });
     document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+
+    // ---- Lightbox (click-to-enlarge screenshots) ----
+    (function () {
+      var lb = document.getElementById('lightbox');
+      var lbImg = document.getElementById('lightboxImg');
+      var lbCap = document.getElementById('lightboxCap');
+      var lbClose = document.getElementById('lightboxClose');
+      var lastFocus = null;
+
+      function openLb(src, alt, cap) {
+        lastFocus = document.activeElement;
+        lbImg.setAttribute('src', src);
+        lbImg.setAttribute('alt', alt || '');
+        lbCap.textContent = cap || '';
+        lb.classList.add('open');
+        document.body.style.overflow = 'hidden';
+        lbClose.focus();
+        document.addEventListener('keydown', onKey);
+      }
+      var reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      function finishClose() {
+        lb.classList.remove('open', 'closing');
+        lbImg.setAttribute('src', '');
+        document.body.style.overflow = '';
+        if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+      }
+      function closeLb() {
+        document.removeEventListener('keydown', onKey);
+        if (reduceMq.matches) { finishClose(); return; }
+        lb.classList.add('closing');
+        var done = false;
+        function end() { if (done) return; done = true; lb.removeEventListener('animationend', end); finishClose(); }
+        lb.addEventListener('animationend', end);
+        setTimeout(end, 280); // fallback if animationend doesn't fire
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); closeLb(); }
+        else if (e.key === 'Tab') { e.preventDefault(); lbClose.focus(); } // trap: only close is focusable
+      }
+
+      document.querySelectorAll('.zoom').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var img = btn.querySelector('img');
+          openLb(btn.getAttribute('data-full'), img ? img.getAttribute('alt') : '', btn.getAttribute('data-cap'));
+        });
+      });
+      lbClose.addEventListener('click', closeLb);
+      lb.addEventListener('click', function (e) { if (e.target === lb) closeLb(); });
+    })();
   </script>
 </body>
 </html>
