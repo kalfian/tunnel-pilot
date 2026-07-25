@@ -20,6 +20,15 @@
 //!   static icon set while transitional, and every frame is painted on the
 //!   AppKit main thread with a guard that drops any frame landing after the
 //!   ticker went idle — so it can never overwrite the freshly-settled icon.
+//!
+//! ## App Nap (macOS) — why the tick used to lag
+//! Tunnel Pilot runs as a background menu-bar (Accessory) agent. macOS App Nap
+//! coalesces such an app's timers and throttles its main run loop, so the tokio
+//! tick fired late and the `run_on_main_thread` icon paints landed slower than
+//! [`FRAME_INTERVAL`] — the animation looked far slower than its nominal rate.
+//! While the ticker is active it holds an `NSProcessInfo` activity assertion
+//! ([`app_nap`]) that disables App Nap (without keeping the system awake), so the
+//! tick stays on time; the assertion is released the moment it goes idle.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -74,13 +83,30 @@ impl ConnectingAnimator {
         let wake = self.wake.clone();
         tauri::async_runtime::spawn(async move {
             let mut frame = 0usize;
+            // Held (macOS) only while ticking so App Nap can't coalesce the timer
+            // / throttle the paints; dropped on idle to release the assertion.
+            #[cfg(target_os = "macos")]
+            let mut nap: Option<app_nap::AppNapGuard> = None;
+            #[cfg(target_os = "macos")]
+            let mut nap_tried = false;
             loop {
                 if !active.load(Ordering::SeqCst) {
                     // Idle: reset so the next connect starts at one dot, then
                     // block until woken (no spin, no wasted wakeups).
+                    #[cfg(target_os = "macos")]
+                    {
+                        nap = None;
+                        nap_tried = false;
+                    }
                     frame = 0;
                     wake.notified().await;
                     continue;
+                }
+                // Disable App Nap for the duration of this connect (attempt once).
+                #[cfg(target_os = "macos")]
+                if nap.is_none() && !nap_tried {
+                    nap = app_nap::AppNapGuard::begin("Tunnel Pilot tray connecting animation");
+                    nap_tried = true;
                 }
                 paint_frame(&app, &active, frame);
                 frame = (frame + 1) % super::icon::CONNECTING_FRAMES;
@@ -118,5 +144,75 @@ fn paint_frame(app: &AppHandle, active: &Arc<AtomicBool>, frame: usize) {
     });
     if let Err(e) = dispatch {
         tracing::error!(error = %e, "failed to dispatch connecting frame to main thread");
+    }
+}
+
+/// macOS App Nap suppression via an `NSProcessInfo` activity assertion. Keeping
+/// this alive stops App Nap from coalescing the tick timer / throttling the tray
+/// paints while a tunnel is connecting. A minimal `objc2` `msg_send!` shim
+/// (objc2 is already in the tree via Tauri); the activity API is documented as
+/// thread-safe, so we can begin/end it from the ticker task's thread.
+#[cfg(target_os = "macos")]
+mod app_nap {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    /// `NSActivityUserInitiated & ~NSActivityIdleSystemSleepDisabled` — prevents
+    /// App Nap (so periodic tray updates stay on time) WITHOUT keeping the system
+    /// awake / display on.
+    const NS_ACTIVITY_USER_INITIATED_ALLOWING_IDLE_SLEEP: u64 = 0x00FF_FFFF;
+
+    /// Holds one `NSProcessInfo` activity assertion; releases it on drop.
+    pub struct AppNapGuard {
+        /// Retained activity token returned by `beginActivityWithOptions:reason:`.
+        token: *mut AnyObject,
+    }
+
+    // The token is an ObjC object we own (retained). NSProcessInfo activity
+    // objects are thread-safe and we only retain/endActivity/release it, so
+    // moving the guard onto the async task's thread is sound.
+    unsafe impl Send for AppNapGuard {}
+
+    impl AppNapGuard {
+        /// Begin an activity assertion; `None` if the ObjC calls yield null.
+        pub fn begin(reason: &str) -> Option<Self> {
+            let c_reason = std::ffi::CString::new(reason).ok()?;
+            // Scope the autorelease pool so the autoreleased NSString + activity
+            // token don't leak on this (non-main) thread; we `retain` the token
+            // inside the pool so it survives the drain.
+            objc2::rc::autoreleasepool(|_| unsafe {
+                let pi: *mut AnyObject = msg_send![class!(NSProcessInfo), processInfo];
+                if pi.is_null() {
+                    return None;
+                }
+                let reason_ns: *mut AnyObject =
+                    msg_send![class!(NSString), stringWithUTF8String: c_reason.as_ptr()];
+                if reason_ns.is_null() {
+                    return None;
+                }
+                let token: *mut AnyObject = msg_send![
+                    pi,
+                    beginActivityWithOptions: NS_ACTIVITY_USER_INITIATED_ALLOWING_IDLE_SLEEP,
+                    reason: reason_ns,
+                ];
+                if token.is_null() {
+                    return None;
+                }
+                let token: *mut AnyObject = msg_send![token, retain];
+                Some(Self { token })
+            })
+        }
+    }
+
+    impl Drop for AppNapGuard {
+        fn drop(&mut self) {
+            objc2::rc::autoreleasepool(|_| unsafe {
+                let pi: *mut AnyObject = msg_send![class!(NSProcessInfo), processInfo];
+                if !pi.is_null() {
+                    let _: () = msg_send![pi, endActivity: self.token];
+                }
+                let _: () = msg_send![self.token, release];
+            });
+        }
     }
 }
