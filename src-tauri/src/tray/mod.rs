@@ -9,6 +9,7 @@
 //! The dynamic count icon (idle grey / 1–9 badge) and the menu itself are kept in
 //! sync with `tunnel://status` + `update://status` by [`menu::spawn_tray_sync`].
 
+pub mod animation;
 pub mod icon;
 pub mod menu;
 

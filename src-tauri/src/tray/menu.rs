@@ -1,6 +1,6 @@
 //! Tray menu build + debounced rebuild-on-change, styled after Tailscale /
 //! Laravel Herd's native menu-bar menu: a disabled title header ("Tunnel Pilot"
-//! + an "N of M connected" status line) at the top, an update-notice slot, per-
+//! plus an "N of M connected" status line) at the top, an update-notice slot, per-
 //! tunnel rows with a colored status-dot leading icon bucketed into greyed group
 //! section headers (`PRODUCTION` / `STAGING` / `Ungrouped`; a flat list when
 //! nothing is grouped), conditional bulk Start/Stop All, and an actions footer
@@ -29,6 +29,7 @@ use tauri::menu::{IconMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{AppHandle, Listener, Manager, Wry};
 use tokio::sync::Notify;
 
+use super::animation::ConnectingAnimator;
 use crate::events;
 use crate::state::models::{ForwardStatus, TunnelGroup, UpdateStatus};
 use crate::state::AppState;
@@ -277,6 +278,18 @@ pub fn connected_count(tunnels: &[TunnelState]) -> usize {
         .iter()
         .filter(|t| t.status == ForwardStatus::Connected)
         .count()
+}
+
+/// Whether any tunnel is in a transitional state (connecting or disconnecting)
+/// — drives the tray's connecting-pulse indicator, which takes precedence over
+/// the connected-count badge so the user always sees activity.
+pub fn has_transitional(tunnels: &[TunnelState]) -> bool {
+    tunnels.iter().any(|t| {
+        matches!(
+            t.status,
+            ForwardStatus::Connecting | ForwardStatus::Disconnecting
+        )
+    })
 }
 
 /// The Tailscale-style header status line: `"No active tunnels"` when none are
@@ -646,16 +659,35 @@ fn gather_update_notice(app: &AppHandle) -> Option<UpdateNotice> {
 }
 
 /// Rebuild the tray icon + menu from current state, on the main thread.
-pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>) {
+///
+/// Icon precedence: any transitional tunnel (connecting/disconnecting) → the
+/// amber connecting-pulse (owned by `animator`, so the static icon is *not*
+/// repainted here); else the connected-count badge / idle. Starting/stopping
+/// the pulse is idempotent, so this can be called on every status change.
+pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>, animator: &ConnectingAnimator) {
     let tunnels = gather_tunnel_states(state);
     let groups = state.groups_snapshot();
     let count = connected_count(&tunnels);
+    let transitional = has_transitional(&tunnels);
     let update_notice = gather_update_notice(app);
     let model = build_menu_model(&tunnels, &groups, update_notice);
 
+    // Drive the connecting-pulse before dispatching the (menu-only when
+    // connecting) main-thread paint. When settling, `stop()` first so the guard
+    // in `paint_frame` drops any late in-flight amber frame.
+    if transitional {
+        animator.start(app.clone());
+    } else {
+        animator.stop();
+    }
+
     let app_main = app.clone();
     let dispatch = app.run_on_main_thread(move || {
-        super::icon::update_tray_icon(&app_main, super::TRAY_ID, count);
+        // While connecting the pulse task owns the icon; only settle the static
+        // count/idle icon when nothing is transitional.
+        if !transitional {
+            super::icon::update_tray_icon(&app_main, super::TRAY_ID, count);
+        }
         match build_tauri_menu(&app_main, &model) {
             Ok(menu) => {
                 if let Some(tray) = app_main.tray_by_id(super::TRAY_ID) {
@@ -678,6 +710,9 @@ pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>) {
 /// debounced ~100 ms so a bulk operation coalesces into one rebuild.
 pub fn spawn_tray_sync(app: AppHandle, state: Arc<AppState>) {
     let notify = Arc::new(Notify::new());
+    // Single shared animator: the debounce loop and the initial paint drive the
+    // same guarded pulse task, so it can never double-run.
+    let animator = ConnectingAnimator::new();
 
     // Any tunnel status transition marks the tray dirty.
     let dirty = notify.clone();
@@ -696,16 +731,17 @@ pub fn spawn_tray_sync(app: AppHandle, state: Arc<AppState>) {
     // further changes), then do exactly one rebuild.
     let debounce_app = app.clone();
     let debounce_state = state.clone();
+    let debounce_animator = animator.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             notify.notified().await;
             tokio::time::sleep(REBUILD_DEBOUNCE).await;
-            rebuild_now(&debounce_app, &debounce_state);
+            rebuild_now(&debounce_app, &debounce_state, &debounce_animator);
         }
     });
 
     // Initial build so the menu reflects the boot state immediately.
-    rebuild_now(&app, &state);
+    rebuild_now(&app, &state, &animator);
 }
 
 #[cfg(test)]
@@ -899,6 +935,31 @@ mod tests {
             ts("d", ForwardStatus::Error),
         ];
         assert_eq!(connected_count(&tunnels), 2);
+    }
+
+    #[test]
+    fn has_transitional_detects_connecting_and_disconnecting() {
+        // No transitional tunnels → false (connected/error/disconnected only).
+        let settled = [
+            ts("a", ForwardStatus::Connected),
+            ts("b", ForwardStatus::Error),
+            ts("c", ForwardStatus::Disconnected),
+        ];
+        assert!(!has_transitional(&settled));
+
+        // A single connecting tunnel flips it on, even amid connected ones.
+        let connecting = [
+            ts("a", ForwardStatus::Connected),
+            ts("b", ForwardStatus::Connecting),
+        ];
+        assert!(has_transitional(&connecting));
+
+        // Disconnecting is transitional too.
+        let disconnecting = [ts("a", ForwardStatus::Disconnecting)];
+        assert!(has_transitional(&disconnecting));
+
+        // Empty set → nothing transitional.
+        assert!(!has_transitional(&[]));
     }
 
     // --- header status summary ---------------------------------------------

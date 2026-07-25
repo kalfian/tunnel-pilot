@@ -23,13 +23,18 @@ use crate::state::models::ForwardStatus;
 /// The connected-count value at which the badge clamps (spec 03 §10).
 pub const MAX_BADGE: usize = 9;
 
-/// Which tray icon asset to display for a given connected-tunnel count.
+/// Which tray icon asset to display for the current tunnel picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayIcon {
-    /// No tunnels connected — the grey idle icon.
+    /// No tunnels connected and nothing transitional — the grey idle icon.
     Idle,
-    /// One or more connected — the numbered badge (1..=9, clamped).
+    /// One or more connected (and nothing transitional) — the numbered badge
+    /// (1..=9, clamped).
     Badge(u8),
+    /// At least one tunnel is in a transitional state (connecting /
+    /// disconnecting). Rendered as the amber pulse animation; this variant maps
+    /// to the first (fully-opaque) frame when a single still is needed.
+    Connecting,
 }
 
 /// Pure count→asset selection (spec 03 §10): `0 → Idle`, otherwise the badge
@@ -41,6 +46,21 @@ pub fn tray_icon_for_count(count: usize) -> TrayIcon {
         TrayIcon::Badge(count.min(MAX_BADGE) as u8)
     }
 }
+
+/// Pure tray-icon precedence including the transitional state (spec 03 §10 +
+/// connecting indicator): a transitional tunnel (connecting/disconnecting) wins
+/// over the connected count so the user always sees "something is working";
+/// otherwise fall back to the connected-count badge / idle. Unit-tested.
+pub fn tray_icon_for_state(transitional: bool, connected: usize) -> TrayIcon {
+    if transitional {
+        TrayIcon::Connecting
+    } else {
+        tray_icon_for_count(connected)
+    }
+}
+
+/// Number of frames in the amber connecting-pulse animation.
+pub const CONNECTING_FRAMES: usize = 4;
 
 const IDLE_PNG: &[u8] = include_bytes!("../../../assets/icons/tray_icon_idle.png");
 
@@ -57,6 +77,16 @@ const BADGE_PNG: [&[u8]; MAX_BADGE] = [
     include_bytes!("../../../assets/icons/tray_icon_9.png"),
 ];
 
+/// Amber connecting-pulse frames (index = frame). Non-template: amber is an
+/// intentional status color that must survive the light/dark menu-bar tint,
+/// mirroring the amber "connecting" dot in the menu.
+const CONNECTING_PNG: [&[u8]; CONNECTING_FRAMES] = [
+    include_bytes!("../../../assets/icons/tray_icon_connecting_0.png"),
+    include_bytes!("../../../assets/icons/tray_icon_connecting_1.png"),
+    include_bytes!("../../../assets/icons/tray_icon_connecting_2.png"),
+    include_bytes!("../../../assets/icons/tray_icon_connecting_3.png"),
+];
+
 /// The embedded PNG bytes backing a [`TrayIcon`].
 fn png_bytes(icon: TrayIcon) -> &'static [u8] {
     match icon {
@@ -68,13 +98,25 @@ fn png_bytes(icon: TrayIcon) -> &'static [u8] {
             let idx = (n as usize).clamp(1, MAX_BADGE) - 1;
             BADGE_PNG[idx]
         }
+        // A single still of the connecting state = the fully-opaque first frame.
+        TrayIcon::Connecting => CONNECTING_PNG[0],
     }
+}
+
+/// The embedded PNG bytes for connecting-pulse `frame` (wraps defensively).
+fn connecting_bytes(frame: usize) -> &'static [u8] {
+    CONNECTING_PNG[frame % CONNECTING_FRAMES]
 }
 
 /// Decode the embedded PNG for `icon` into a Tauri [`Image`] (needs the
 /// `image-png` cargo feature, enabled in `Cargo.toml`).
 pub fn load_image(icon: TrayIcon) -> tauri::Result<Image<'static>> {
     Image::from_bytes(png_bytes(icon))
+}
+
+/// Decode the connecting-pulse `frame` PNG into a Tauri [`Image`].
+pub fn load_connecting_frame(frame: usize) -> tauri::Result<Image<'static>> {
+    Image::from_bytes(connecting_bytes(frame))
 }
 
 // --- per-tunnel status dots ------------------------------------------------
@@ -148,6 +190,31 @@ pub fn update_tray_icon(app: &tauri::AppHandle, tray_id: &str, count: usize) {
     }
 }
 
+/// Paint one amber connecting-pulse `frame` on the tray. The frame is drawn
+/// **non-template** (`set_icon_as_template(false)` on macOS) so the amber status
+/// color survives the menu-bar tint. Must run on the main thread (AppKit) —
+/// callers dispatch via `AppHandle::run_on_main_thread`. Failures are logged,
+/// never fatal.
+pub fn set_connecting_frame(app: &tauri::AppHandle, tray_id: &str, frame: usize) {
+    let Some(tray) = app.tray_by_id(tray_id) else {
+        tracing::warn!(tray_id, "tray icon not found; cannot set connecting frame");
+        return;
+    };
+    match load_connecting_frame(frame) {
+        Ok(img) => {
+            if let Err(e) = tray.set_icon(Some(img)) {
+                tracing::error!(error = %e, "failed to set connecting tray icon");
+            }
+            // Amber is a status color: draw it as-is, not tinted by the menu bar.
+            #[cfg(target_os = "macos")]
+            if let Err(e) = tray.set_icon_as_template(false) {
+                tracing::error!(error = %e, "failed to clear template for connecting icon");
+            }
+        }
+        Err(e) => tracing::error!(error = %e, frame, "failed to decode connecting frame PNG"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,6 +247,41 @@ mod tests {
             let bytes = png_bytes(tray_icon_for_count(n));
             assert!(!bytes.is_empty(), "badge {n} has no bytes");
         }
+    }
+
+    #[test]
+    fn transitional_state_wins_over_count() {
+        // Connecting/disconnecting always shows the connecting indicator,
+        // regardless of how many are connected — the user must see activity.
+        assert_eq!(tray_icon_for_state(true, 0), TrayIcon::Connecting);
+        assert_eq!(tray_icon_for_state(true, 1), TrayIcon::Connecting);
+        assert_eq!(tray_icon_for_state(true, 9), TrayIcon::Connecting);
+        assert_eq!(tray_icon_for_state(true, 100), TrayIcon::Connecting);
+    }
+
+    #[test]
+    fn non_transitional_falls_back_to_count() {
+        // With nothing transitional it is exactly the count badge / idle.
+        assert_eq!(tray_icon_for_state(false, 0), TrayIcon::Idle);
+        assert_eq!(tray_icon_for_state(false, 1), TrayIcon::Badge(1));
+        assert_eq!(tray_icon_for_state(false, 5), TrayIcon::Badge(5));
+        assert_eq!(tray_icon_for_state(false, 42), TrayIcon::Badge(9));
+    }
+
+    #[test]
+    fn every_connecting_frame_has_embedded_bytes() {
+        for f in 0..CONNECTING_FRAMES {
+            assert!(!connecting_bytes(f).is_empty(), "frame {f} has no bytes");
+        }
+        // The Connecting still resolves to the first frame's bytes.
+        assert_eq!(png_bytes(TrayIcon::Connecting), connecting_bytes(0));
+    }
+
+    #[test]
+    fn connecting_frame_index_wraps() {
+        // The animator advances with modulo; an over-range frame must not panic.
+        assert_eq!(connecting_bytes(CONNECTING_FRAMES), connecting_bytes(0));
+        assert_eq!(connecting_bytes(CONNECTING_FRAMES + 1), connecting_bytes(1));
     }
 
     #[test]
