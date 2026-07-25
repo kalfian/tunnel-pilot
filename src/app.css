@@ -1,0 +1,8 @@
+/*
+ * Global stylesheet entry. The design system lives in ./styles/*:
+ *   - tokens.css : design tokens (spec/design-tokens.md, verbatim)
+ *   - base.css   : reset, canvas, focus ring, reduced-motion
+ * Component-level styling is scoped inside each .svelte <style>.
+ */
+@import "./styles/tokens.css";
+@import "./styles/base.css";

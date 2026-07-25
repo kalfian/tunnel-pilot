@@ -1,0 +1,50 @@
+{
+  "name": "tunnel-pilot",
+  "version": "2.0.0",
+  "description": "Cross-platform SSH local port forwarding manager (Tauri v2 + Svelte)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "lint": "prettier --check \"src/**/*.{ts,svelte,css}\" \"*.{ts,js,json}\" && eslint .",
+    "format": "prettier --write \"src/**/*.{ts,svelte,css}\" \"*.{ts,js,json}\"",
+    "test": "vitest run",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-autostart": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-notification": "^2",
+    "@tauri-apps/plugin-updater": "^2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5",
+    "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/svelte": "^5.4.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@tsconfig/svelte": "^5",
+    "@types/node": "^26.1.1",
+    "@typescript-eslint/eslint-plugin": "^8",
+    "@typescript-eslint/parser": "^8",
+    "eslint": "^9",
+    "eslint-plugin-svelte": "^3",
+    "globals": "^16",
+    "jsdom": "^29.1.1",
+    "prettier": "^3",
+    "prettier-plugin-svelte": "^3",
+    "svelte": "^5",
+    "svelte-check": "^4",
+    "svelte-eslint-parser": "^1",
+    "tslib": "^2",
+    "typescript": "^5",
+    "typescript-eslint": "^8",
+    "vite": "^6",
+    "vitest": "^4.1.10"
+  }
+}

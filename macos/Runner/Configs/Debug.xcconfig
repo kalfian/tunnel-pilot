@@ -1,5 +1,0 @@
-#include "../../Flutter/Flutter-Debug.xcconfig"
-#include "Warnings.xcconfig"
-
-// Hide from Dock (menu bar / tray only)
-LS_UI_ELEMENT = 1

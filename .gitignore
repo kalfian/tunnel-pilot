@@ -46,3 +46,24 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# --- Tauri v2 + Svelte (v2 rewrite) ---
+# Node / frontend
+node_modules/
+/dist/
+.vite/
+vite.config.ts.timestamp-*
+vite.config.js.timestamp-*
+
+# Rust / Tauri build output
+/src-tauri/target/
+/src-tauri/gen/
+
+# Secrets & updater signing keys (org policy: never commit)
+.env
+.env.*
+!.env.example
+# Tauri updater minisign private key (the PUBLIC key stays in tauri.conf.json).
+# Generated as a .key file by `tauri signer generate`; keep it out of git.
+*.key
+tunnel_pilot_secrets.json

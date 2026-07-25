@@ -1,0 +1,96 @@
+name: tauri-build
+
+# Cross-platform BUILD-ONLY CI for the Tauri v2 app (spec 06 §4).
+#
+# Post-cutover this is the primary CI gate on `master` (the Flutter v1 app and its
+# `release.yml` were removed in the v2 rewrite). It still runs on `rewrite/tauri`
+# so the branch stays green until the merge. No OS code-signing and no updater
+# (minisign) signing here — that runs only in the tag-triggered release workflow
+# (tauri-release.yml). CI is the only push/release path (project rule); this job
+# never publishes.
+
+on:
+  push:
+    branches: [master, rewrite/tauri]
+  pull_request:
+    branches: [master, rewrite/tauri]
+  workflow_dispatch:
+
+concurrency:
+  group: tauri-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri v2 Linux system dependencies (webkit2gtk, gtk, appindicator, etc.).
+      - name: Install Linux system deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            libssl-dev \
+            libxdo-dev \
+            build-essential \
+            curl wget file
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend checks (svelte-check + lint)
+        run: |
+          pnpm check
+          pnpm lint
+
+      - name: Rust checks (fmt + clippy)
+        working-directory: src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+
+      # Build the Tauri bundle for the host OS. Unsigned (see header). This runs
+      # `pnpm build` (frontend) via beforeBuildCommand, then the Rust release
+      # build + bundler.
+      - name: Build Tauri app (unsigned)
+        run: pnpm tauri build
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnel-pilot-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/**
+          if-no-files-found: warn
+          retention-days: 7

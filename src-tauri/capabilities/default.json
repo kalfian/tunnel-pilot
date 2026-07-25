@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for the main window. App commands (spec/02 §6) are not ACL-gated in Tauri v2, so the window can invoke them; this grants the ACL-gated core:window + plugin commands the window uses (AGENTS.md §8).",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "autostart:default",
+    "notification:default",
+    "updater:default",
+    "dialog:default",
+    "clipboard-manager:default",
+    "clipboard-manager:allow-write-text"
+  ]
+}

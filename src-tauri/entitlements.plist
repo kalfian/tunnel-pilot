@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS entitlements — v1 parity (macos/Runner/Release.entitlements), spec 03 §19.
+
+  The app is UNSANDBOXED on purpose: it must open arbitrary SSH connections, read
+  identity keys under ~/.ssh, use the file picker, and write self-update bundles.
+  Do NOT enable com.apple.security.app-sandbox.
+
+  NOTE: these entitlements are only applied by `codesign` during OS code-signing,
+  which is DELIBERATELY SKIPPED for v2.0 (open-source / unfunded — see 06 §4). They
+  are committed for (a) v1 parity, (b) documented intent, and (c) drop-in readiness
+  if a future funded maintainer enables Developer ID signing. An unsigned build runs
+  unsandboxed regardless.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+</dict>
+</plist>
