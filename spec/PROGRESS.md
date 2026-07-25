@@ -26,8 +26,8 @@
 | M3 | Tray/window/lifecycle/autostart/dock | ✅ done | 6610ce8..331a2d4 (5 commits) |
 | M4 | Full UI parity | ✅ done | P1 `08c2e35` · P2a `1c94b5c..048de6b` · P2b `fcd25ee..85939c7` |
 | M5 | UX improvements | ✅ done | Rust `44ef253`,`ffc4f69` · FE `5c95728..1812a43` |
-| M6 | Signed updater + notifications | ⬜ pending | — |
-| M7 | Packaging + cutover | ⬜ pending | — |
+| M6 | Signed updater + notifications | ✅ done | 6c5970d..637d7fb (7 commits) |
+| M7 | Packaging + cutover | 🟨 prep done — release/cutover pending (manual/CI/device) | 3598b85..(this session) |
 
 ## M0 item checklist (commit per item)
 - [x] Toolchain: add Tauri CLI (`pnpm add -D @tauri-apps/cli`), confirm rustup + node/pnpm.
@@ -397,10 +397,61 @@ dialog; clipboard/file-picker round-trips; live `tunnel://stats` 3s cross-fade; 
 follow of OS `prefers-color-scheme`; drag-reorder + cross-group drag reassign (jsdom can't
 exercise HTML5 DnD — keyboard reorder + the disabled-under-filter guard are unit-tested).
 
+## M7 — Packaging / release prep (EXECUTABLE portion done; release/cutover PENDING)
+This session did the docs + bundling-config + cutover-checklist work. It did **NOT** merge,
+tag, push, or move Flutter — those are the manual/CI cutover steps (see `CUTOVER.md`).
+- [x] **Bundling finalized** (`tauri.conf.json`, commit `3598b85`): per-OS targets (macOS
+      `app`+`dmg`, Windows `nsis`, Linux `appimage`+`deb`+`rpm`) instead of `"all"` (keeps
+      Windows to NSIS, no MSI); `publisher`/`copyright`/`category`; macOS `entitlements.plist`
+      (v1 parity: app-sandbox=false, network client/server, files user-selected, allow-jit)
+      referenced from `bundle.macOS`; `LSUIElement` stays in `Info.plist`; NSIS `currentUser`
+      unsigned; overlay titlebar (macOS) / native decorations (Win+Linux) unchanged; updater
+      artifacts + endpoint + committed pubkey intact (pubkey verified against the keypair);
+      version 2.0.0 consistent across `tauri.conf.json`/`Cargo.toml`/`package.json`. No OS
+      code-signing (unfunded). `cargo build` + `pnpm build` parse the config.
+- [x] **README.md** rewritten for v2 (commit `a7a8fcd`): Rust+Tauri stack, per-OS install +
+      unsigned workarounds (verbatim 06 §8), v1→v2 upgrade path + config-preservation guarantee
+      (06 §6), build-from-source (rustup + pnpm + `pnpm tauri dev/build`), two-tier signing note.
+- [x] **docs/index.html** updated for v2 (commit `f68517e`): upgrade + unsigned-first-launch
+      callouts, v2 download artifacts, Rust/Tauri build-from-source, JSON-LD version 2.0.0.
+- [x] **CUTOVER.md** created (commit `f1cc7b2`): the precise remaining steps, DONE vs
+      PENDING(manual/CI/device).
+
+### PENDING for release/cutover (see CUTOVER.md for detail)
+- **CI (manual, one-time):** set repo secrets `TAURI_UPDATER_PRIVATE_KEY` +
+  `TAURI_UPDATER_KEY_PASSWORD` (private key at `~/tunnel-pilot-updater-keys/`, OUTSIDE repo,
+  never commit).
+- **Device (per OS):** RAM measurement (RSS, window hidden after 60s idle, tray active; idle
+  ≤30 MB) — table in CUTOVER.md §2. Plus F5 (macOS notifications on an UNSIGNED bundle — likely
+  silent-fail, confirm tray/log fallback), F15 (wake across real OS sleep), signed-update
+  end-to-end + tamper-rejection, runtime tray/dock/window/single-instance/file-picker/clipboard,
+  560px responsive breakpoints.
+- **Manual (on `master`):** final Flutter v1 **bridge** release carrying an in-app notice
+  pointing to the v2 download (06 §6/§7); update the landing-page `install.sh`/`install.ps1`
+  one-liner scripts (still fetch v1 portable artifacts) at cutover.
+- **Cutover sequence (do NOT do now):** move `lib/`,`macos/`,`windows/`,`linux/`,`pubspec.yaml`,
+  `test/` → `legacy/flutter/` (KEEP, don't delete); relocate/disable Flutter `release.yml`;
+  retarget `tauri-build.yml` to `master`; merge `rewrite/tauri`→`master`; tag `v2.0.0` (triggers
+  `tauri-release.yml`); review + publish the draft release; verify `latest.json` endpoint.
+
+### Open backlog (carried forward — not release blockers)
+- **F40** [Low] `quit_app` teardown watchdog (`select!` teardown-vs-timeout(5s)→`exit(0)`).
+- **F41** [Nit] guard `quit_app` against double-invocation (`AtomicBool`).
+- **Host-key verification** (MITM) — `ssh/client.rs::check_server_key` accepts any key (v1
+  parity). TOFU/known_hosts pinning post-cutover. (NOTE: the M7 brief called this "F46", but
+  F46 is the closed M5 auth-validation fix; host-key verification has no F-number.)
+- **F50** [Low] `lib/fuzzy.ts` UTF-16 code-unit matching (astral/emoji imperfect ranking).
+
+### M7 findings / spec note
+- **No spec correction needed** — bundling implemented per 03 §§14/19 + 06 §4 and 07 M7.
+- **Brief F-number mismatch flagged:** the task brief listed "F46/host-key verification", but
+  F46 is already the M5 "require ≥1 auth method" fix (commit `a9e1876`). Host-key verification
+  is the un-numbered M1/M3 backlog item. Recorded correctly in CUTOVER.md + here.
+
 ## Next action
-**M5 review, then M6** (signed updater + notifications + wake polish). M5 feature-complete:
-N1–N4 + N7 shipped, F43/F45–F48 fixed; 59 FE tests pass; `pnpm check`/`lint`/`test`/`build`
-all clean. Interactive window/resize/DnD + real-OS-sleep wake remain for a desktop session / M6.
+**Release/cutover of v2.0.0** — execute `CUTOVER.md` (CI secrets → RAM/device verifications →
+v1 bridge → move Flutter to `legacy/flutter/` → merge → tag `v2.0.0`). All gated on manual/CI/
+device steps; the executable prep (bundling config + docs + checklist) is done on `rewrite/tauri`.
 
 ## Commit log (append hash + item as they land)
 - `4aac549` docs: spec package v1 (pre-build baseline)
@@ -462,6 +513,10 @@ all clean. Interactive window/resize/DnD + real-OS-sleep wake remain for a deskt
 - `6ec51d5` feat(m5): N1 command palette (⌘K) with fuzzy launcher
 - `c164226` feat(m5): N3 groups/tags UI + F43 reorder-under-filter fix
 - `1812a43` feat(m5): N2 responsive reflow (content-area container queries)
+- `3598b85` chore(m7): finalize bundling — explicit targets, publisher/copyright, macOS entitlements + NSIS
+- `a7a8fcd` docs(m7): rewrite README for v2 (Rust+Tauri) with install workarounds + v1 upgrade path
+- `f68517e` docs(m7): update landing page for v2 (downloads, unsigned workarounds, v1 upgrade)
+- `f1cc7b2` docs(m7): add CUTOVER.md — remaining steps to ship v2.0.0 (DONE vs PENDING)
 
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).
