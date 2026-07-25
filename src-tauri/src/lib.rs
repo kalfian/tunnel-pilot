@@ -211,17 +211,6 @@ pub fn run() {
             // here — it auto-starts on the first connect.
             crate::ssh::wake::spawn_wake_watchdog(state.clone());
 
-            // macOS dock/activation policy follows the `showInDock` SETTING
-            // (BUG 1), applied once here from the loaded setting and again on
-            // every settings change — NOT tied to window visibility, so the dock
-            // icon persists across window open/close (present iff showInDock is
-            // on). No-op on Windows/Linux. `window::show_window` fronts the
-            // window without changing this policy.
-            crate::platform::dock::apply_dock_policy(
-                &app.handle().clone(),
-                state.settings_snapshot().show_in_dock,
-            );
-
             // Autostart (spec 03 §12): reconcile the OS launch-at-login
             // registration with the persisted `launchAtLogin` setting on every
             // boot, correcting any drift.
@@ -243,8 +232,19 @@ pub fn run() {
             // focuses the window; an AUTOSTART (login) launch stays hidden in the
             // tray. The window boots hidden (`visible: false`), so we only ever
             // opt IN to showing — an autostart launch simply leaves it hidden.
+            //
+            // The macOS activation policy is a function of window visibility AND
+            // `showInDock` (see `platform::dock`):
+            // - normal launch → `show_window` applies the visible-state policy
+            //   (`Regular`: owns menu bar + Cmd+Tab + dock).
+            // - autostart (hidden) launch → apply the hidden-state policy here
+            //   (`Regular` iff `showInDock`, else `Accessory` / tray-only). No-op
+            //   on Windows/Linux beyond the taskbar entry.
             if launched_from_autostart() {
                 tracing::info!("launched from autostart; staying hidden in the tray");
+                // Window stays hidden → apply the hidden-state policy from the
+                // managed setting + live visibility (`is_visible()` == false here).
+                crate::platform::dock::refresh_dock_policy(&app.handle().clone());
             } else {
                 crate::window::show_window(&app.handle().clone());
             }
