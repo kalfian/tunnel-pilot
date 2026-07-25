@@ -317,6 +317,10 @@ async fn supervise(
             }
             Some(Ok(pair)) => pair,
             Some(Err(e)) => {
+                // Surface the EXACT russh failure reason (KEX/host-key/cipher
+                // negotiation, bind, or auth) — otherwise only the later
+                // "disconnected" line is logged and the real cause is hidden.
+                tracing::warn!(tunnel = %id, error = %e, "connect attempt failed");
                 match handle_teardown(
                     TeardownCtx {
                         state: &state,
