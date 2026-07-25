@@ -13,6 +13,7 @@
     "notification:default",
     "updater:default",
     "dialog:default",
-    "clipboard-manager:default"
+    "clipboard-manager:default",
+    "clipboard-manager:allow-write-text"
   ]
 }
