@@ -418,8 +418,15 @@ pub fn handle_menu_event(app: &AppHandle, item_id: &str) {
             let updater = updater.inner().clone();
             let app_for_check = app.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) =
-                    crate::updater::run_check(&app_for_check, &state, &updater, false).await
+                // User-initiated (tray) → a failure surfaces as a clean string in
+                // the emitted `update://status`, not an error object (BUG 3).
+                if let Err(e) = crate::updater::run_check(
+                    &app_for_check,
+                    &state,
+                    &updater,
+                    crate::updater::CheckTrigger::UserRequested,
+                )
+                .await
                 {
                     tracing::error!(error = %e, "tray update-check failed");
                 }
@@ -735,6 +742,7 @@ mod tests {
             version: Some("1.5.0".to_string()),
             notes: Some("changelog".to_string()),
             skipped: false,
+            error: None,
         };
         let notice = update_notice_from_status(&status);
         assert_eq!(
@@ -759,6 +767,7 @@ mod tests {
             version: Some("1.5.0".to_string()),
             notes: None,
             skipped: true,
+            error: None,
         };
         assert!(update_notice_from_status(&status).is_none());
     }
@@ -770,6 +779,7 @@ mod tests {
             version: None,
             notes: None,
             skipped: false,
+            error: None,
         };
         assert_eq!(
             update_notice_from_status(&status),

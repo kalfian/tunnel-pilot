@@ -116,26 +116,59 @@ fn emit_status(app: &AppHandle, status: &UpdateStatus) {
     let _ = app.emit(events::UPDATE_STATUS, status);
 }
 
-/// Query the updater endpoint and build an [`UpdateStatus`], caching the pending
-/// [`Update`] for a subsequent [`run_install`]. Emits `update://status`.
+/// Which trigger initiated an update check (BUG 3). The two paths differ ONLY in
+/// how a check *failure* is surfaced:
 ///
-/// When `notify_on_available` is set (the auto-check path), fires the
-/// update-available notification **once per version** — skipped versions
-/// (`lastSkippedVersion`) never notify.
+/// - [`CheckTrigger::Startup`] — the boot auto-check. A failure (e.g. no v2
+///   release exists yet, or offline) is **logged and ignored**: it must never
+///   surface as a scary "Update failed" banner, so we do NOT emit an error
+///   `update://status` and leave the cached status untouched (idle/unknown). It
+///   also fires the once-per-version update-available notice on success.
+/// - [`CheckTrigger::UserRequested`] — the user pressed "Check for updates". A
+///   failure IS surfaced, but as a clean human-readable STRING in
+///   [`UpdateStatus::error`] (never a serialized [`AppError`] object → the FE can
+///   no longer render `[object Object]`), emitted via `update://status`. It does
+///   NOT fire a notification (the startup path owns that).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckTrigger {
+    Startup,
+    UserRequested,
+}
+
+/// Query the updater endpoint and build an [`UpdateStatus`], caching the pending
+/// [`Update`] for a subsequent [`run_install`]. Emits `update://status` on
+/// success (and, for [`CheckTrigger::UserRequested`], on failure — as a clean
+/// error string).
+///
+/// A check failure is handled per [`CheckTrigger`] (see [`handle_check_error`]),
+/// so this always returns `Ok`: a user check surfaces its error inside the
+/// status (never as an IPC rejection object), and a startup check swallows it.
 pub async fn run_check(
     app: &AppHandle,
     app_state: &AppState,
     updater_state: &UpdaterState,
-    notify_on_available: bool,
+    trigger: CheckTrigger,
 ) -> Result<UpdateStatus, AppError> {
-    let updater = app
-        .updater()
-        .map_err(|e| AppError::Updater(format!("updater unavailable: {e}")))?;
+    // Only the startup/auto path fires the once-per-version available notice.
+    let notify_on_available = trigger == CheckTrigger::Startup;
 
-    let maybe_update = updater
-        .check()
-        .await
-        .map_err(|e| AppError::Updater(format!("update check failed: {e}")))?;
+    // Run the check, collapsing any failure into a clean human-readable STRING
+    // (never a serialized error object — that is what produced `[object Object]`).
+    let check = async {
+        let updater = app
+            .updater()
+            .map_err(|e| format!("updater unavailable: {e}"))?;
+        updater
+            .check()
+            .await
+            .map_err(|e| format!("update check failed: {e}"))
+    }
+    .await;
+
+    let maybe_update = match check {
+        Ok(u) => u,
+        Err(msg) => return Ok(handle_check_error(app, updater_state, trigger, msg)),
+    };
 
     let last_skipped = app_state.settings_snapshot().last_skipped_version;
 
@@ -163,6 +196,7 @@ pub async fn run_check(
                 version: Some(version),
                 notes,
                 skipped,
+                error: None,
             }
         }
         None => {
@@ -175,6 +209,38 @@ pub async fn run_check(
     updater_state.set_latest_status(status.clone());
     emit_status(app, &status);
     Ok(status)
+}
+
+/// Surface (or swallow) a check FAILURE per the trigger (BUG 3). Returns the
+/// [`UpdateStatus`] the caller should return.
+fn handle_check_error(
+    app: &AppHandle,
+    updater_state: &UpdaterState,
+    trigger: CheckTrigger,
+    msg: String,
+) -> UpdateStatus {
+    match trigger {
+        CheckTrigger::Startup => {
+            // A failed boot check must NEVER surface as a banner: log and ignore,
+            // do not emit, and leave the cached status as-is (idle/unknown, or a
+            // previously-known-available state — never clobbered by a transient
+            // failure).
+            tracing::warn!(error = %msg, "startup update-check failed (ignored)");
+            updater_state.latest_status()
+        }
+        CheckTrigger::UserRequested => {
+            // Surface a CLEAN STRING (never a serialized object) so the FE never
+            // renders `[object Object]`, and emit it so the banner updates.
+            tracing::warn!(error = %msg, "user update-check failed");
+            let status = UpdateStatus {
+                error: Some(msg),
+                ..UpdateStatus::default()
+            };
+            updater_state.set_latest_status(status.clone());
+            emit_status(app, &status);
+            status
+        }
+    }
 }
 
 /// Download → verify (minisign) → install the pending update, emitting
@@ -232,11 +298,14 @@ pub async fn auto_check_on_startup(
         tracing::debug!("auto update-check disabled (autoCheckUpdates=false)");
         return;
     }
-    match run_check(&app, &app_state, &updater_state, true).await {
+    // Startup trigger: a failure is logged-and-ignored inside `run_check` and
+    // never emits an error `update://status` (BUG 3) — so a missing v2 release
+    // can't surface as a "Update failed" banner.
+    match run_check(&app, &app_state, &updater_state, CheckTrigger::Startup).await {
         Ok(status) if status.available => {
             tracing::info!(version = ?status.version, skipped = status.skipped, "update available");
         }
-        Ok(_) => tracing::debug!("no update available"),
+        Ok(_) => tracing::debug!("no update available (or check ignored)"),
         Err(e) => tracing::warn!(error = %e, "startup update-check failed (ignored)"),
     }
 }
@@ -252,6 +321,7 @@ mod tests {
             version: Some(version.to_string()),
             notes: None,
             skipped: false,
+            error: None,
         }
     }
 

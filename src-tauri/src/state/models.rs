@@ -279,6 +279,12 @@ pub struct UpdateStatus {
     pub notes: Option<String>,
     /// `version == settings.last_skipped_version`.
     pub skipped: bool,
+    /// Human-readable error from a **user-initiated** `check_update` that failed
+    /// (BUG 3). Always a plain STRING — never a serialized error object — so the
+    /// FE renders it directly instead of `[object Object]`. `None` on success
+    /// and on the startup/auto path (which logs-and-ignores failures and never
+    /// sets this).
+    pub error: Option<String>,
 }
 
 /// One-shot boot/rehydrate snapshot returned by `app_hydrate` (spec 04 §8). The

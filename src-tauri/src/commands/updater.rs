@@ -22,13 +22,24 @@ use crate::updater::UpdaterState;
 /// the pending update for [`install_update`], and emit `update://status`. This
 /// is the user-triggered check, so it does NOT fire a notification (the auto
 /// startup check owns the once-per-version notice).
+///
+/// A check failure is surfaced as a clean STRING in [`UpdateStatus::error`]
+/// (never a serialized error object → no `[object Object]` on the FE), so this
+/// returns `Ok` with the error inside the status rather than an IPC rejection
+/// (BUG 3).
 #[tauri::command]
 pub async fn check_update(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     updater: State<'_, Arc<UpdaterState>>,
 ) -> Result<UpdateStatus, AppError> {
-    crate::updater::run_check(&app, state.inner(), updater.inner(), false).await
+    crate::updater::run_check(
+        &app,
+        state.inner(),
+        updater.inner(),
+        crate::updater::CheckTrigger::UserRequested,
+    )
+    .await
 }
 
 /// `install_update` — download + verify the minisign signature + install the
