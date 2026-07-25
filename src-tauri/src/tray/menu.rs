@@ -1,11 +1,15 @@
-//! Tray menu build + debounced rebuild-on-change, styled after Laravel Herd's
-//! native menu-bar menu: an update-notice slot at the top, per-tunnel rows with
-//! a colored status-dot leading icon, conditional bulk Start/Stop All, and an
-//! actions footer (Settings ⌘, / Check for Updates… ⌘U / Quit ⌘Q).
+//! Tray menu build + debounced rebuild-on-change, styled after Tailscale /
+//! Laravel Herd's native menu-bar menu: a disabled title header ("Tunnel Pilot"
+//! + an "N of M connected" status line) at the top, an update-notice slot, per-
+//! tunnel rows with a colored status-dot leading icon bucketed into greyed group
+//! section headers (`PRODUCTION` / `STAGING` / `Ungrouped`; a flat list when
+//! nothing is grouped), conditional bulk Start/Stop All, and an actions footer
+//! (Settings ⌘, / Check for Updates… ⌘U / Quit ⌘Q).
 //!
 //! The menu *model* ([`build_menu_model`]) is a pure function of the tunnel
-//! states + update availability, so the "which rows/actions/bulk items appear"
-//! logic is unit-testable without a display. Turning the model into a real
+//! states + group definitions + update availability, so the "which
+//! rows/sections/actions/bulk items appear" logic is unit-testable without a
+//! display. Turning the model into a real
 //! `tauri::menu::Menu` (with `IconMenuItem` dots + accelerators) and reacting to
 //! clicks is the impure layer below.
 //!
@@ -26,7 +30,7 @@ use tauri::{AppHandle, Listener, Manager, Wry};
 use tokio::sync::Notify;
 
 use crate::events;
-use crate::state::models::{ForwardStatus, UpdateStatus};
+use crate::state::models::{ForwardStatus, TunnelGroup, UpdateStatus};
 use crate::state::AppState;
 use crate::updater::UpdaterState;
 
@@ -65,6 +69,9 @@ pub struct TunnelState {
     /// Local bind port, shown right of the name (e.g. `Qismo Prod   :5431`).
     pub port: u16,
     pub status: ForwardStatus,
+    /// The group this tunnel belongs to (`None` = ungrouped). Drives the
+    /// Herd/Tailscale-style section headers in the tray menu.
+    pub group_id: Option<String>,
 }
 
 /// The action a per-tunnel menu row can offer, given its status.
@@ -82,10 +89,23 @@ pub struct TunnelMenuRow {
     pub name: String,
     pub port: u16,
     pub status: ForwardStatus,
+    /// The group this row belongs to (`None` = ungrouped), used to bucket rows
+    /// into [`MenuSection`]s.
+    pub group_id: Option<String>,
     /// Actions available in this status (empty for the transient `disconnecting`).
     pub actions: Vec<TunnelAction>,
     /// The single action a click on this row performs (`None` while transient).
     pub primary: Option<TunnelAction>,
+}
+
+/// A group of per-tunnel rows under an optional section header. `header` is
+/// `None` for the single flat section used when no tunnel is grouped; otherwise
+/// it is the group name (or `"Ungrouped"`), rendered as a disabled/greyed
+/// header item (Herd/Tailscale style).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuSection {
+    pub header: Option<String>,
+    pub rows: Vec<TunnelMenuRow>,
 }
 
 /// Content of the update-notice slot when an update is pending install.
@@ -101,11 +121,24 @@ pub struct MenuModel {
     /// Update-notice slot at the top; `Some` only when an update is pending
     /// install (available and not skipped) — see [`update_notice_from_status`].
     pub update_notice: Option<UpdateNotice>,
-    pub tunnels: Vec<TunnelMenuRow>,
+    /// Per-tunnel rows bucketed into group sections (display order). A single
+    /// `header: None` section when no tunnel is grouped (flat list).
+    pub sections: Vec<MenuSection>,
+    /// Connected tunnel count — drives the header status summary + icon badge.
+    pub connected: usize,
+    /// Total configured tunnel count — drives the header status summary.
+    pub total: usize,
     /// "Start All" shown when at least one tunnel is startable.
     pub show_start_all: bool,
     /// "Stop All" shown when at least one tunnel is stoppable.
     pub show_stop_all: bool,
+}
+
+impl MenuModel {
+    /// All per-tunnel rows, flattened across sections in display order.
+    pub fn rows(&self) -> Vec<&TunnelMenuRow> {
+        self.sections.iter().flat_map(|s| s.rows.iter()).collect()
+    }
 }
 
 /// Derive the tray update-notice from the cached [`UpdateStatus`]. An update is
@@ -146,11 +179,16 @@ pub fn primary_action(status: ForwardStatus) -> Option<TunnelAction> {
     }
 }
 
-/// Build the pure tray-menu model from the current tunnel states + update
-/// availability. Bulk items appear conditionally: Start All when anything is
-/// startable (disconnected/error), Stop All when anything is stoppable
-/// (connected/connecting).
-pub fn build_menu_model(tunnels: &[TunnelState], update_notice: Option<UpdateNotice>) -> MenuModel {
+/// Build the pure tray-menu model from the current tunnel states, group
+/// definitions, and update availability. Bulk items appear conditionally: Start
+/// All when anything is startable (disconnected/error), Stop All when anything is
+/// stoppable (connected/connecting). Rows are bucketed into group sections (see
+/// [`build_sections`]) — a flat list when no tunnel is grouped.
+pub fn build_menu_model(
+    tunnels: &[TunnelState],
+    groups: &[TunnelGroup],
+    update_notice: Option<UpdateNotice>,
+) -> MenuModel {
     let rows: Vec<TunnelMenuRow> = tunnels
         .iter()
         .map(|t| TunnelMenuRow {
@@ -158,6 +196,7 @@ pub fn build_menu_model(tunnels: &[TunnelState], update_notice: Option<UpdateNot
             name: t.name.clone(),
             port: t.port,
             status: t.status,
+            group_id: t.group_id.clone(),
             actions: actions_for(t.status),
             primary: primary_action(t.status),
         })
@@ -175,10 +214,61 @@ pub fn build_menu_model(tunnels: &[TunnelState], update_notice: Option<UpdateNot
 
     MenuModel {
         update_notice,
-        tunnels: rows,
+        sections: build_sections(rows, groups),
+        connected: connected_count(tunnels),
+        total: tunnels.len(),
         show_start_all,
         show_stop_all,
     }
+}
+
+/// Bucket rows into group sections (Herd/Tailscale style). When no row carries a
+/// `group_id` the result is a single flat section (`header: None`), so an app
+/// with no groups renders a plain list. Otherwise rows are grouped by their
+/// group (headers in group `order`), and any ungrouped rows — including rows
+/// whose `group_id` no longer resolves to a known group — fall under a final
+/// `"Ungrouped"` section. Empty group sections (no matching rows) are omitted,
+/// and within each section rows keep their incoming display order.
+fn build_sections(rows: Vec<TunnelMenuRow>, groups: &[TunnelGroup]) -> Vec<MenuSection> {
+    if !rows.iter().any(|r| r.group_id.is_some()) {
+        return vec![MenuSection { header: None, rows }];
+    }
+
+    let known: std::collections::HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
+
+    let mut ordered: Vec<&TunnelGroup> = groups.iter().collect();
+    ordered.sort_by_key(|g| g.order);
+
+    let mut sections: Vec<MenuSection> = Vec::new();
+    for group in ordered {
+        let group_rows: Vec<TunnelMenuRow> = rows
+            .iter()
+            .filter(|r| r.group_id.as_deref() == Some(group.id.as_str()))
+            .cloned()
+            .collect();
+        if !group_rows.is_empty() {
+            sections.push(MenuSection {
+                header: Some(group.name.clone()),
+                rows: group_rows,
+            });
+        }
+    }
+
+    let ungrouped: Vec<TunnelMenuRow> = rows
+        .into_iter()
+        .filter(|r| match &r.group_id {
+            None => true,
+            Some(id) => !known.contains(id.as_str()),
+        })
+        .collect();
+    if !ungrouped.is_empty() {
+        sections.push(MenuSection {
+            header: Some("Ungrouped".to_string()),
+            rows: ungrouped,
+        });
+    }
+
+    sections
 }
 
 /// Number of tunnels in `Connected` — drives the tray badge count.
@@ -187,6 +277,18 @@ pub fn connected_count(tunnels: &[TunnelState]) -> usize {
         .iter()
         .filter(|t| t.status == ForwardStatus::Connected)
         .count()
+}
+
+/// The Tailscale-style header status line: `"No active tunnels"` when none are
+/// connected, `"{n} connected"` when all are, else `"{n} of {m} connected"`.
+pub fn status_summary(connected: usize, total: usize) -> String {
+    if connected == 0 {
+        "No active tunnels".to_string()
+    } else if connected == total {
+        format!("{connected} connected")
+    } else {
+        format!("{connected} of {total} connected")
+    }
 }
 
 fn status_label(status: ForwardStatus) -> &'static str {
@@ -230,6 +332,7 @@ pub fn gather_tunnel_states(state: &AppState) -> Vec<TunnelState> {
                 name: c.name,
                 port: c.local_port,
                 status,
+                group_id: c.group_id,
             }
         })
         .collect()
@@ -242,8 +345,9 @@ pub fn gather_tunnel_states(state: &AppState) -> Vec<TunnelState> {
 /// every status/update change. Must run on the main thread (AppKit).
 pub fn build_current_menu(app: &AppHandle, state: &Arc<AppState>) -> tauri::Result<Menu<Wry>> {
     let tunnels = gather_tunnel_states(state);
+    let groups = state.groups_snapshot();
     let update_notice = gather_update_notice(app);
-    let model = build_menu_model(&tunnels, update_notice);
+    let model = build_menu_model(&tunnels, &groups, update_notice);
     build_tauri_menu(app, &model)
 }
 
@@ -253,7 +357,27 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
     // Boxed so heterogeneous item kinds (MenuItem/Submenu/separator) share a Vec.
     let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
 
-    // Update-notice slot (top). Present only when an update is pending install.
+    // Tailscale-style title header (top): the app name + a disabled status
+    // summary line, so the menu opens with a clear title rather than straight
+    // into the list. Both are disabled/greyed (standard NSMenu title pattern).
+    items.push(Box::new(MenuItem::with_id(
+        app,
+        "noop:title",
+        "Tunnel Pilot",
+        false,
+        None::<&str>,
+    )?));
+    items.push(Box::new(MenuItem::with_id(
+        app,
+        "noop:summary",
+        status_summary(model.connected, model.total),
+        false,
+        None::<&str>,
+    )?));
+    items.push(Box::new(PredefinedMenuItem::separator(app)?));
+
+    // Update-notice slot (below the title). Present only when an update is
+    // pending install.
     if let Some(notice) = &model.update_notice {
         let label = match &notice.version {
             Some(v) => format!("Update available (v{v}) — Install"),
@@ -270,8 +394,11 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
     }
 
     // Per-tunnel rows: each a single clickable IconMenuItem with a colored
-    // status-dot leading icon. Clicking runs the row's primary action.
-    if model.tunnels.is_empty() {
+    // status-dot leading icon. Clicking runs the row's primary action. Rows are
+    // bucketed into group sections, each led by a disabled/greyed header
+    // (Herd-style); a flat list when nothing is grouped.
+    let total_rows: usize = model.sections.iter().map(|s| s.rows.len()).sum();
+    if total_rows == 0 {
         items.push(Box::new(MenuItem::with_id(
             app,
             "noop:empty",
@@ -280,8 +407,28 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
             None::<&str>,
         )?));
     } else {
-        for row in &model.tunnels {
-            items.push(build_tunnel_row(app, row)?);
+        let mut first_section = true;
+        for section in &model.sections {
+            if section.rows.is_empty() {
+                continue;
+            }
+            if let Some(header) = &section.header {
+                // Separate consecutive group sections with a divider.
+                if !first_section {
+                    items.push(Box::new(PredefinedMenuItem::separator(app)?));
+                }
+                items.push(Box::new(MenuItem::with_id(
+                    app,
+                    format!("noop:hdr:{header}"),
+                    header.to_uppercase(),
+                    false,
+                    None::<&str>,
+                )?));
+            }
+            for row in &section.rows {
+                items.push(build_tunnel_row(app, row)?);
+            }
+            first_section = false;
         }
     }
 
@@ -501,9 +648,10 @@ fn gather_update_notice(app: &AppHandle) -> Option<UpdateNotice> {
 /// Rebuild the tray icon + menu from current state, on the main thread.
 pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>) {
     let tunnels = gather_tunnel_states(state);
+    let groups = state.groups_snapshot();
     let count = connected_count(&tunnels);
     let update_notice = gather_update_notice(app);
-    let model = build_menu_model(&tunnels, update_notice);
+    let model = build_menu_model(&tunnels, &groups, update_notice);
 
     let app_main = app.clone();
     let dispatch = app.run_on_main_thread(move || {
@@ -570,13 +718,32 @@ mod tests {
             name: format!("fwd-{id}"),
             port: 5000,
             status,
+            group_id: None,
+        }
+    }
+
+    /// A tunnel state assigned to `group_id`.
+    fn ts_grouped(id: &str, status: ForwardStatus, group_id: &str) -> TunnelState {
+        TunnelState {
+            group_id: Some(group_id.to_string()),
+            ..ts(id, status)
+        }
+    }
+
+    fn group(id: &str, name: &str, order: u32) -> TunnelGroup {
+        TunnelGroup {
+            id: id.to_string(),
+            name: name.to_string(),
+            color: None,
+            order,
+            collapsed: false,
         }
     }
 
     #[test]
     fn empty_has_no_bulk() {
-        let m = build_menu_model(&[], None);
-        assert!(m.tunnels.is_empty());
+        let m = build_menu_model(&[], &[], None);
+        assert!(m.rows().is_empty());
         assert!(!m.show_start_all);
         assert!(!m.show_stop_all);
         assert!(m.update_notice.is_none());
@@ -584,27 +751,27 @@ mod tests {
 
     #[test]
     fn error_row_exposes_retry() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], None);
-        let row = &m.tunnels[0];
-        assert!(row.actions.contains(&TunnelAction::Retry));
+        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], &[], None);
+        let rows = m.rows();
+        assert!(rows[0].actions.contains(&TunnelAction::Retry));
     }
 
     #[test]
     fn connected_row_offers_disconnect_only() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Connected)], None);
-        assert_eq!(m.tunnels[0].actions, vec![TunnelAction::Disconnect]);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Connected)], &[], None);
+        assert_eq!(m.rows()[0].actions, vec![TunnelAction::Disconnect]);
     }
 
     #[test]
     fn disconnected_row_offers_connect_only() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnected)], None);
-        assert_eq!(m.tunnels[0].actions, vec![TunnelAction::Connect]);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnected)], &[], None);
+        assert_eq!(m.rows()[0].actions, vec![TunnelAction::Connect]);
     }
 
     #[test]
     fn disconnecting_row_has_no_actions() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnecting)], None);
-        assert!(m.tunnels[0].actions.is_empty());
+        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnecting)], &[], None);
+        assert!(m.rows()[0].actions.is_empty());
     }
 
     #[test]
@@ -632,14 +799,14 @@ mod tests {
     #[test]
     fn error_row_primary_is_retry() {
         // On error, clicking the row retries (keeps a way to retry — acceptance).
-        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], None);
-        assert_eq!(m.tunnels[0].primary, Some(TunnelAction::Retry));
+        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], &[], None);
+        assert_eq!(m.rows()[0].primary, Some(TunnelAction::Retry));
     }
 
     #[test]
     fn disconnecting_row_has_no_primary() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnecting)], None);
-        assert!(m.tunnels[0].primary.is_none());
+        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnecting)], &[], None);
+        assert!(m.rows()[0].primary.is_none());
     }
 
     #[test]
@@ -647,8 +814,9 @@ mod tests {
         let mut t = ts("a", ForwardStatus::Connected);
         t.name = "Qismo Prod".to_string();
         t.port = 5431;
-        let m = build_menu_model(&[t], None);
-        let row = &m.tunnels[0];
+        let m = build_menu_model(&[t], &[], None);
+        let rows = m.rows();
+        let row = rows[0];
         assert_eq!(row.port, 5431);
         assert_eq!(tunnel_row_label(row), "Qismo Prod   :5431");
     }
@@ -658,9 +826,9 @@ mod tests {
         let mut t = ts("a", ForwardStatus::Disconnecting);
         t.name = "DB".to_string();
         t.port = 6001;
-        let m = build_menu_model(&[t], None);
+        let m = build_menu_model(&[t], &[], None);
         assert_eq!(
-            tunnel_row_label(&m.tunnels[0]),
+            tunnel_row_label(m.rows()[0]),
             "DB   :6001  (Disconnecting…)"
         );
     }
@@ -673,6 +841,7 @@ mod tests {
                 ts("a", ForwardStatus::Connected),
                 ts("b", ForwardStatus::Disconnected),
             ],
+            &[],
             None,
         );
         assert!(m.show_start_all);
@@ -686,6 +855,7 @@ mod tests {
                 ts("a", ForwardStatus::Connected),
                 ts("b", ForwardStatus::Connected),
             ],
+            &[],
             None,
         );
         assert!(!m.show_start_all);
@@ -699,6 +869,7 @@ mod tests {
                 ts("a", ForwardStatus::Disconnected),
                 ts("b", ForwardStatus::Error),
             ],
+            &[],
             None,
         );
         assert!(m.show_start_all);
@@ -707,14 +878,14 @@ mod tests {
 
     #[test]
     fn error_makes_start_all_available() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], None);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], &[], None);
         assert!(m.show_start_all);
         assert!(!m.show_stop_all);
     }
 
     #[test]
     fn connecting_makes_stop_all_available() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Connecting)], None);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Connecting)], &[], None);
         assert!(!m.show_start_all);
         assert!(m.show_stop_all);
     }
@@ -730,18 +901,131 @@ mod tests {
         assert_eq!(connected_count(&tunnels), 2);
     }
 
+    // --- header status summary ---------------------------------------------
+
+    #[test]
+    fn summary_none_connected() {
+        assert_eq!(status_summary(0, 0), "No active tunnels");
+        assert_eq!(status_summary(0, 3), "No active tunnels");
+    }
+
+    #[test]
+    fn summary_all_connected() {
+        assert_eq!(status_summary(3, 3), "3 connected");
+    }
+
+    #[test]
+    fn summary_partial() {
+        assert_eq!(status_summary(1, 3), "1 of 3 connected");
+    }
+
+    #[test]
+    fn model_carries_connected_and_total() {
+        let m = build_menu_model(
+            &[
+                ts("a", ForwardStatus::Connected),
+                ts("b", ForwardStatus::Disconnected),
+            ],
+            &[],
+            None,
+        );
+        assert_eq!(m.connected, 1);
+        assert_eq!(m.total, 2);
+    }
+
+    // --- group sections -----------------------------------------------------
+
+    #[test]
+    fn flat_section_when_no_groups() {
+        let m = build_menu_model(
+            &[
+                ts("a", ForwardStatus::Connected),
+                ts("b", ForwardStatus::Disconnected),
+            ],
+            &[],
+            None,
+        );
+        assert_eq!(m.sections.len(), 1);
+        assert!(m.sections[0].header.is_none());
+        assert_eq!(m.sections[0].rows.len(), 2);
+    }
+
+    #[test]
+    fn grouped_rows_get_section_headers_in_group_order() {
+        // Groups declared out of order; sections must follow `order`.
+        let groups = [group("g2", "Staging", 1), group("g1", "Production", 0)];
+        let m = build_menu_model(
+            &[
+                ts_grouped("a", ForwardStatus::Connected, "g2"),
+                ts_grouped("b", ForwardStatus::Connected, "g1"),
+            ],
+            &groups,
+            None,
+        );
+        assert_eq!(m.sections.len(), 2);
+        assert_eq!(m.sections[0].header.as_deref(), Some("Production"));
+        assert_eq!(m.sections[0].rows[0].id, "b");
+        assert_eq!(m.sections[1].header.as_deref(), Some("Staging"));
+        assert_eq!(m.sections[1].rows[0].id, "a");
+    }
+
+    #[test]
+    fn ungrouped_rows_fall_under_ungrouped_section_last() {
+        let groups = [group("g1", "Production", 0)];
+        let m = build_menu_model(
+            &[
+                ts("a", ForwardStatus::Connected),
+                ts_grouped("b", ForwardStatus::Connected, "g1"),
+            ],
+            &groups,
+            None,
+        );
+        assert_eq!(m.sections.len(), 2);
+        assert_eq!(m.sections[0].header.as_deref(), Some("Production"));
+        assert_eq!(m.sections[1].header.as_deref(), Some("Ungrouped"));
+        assert_eq!(m.sections[1].rows[0].id, "a");
+    }
+
+    #[test]
+    fn unknown_group_id_falls_back_to_ungrouped() {
+        // A row referencing a group that no longer exists renders as ungrouped,
+        // never dropped.
+        let groups = [group("g1", "Production", 0)];
+        let m = build_menu_model(
+            &[ts_grouped("a", ForwardStatus::Connected, "ghost")],
+            &groups,
+            None,
+        );
+        assert_eq!(m.sections.len(), 1);
+        assert_eq!(m.sections[0].header.as_deref(), Some("Ungrouped"));
+        assert_eq!(m.rows().len(), 1);
+    }
+
+    #[test]
+    fn empty_group_section_is_omitted() {
+        // A declared group with no rows must not produce a header.
+        let groups = [group("g1", "Production", 0), group("g2", "Staging", 1)];
+        let m = build_menu_model(
+            &[ts_grouped("a", ForwardStatus::Connected, "g1")],
+            &groups,
+            None,
+        );
+        assert_eq!(m.sections.len(), 1);
+        assert_eq!(m.sections[0].header.as_deref(), Some("Production"));
+    }
+
     #[test]
     fn update_notice_flows_through_when_present() {
         let notice = UpdateNotice {
             version: Some("1.5.0".to_string()),
         };
-        let m = build_menu_model(&[], Some(notice.clone()));
+        let m = build_menu_model(&[], &[], Some(notice.clone()));
         assert_eq!(m.update_notice, Some(notice));
     }
 
     #[test]
     fn update_notice_absent_when_none() {
-        let m = build_menu_model(&[ts("a", ForwardStatus::Connected)], None);
+        let m = build_menu_model(&[ts("a", ForwardStatus::Connected)], &[], None);
         assert!(m.update_notice.is_none());
     }
 
