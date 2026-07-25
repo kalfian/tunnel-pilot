@@ -186,8 +186,6 @@
     font-size: var(--fs-label);
     line-height: var(--lh-label);
     font-weight: var(--fw-label);
-    letter-spacing: var(--tracking-label);
-    text-transform: uppercase;
     color: var(--text-2);
     overflow: hidden;
     text-overflow: ellipsis;

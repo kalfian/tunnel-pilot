@@ -433,7 +433,7 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
                 items.push(Box::new(MenuItem::with_id(
                     app,
                     format!("noop:hdr:{header}"),
-                    header.to_uppercase(),
+                    header.clone(),
                     false,
                     None::<&str>,
                 )?));
