@@ -27,7 +27,7 @@ pub fn app_hydrate(
     state.app_snapshot(updater.latest_status())
 }
 
-/// `show_window` — show + focus the main window (tray "Open" / single-instance).
+/// `show_window` — show + focus the main window (tray "Settings" / single-instance).
 #[tauri::command]
 pub fn show_window(app: AppHandle) {
     crate::window::show_window(&app);

@@ -272,10 +272,13 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
         items.push(Box::new(PredefinedMenuItem::separator(app)?));
     }
 
+    // The main window IS the settings/config window (v1 parity), so the tray
+    // entry reads "Settings". Id stays `ID_OPEN` — the action still shows the
+    // window via `window::show_window` (see `handle_menu_event`).
     items.push(Box::new(MenuItem::with_id(
         app,
         ID_OPEN,
-        "Open",
+        "Settings",
         true,
         None::<&str>,
     )?));
