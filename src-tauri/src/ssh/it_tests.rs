@@ -1,5 +1,5 @@
 //! Engine integration tests against an IN-PROCESS russh server (spec 03 §§1,2,
-//! 5,6 acceptance). No external sshd/docker is required — a minimal russh 0.45
+//! 5,6 acceptance). No external sshd/docker is required — a minimal russh 0.62
 //! server that accepts password auth and forwards `direct-tcpip` channels to a
 //! real TCP target runs inside the test process. If a future environment cannot
 //! spawn the in-process server, these are the tests to gate behind `#[ignore]`.
@@ -84,7 +84,6 @@ struct TestServerHandler {
     hang_session_channel: Arc<AtomicBool>,
 }
 
-#[async_trait::async_trait]
 impl russh::server::Handler for TestServerHandler {
     type Error = russh::Error;
 
@@ -99,14 +98,18 @@ impl russh::server::Handler for TestServerHandler {
     async fn channel_open_session(
         &mut self,
         _channel: russh::Channel<russh::server::Msg>,
+        reply: russh::server::ChannelOpenHandle,
         _session: &mut russh::server::Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         // The client's 3s RTT probe opens a session channel. If wedged, delay
-        // the confirmation past the client's probe timeout (F32).
+        // the confirmation past the client's probe timeout (F32). In russh 0.62
+        // the open is confirmed by calling `reply.accept()` (not by returning
+        // `Ok(true)`); dropping `reply` would reject the open.
         if self.hang_session_channel.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     async fn channel_open_direct_tcpip(
@@ -116,11 +119,15 @@ impl russh::server::Handler for TestServerHandler {
         port_to_connect: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: russh::server::ChannelOpenHandle,
         _session: &mut russh::server::Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         if self.reject_channels.load(Ordering::SeqCst) {
-            return Ok(false); // reject → client open errors → forward failure
+            // reject → client open errors → forward failure
+            reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
+            return Ok(());
         }
+        reply.accept().await;
         let target = format!("{host_to_connect}:{port_to_connect}");
         tokio::spawn(async move {
             if let Ok(mut tcp) = TcpStream::connect(&target).await {
@@ -128,7 +135,7 @@ impl russh::server::Handler for TestServerHandler {
                 let _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp).await;
             }
         });
-        Ok(true)
+        Ok(())
     }
 }
 
@@ -168,8 +175,13 @@ struct StartOpts {
 
 /// Start the SSH server. `fixed_port` lets the retry test rebind the same port.
 async fn start_ssh_server(opts: StartOpts) -> TestSsh {
+    // russh 0.62 host keys are `ssh_key::PrivateKey`. A deterministic seed keeps
+    // the in-process test server reproducible (no RNG plumbing needed).
+    let host_key = russh::keys::PrivateKey::from(
+        russh::keys::ssh_key::private::Ed25519Keypair::from_seed(&[7u8; 32]),
+    );
     let config = Arc::new(russh::server::Config {
-        keys: vec![russh::keys::key::KeyPair::generate_ed25519().expect("keygen")],
+        keys: vec![host_key],
         inactivity_timeout: Some(Duration::from_secs(3600)),
         ..Default::default()
     });

@@ -27,9 +27,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util"
 tokio-util = "0.7"                  # CancellationToken (two-level token hierarchy, M1)
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# Bridges the `log` crate into `tracing`. russh 0.45 / russh-keys 0.45 emit via
-# `log` (NOT tracing), so this is required to capture their KEX/algorithm
-# negotiation in the dev log for the "Unknown algorithm" diagnostic.
+# Bridges the `log` crate into `tracing`. russh still emits via `log` (NOT
+# tracing), so this is required to capture its KEX/algorithm negotiation in the
+# dev log.
 tracing-log = "0.2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["clock"] }
@@ -41,9 +41,13 @@ tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
-russh = "0.45"
-russh-keys = "0.45"
-async-trait = "0.1.91"
+# russh 0.62 fixes the strict-kex negotiation bug that made 0.45 unable to talk
+# to OpenSSH 8.9+ servers (0.45 could select the `kex-strict-*` signaling MARKER
+# as the real KEX → `Error::UnknownAlgo`; see ssh/client.rs). Its `client`/
+# `server` `Handler` traits are native-async (RPITIT: `fn -> impl Future`), so
+# impls use plain `async fn` — no `async-trait` crate needed anymore. Keys now
+# live under `russh::keys` (the separate `russh-keys` crate is gone).
+russh = "0.62"
 
 # OS keychain (credentials/, M2). keyring v3 ships NO backend by default (F9):
 # each target MUST pin its native backend feature or `keychain_available()` is

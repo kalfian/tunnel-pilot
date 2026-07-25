@@ -135,7 +135,7 @@ pub fn spawn_forward_conn(
         fail.reset();
 
         let _guard = ActiveConnGuard::new(stats.clone());
-        let stream = channel.into_stream(); // AsyncRead + AsyncWrite (russh 0.45)
+        let stream = channel.into_stream(); // AsyncRead + AsyncWrite
         pipe_bidirectional(local, stream, &stats, &attempt_cancel).await;
     });
 }

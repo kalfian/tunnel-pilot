@@ -34,63 +34,46 @@ pub type Session = Handle<ClientHandler>;
 /// pinning is ever specced.
 pub struct ClientHandler;
 
-#[async_trait::async_trait]
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::key::PublicKey,
+        _server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }
 
-/// Comprehensive algorithm-negotiation set.
+/// Host & public-key signature algorithms offered to the server.
 ///
-/// russh 0.45's `Preferred::DEFAULT` omits algorithms real-world OpenSSH jump
-/// hosts still require — most importantly the `ssh-rsa` (SHA-1) host-key
-/// signature and `ecdsa-sha2-nistp384`, plus the older `diffie-hellman-group14`
-/// KEX and CTR/CBC ciphers. Against such a server the transport-layer
-/// negotiation fails BEFORE authentication with russh's `Error::UnknownAlgo`
-/// ("Unknown algorithm") / `NoCommonKexAlgo`. We therefore offer everything
-/// russh 0.45 can actually instantiate.
+/// Covers Ed25519, the three NIST ECDSA curves, RSA with SHA-2 (`rsa-sha2-512`
+/// / `rsa-sha2-256`), and legacy `ssh-rsa` (SHA-1) — the last kept for older
+/// jump hosts whose RSA host key only signs with SHA-1. russh 0.62's default
+/// already includes all of these; we list them explicitly so the offered set is
+/// pinned and unit-testable.
 ///
-/// CRITICAL: every name below is verified to be present in russh 0.45's
-/// `KEXES` / `CIPHERS` / `MACS` / key registries. Listing a name russh does NOT
-/// have registered is exactly what raises `Error::UnknownAlgo` (negotiation
-/// selects a name from our list, then the registry lookup returns `None`), so
-/// this list must never include an unregistered algorithm.
-///
-/// ONLY real key-exchange algorithms — never the `ext-info-*` / `kex-strict-*`
-/// negotiation MARKERS. Those are signaling pseudo-names, not runnable KEX; if
-/// they appear in the client's preferred `kex` list, russh can select the
-/// server's `kex-strict-s-v00@openssh.com` marker as the negotiated KEX and then
-/// fail with `Error::UnknownAlgo` trying to run it (observed against OpenSSH 8.9
-/// with strict-kex — the real `Unknown algorithm` bug). russh manages the
-/// strict-KEX / ext-info signaling itself; we must not offer those markers here.
-const PREFERRED_KEX: &[russh::kex::Name] = &[
-    russh::kex::CURVE25519,
-    russh::kex::CURVE25519_PRE_RFC_8731,
-    russh::kex::DH_G16_SHA512,
-    russh::kex::DH_G14_SHA256,
-    russh::kex::ECDH_SHA2_NISTP256,
-    russh::kex::ECDH_SHA2_NISTP384,
-    russh::kex::ECDH_SHA2_NISTP521,
-    russh::kex::DH_G14_SHA1,
-];
-
-/// Host & public-key signature algorithms. Adds `ecdsa-sha2-nistp384` and
-/// `ssh-rsa` (SHA-1 RSA) on top of russh's default — the likely culprit for the
-/// `dbjump.qiscus.io` RSA host key.
-const PREFERRED_KEY: &[russh::keys::key::Name] = &[
-    russh::keys::key::ED25519,
-    russh::keys::key::ECDSA_SHA2_NISTP256,
-    russh::keys::key::ECDSA_SHA2_NISTP384,
-    russh::keys::key::ECDSA_SHA2_NISTP521,
-    russh::keys::key::RSA_SHA2_512,
-    russh::keys::key::RSA_SHA2_256,
-    russh::keys::key::SSH_RSA,
+/// In russh 0.62 host-key preferences are `ssh_key::Algorithm` values (not the
+/// name-string constants that russh 0.45 used).
+const PREFERRED_KEY: &[russh::keys::Algorithm] = &[
+    russh::keys::Algorithm::Ed25519,
+    russh::keys::Algorithm::Ecdsa {
+        curve: russh::keys::EcdsaCurve::NistP256,
+    },
+    russh::keys::Algorithm::Ecdsa {
+        curve: russh::keys::EcdsaCurve::NistP384,
+    },
+    russh::keys::Algorithm::Ecdsa {
+        curve: russh::keys::EcdsaCurve::NistP521,
+    },
+    russh::keys::Algorithm::Rsa {
+        hash: Some(russh::keys::HashAlg::Sha512),
+    },
+    russh::keys::Algorithm::Rsa {
+        hash: Some(russh::keys::HashAlg::Sha256),
+    },
+    // `Rsa { hash: None }` == the legacy `ssh-rsa` (SHA-1) signature.
+    russh::keys::Algorithm::Rsa { hash: None },
 ];
 
 /// Symmetric ciphers. GCM/ChaCha are AEAD; CTR/CBC pair with the MAC list.
@@ -115,10 +98,21 @@ const PREFERRED_MAC: &[russh::mac::Name] = &[
     russh::mac::HMAC_SHA1,
 ];
 
-/// The comprehensive `Preferred` set offered during KEX (see [`PREFERRED_KEX`]).
+/// The `Preferred` algorithm set offered during KEX.
+///
+/// `kex` and `compression` are inherited verbatim from `Preferred::DEFAULT`.
+/// This is deliberate and load-bearing: russh 0.62 advertises the ext-info /
+/// strict-kex signaling MARKERS only if they are present in `prefs.kex`, and it
+/// places/orders them there itself. Hand-rolling a bespoke kex list (as the
+/// russh-0.45 code did) would silently drop those markers and disable strict-kex
+/// signaling. russh 0.62 then also correctly EXCLUDES the markers from real KEX
+/// selection (negotiation.rs filters `KEX_EXTENSION_NAMES` before choosing),
+/// which is exactly the fix for the 0.45 bug where the marker could be selected
+/// as the KEX and blow up with `Error::UnknownAlgo`. So: let the library own the
+/// kex list; we only broaden host keys / ciphers / MACs for jump-host reach.
 fn preferred_algorithms() -> russh::Preferred {
     russh::Preferred {
-        kex: Cow::Borrowed(PREFERRED_KEX),
+        kex: russh::Preferred::DEFAULT.kex,
         key: Cow::Borrowed(PREFERRED_KEY),
         cipher: Cow::Borrowed(PREFERRED_CIPHER),
         mac: Cow::Borrowed(PREFERRED_MAC),
@@ -184,16 +178,36 @@ async fn authenticate_inner(
 
     if let Some(path) = identity {
         // load_secret_key does synchronous file I/O — run it off the async path.
+        // In russh 0.62 it returns an `ssh_key::PrivateKey`.
         let path = path.to_string();
         let key = tokio::task::spawn_blocking(move || russh::keys::load_secret_key(&path, None))
             .await
             .map_err(|e| AppError::Ssh(format!("key load task failed: {e}")))?
             .map_err(|e| AppError::Ssh(format!("failed to load identity file: {e}")))?;
-        let accepted = session
-            .authenticate_publickey(&cfg.ssh_username, Arc::new(key))
+        let key = Arc::new(key);
+
+        // For RSA keys, pick the strongest signature hash the server advertised
+        // via `server-sig-algs` (rsa-sha2-512 > rsa-sha2-256 > legacy ssh-rsa).
+        // Modern OpenSSH (8.x+) rejects SHA-1 `ssh-rsa` for user auth, so passing
+        // `None` (which maps to ssh-rsa) would fail against `dbjump.qiscus.io`.
+        // Non-RSA keys ignore the hash, so only probe when the key is RSA.
+        let hash_alg = if key.algorithm().is_rsa() {
+            session
+                .best_supported_rsa_hash()
+                .await
+                .ok()
+                .flatten()
+                .flatten()
+        } else {
+            None
+        };
+
+        let key = russh::keys::PrivateKeyWithHashAlg::new(key, hash_alg);
+        let result = session
+            .authenticate_publickey(&cfg.ssh_username, key)
             .await
             .map_err(|e| AppError::Ssh(format!("publickey auth error: {e}")))?;
-        if !accepted {
+        if !result.success() {
             return Err(AppError::Ssh("publickey authentication rejected".into()));
         }
     } else {
@@ -202,11 +216,11 @@ async fn authenticate_inner(
             .get_password_async(&cfg.id)
             .await
             .ok_or_else(|| AppError::Connection("password or identity file required".into()))?;
-        let accepted = session
+        let result = session
             .authenticate_password(&cfg.ssh_username, pw)
             .await
             .map_err(|e| AppError::Ssh(format!("password auth error: {e}")))?;
-        if !accepted {
+        if !result.success() {
             return Err(AppError::Ssh("password authentication rejected".into()));
         }
     }
@@ -255,20 +269,35 @@ mod tests {
 
     #[test]
     fn preferred_offers_broad_host_key_and_kex_set() {
-        // Regression for "SSH error: connect failed: Unknown algorithm" against
-        // an OpenSSH jump host with an RSA host key: russh's default omits
-        // `ssh-rsa`, `ecdsa-sha2-nistp384`, and the DH-group14 KEX. Assert the
-        // widened set is what build_config offers.
+        // Regression for the strict-kex negotiation failure against OpenSSH 8.9
+        // jump hosts (`dbjump.qiscus.io`). Two invariants:
+        //   1. Host keys include legacy `ssh-rsa` (SHA-1) + both RSA SHA-2
+        //      variants + ecdsa-nistp384, so an RSA-host-key jump host matches.
+        //   2. The kex list carries curve25519 AND the ext-info / strict-kex
+        //      signaling markers (inherited from `Preferred::DEFAULT`) — russh
+        //      0.62 needs the markers present to advertise strict-kex, then
+        //      excludes them from real KEX selection (the 0.45 bug fix).
         let p = preferred_algorithms();
-        assert!(p.key.contains(&russh::keys::key::SSH_RSA));
-        assert!(p.key.contains(&russh::keys::key::RSA_SHA2_256));
-        assert!(p.key.contains(&russh::keys::key::RSA_SHA2_512));
-        assert!(p.key.contains(&russh::keys::key::ECDSA_SHA2_NISTP384));
-        assert!(p.kex.contains(&russh::kex::DH_G14_SHA256));
-        assert!(p.kex.contains(&russh::kex::DH_G14_SHA1));
+        assert!(p.key.contains(&russh::keys::Algorithm::Rsa { hash: None }));
+        assert!(p.key.contains(&russh::keys::Algorithm::Rsa {
+            hash: Some(russh::keys::HashAlg::Sha256)
+        }));
+        assert!(p.key.contains(&russh::keys::Algorithm::Rsa {
+            hash: Some(russh::keys::HashAlg::Sha512)
+        }));
+        assert!(p.key.contains(&russh::keys::Algorithm::Ecdsa {
+            curve: russh::keys::EcdsaCurve::NistP384
+        }));
+        assert!(p.kex.contains(&russh::kex::CURVE25519));
+        assert!(p
+            .kex
+            .contains(&russh::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT));
         assert!(p.cipher.contains(&russh::cipher::AES_256_CTR));
 
         let c = build_config(&cfg_with_keepalive(0, 0));
-        assert!(c.preferred.key.contains(&russh::keys::key::SSH_RSA));
+        assert!(c
+            .preferred
+            .key
+            .contains(&russh::keys::Algorithm::Rsa { hash: None }));
     }
 }

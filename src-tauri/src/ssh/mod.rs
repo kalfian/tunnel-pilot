@@ -1,4 +1,4 @@
-//! SSH tunnel engine (russh 0.45, pinned in M1).
+//! SSH tunnel engine (russh 0.62 — bumped from 0.45 to fix strict-kex).
 //!
 //! One long-lived supervisor task per tunnel owns its session in-task and loops
 //! across reconnect attempts; liveness is owned by russh keepalive + the
