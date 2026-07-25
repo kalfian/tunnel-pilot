@@ -1,19 +1,24 @@
 //! Dynamic tray-icon selection: idle grey / badge 1–9 (clamp), template images
-//! on macOS (spec 03 §10).
+//! on macOS (spec 03 §10). Also hosts the small colored **status-dot** images
+//! used as leading icons on per-tunnel menu rows (Herd-style).
 //!
 //! The count→asset mapping is a pure function ([`tray_icon_for_count`]) so it is
 //! unit-testable without a display. The PNG bytes are embedded at compile time
 //! (`include_bytes!`) so the icons are available identically in dev, tests, and
 //! every bundle regardless of the runtime working directory.
 //!
-//! NOTE (M3): the embedded PNGs are the v1 pre-colored tray assets reused as
-//! placeholders. On Windows/Linux they render as-is (blue badge). On macOS they
-//! are marked as **template images** per spec — macOS then tints them by the
-//! menu-bar appearance using the alpha channel. Dedicated monochrome template
-//! art (where the count digit reads crisply in both light and dark menu bars) is
-//! a follow-up for the design agent; the count→asset selection here is final.
+//! Menu-bar icon: the embedded `tray_icon_*` PNGs are **proper macOS template
+//! images** — pure-black RGB (0,0,0) + alpha at 44×44 (22pt @2x). macOS tints
+//! them to the menu-bar appearance (light/dark) via the alpha channel, so they
+//! render crisp and native next to system icons. [`update_tray_icon`] sets
+//! `set_icon_as_template(true)` on macOS. On Windows/Linux they render as-is.
+//!
+//! Status dots ([`load_dot`]) are *colored* (not template) — they must keep
+//! their green/yellow/red/grey hue inside the menu regardless of appearance.
 
 use tauri::image::Image;
+
+use crate::state::models::ForwardStatus;
 
 /// The connected-count value at which the badge clamps (spec 03 §10).
 pub const MAX_BADGE: usize = 9;
@@ -72,6 +77,53 @@ pub fn load_image(icon: TrayIcon) -> tauri::Result<Image<'static>> {
     Image::from_bytes(png_bytes(icon))
 }
 
+// --- per-tunnel status dots ------------------------------------------------
+
+/// A colored status dot shown as the leading icon of a per-tunnel menu row.
+/// Maps the app status palette: connected=green, connecting/disconnecting=yellow,
+/// error=red, disconnected=grey.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusDot {
+    Green,
+    Yellow,
+    Red,
+    Grey,
+}
+
+impl StatusDot {
+    /// The status→dot-color mapping (app status palette). Pure so it is
+    /// unit-testable without a display.
+    pub fn for_status(status: ForwardStatus) -> StatusDot {
+        match status {
+            ForwardStatus::Connected => StatusDot::Green,
+            ForwardStatus::Connecting | ForwardStatus::Disconnecting => StatusDot::Yellow,
+            ForwardStatus::Error => StatusDot::Red,
+            ForwardStatus::Disconnected => StatusDot::Grey,
+        }
+    }
+}
+
+const DOT_GREEN_PNG: &[u8] = include_bytes!("../../../assets/icons/dot_green.png");
+const DOT_YELLOW_PNG: &[u8] = include_bytes!("../../../assets/icons/dot_yellow.png");
+const DOT_RED_PNG: &[u8] = include_bytes!("../../../assets/icons/dot_red.png");
+const DOT_GREY_PNG: &[u8] = include_bytes!("../../../assets/icons/dot_grey.png");
+
+/// The embedded PNG bytes backing a [`StatusDot`].
+fn dot_bytes(dot: StatusDot) -> &'static [u8] {
+    match dot {
+        StatusDot::Green => DOT_GREEN_PNG,
+        StatusDot::Yellow => DOT_YELLOW_PNG,
+        StatusDot::Red => DOT_RED_PNG,
+        StatusDot::Grey => DOT_GREY_PNG,
+    }
+}
+
+/// Decode the status-dot PNG for `status` into a Tauri [`Image`] for use as an
+/// `IconMenuItem` leading icon.
+pub fn load_dot(status: ForwardStatus) -> tauri::Result<Image<'static>> {
+    Image::from_bytes(dot_bytes(StatusDot::for_status(status)))
+}
+
 /// Apply the correct icon for `count` connected tunnels to the tray, marking it
 /// a template image on macOS. Must run on the main thread (AppKit) — callers use
 /// `AppHandle::run_on_main_thread`. Failures are logged, never fatal.
@@ -127,6 +179,39 @@ mod tests {
         for n in 1..=MAX_BADGE {
             let bytes = png_bytes(tray_icon_for_count(n));
             assert!(!bytes.is_empty(), "badge {n} has no bytes");
+        }
+    }
+
+    #[test]
+    fn status_dot_matches_palette() {
+        assert_eq!(
+            StatusDot::for_status(ForwardStatus::Connected),
+            StatusDot::Green
+        );
+        assert_eq!(
+            StatusDot::for_status(ForwardStatus::Connecting),
+            StatusDot::Yellow
+        );
+        assert_eq!(
+            StatusDot::for_status(ForwardStatus::Disconnecting),
+            StatusDot::Yellow
+        );
+        assert_eq!(StatusDot::for_status(ForwardStatus::Error), StatusDot::Red);
+        assert_eq!(
+            StatusDot::for_status(ForwardStatus::Disconnected),
+            StatusDot::Grey
+        );
+    }
+
+    #[test]
+    fn every_status_dot_has_embedded_bytes() {
+        for dot in [
+            StatusDot::Green,
+            StatusDot::Yellow,
+            StatusDot::Red,
+            StatusDot::Grey,
+        ] {
+            assert!(!dot_bytes(dot).is_empty(), "dot {dot:?} has no bytes");
         }
     }
 }
