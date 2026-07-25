@@ -1,18 +1,19 @@
 name: tauri-build
 
-# Cross-platform BUILD-ONLY CI for the Tauri v2 rewrite (spec 06 §4).
+# Cross-platform BUILD-ONLY CI for the Tauri v2 app (spec 06 §4).
 #
-# The v2 app lives alongside Flutter v1 until the M7 cutover, so this workflow
-# is additive — it does NOT replace the Flutter release workflow (release.yml).
-# No OS code-signing and no updater (minisign) signing here: signing is wired
-# in M6/M7 and only runs in the tag-triggered release workflow. CI is the only
-# push/release path (project rule) — this job never publishes.
+# Post-cutover this is the primary CI gate on `master` (the Flutter v1 app and its
+# `release.yml` were removed in the v2 rewrite). It still runs on `rewrite/tauri`
+# so the branch stays green until the merge. No OS code-signing and no updater
+# (minisign) signing here — that runs only in the tag-triggered release workflow
+# (tauri-release.yml). CI is the only push/release path (project rule); this job
+# never publishes.
 
 on:
   push:
-    branches: [rewrite/tauri]
+    branches: [master, rewrite/tauri]
   pull_request:
-    branches: [rewrite/tauri]
+    branches: [master, rewrite/tauri]
   workflow_dispatch:
 
 concurrency:

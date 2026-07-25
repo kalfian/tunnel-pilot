@@ -21,7 +21,7 @@ name: tauri-release
 
 on:
   push:
-    tags: ["v2.*"] # v2 releases only; v1 (Flutter) uses release.yml until M7 cutover
+    tags: ["v2.*"] # v2 releases only (Flutter v1 + its release.yml were removed in the rewrite)
   workflow_dispatch:
     inputs:
       tag:
