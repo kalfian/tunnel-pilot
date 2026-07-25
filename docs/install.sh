@@ -2,14 +2,24 @@
 set -euo pipefail
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Tunnel Pilot — Installer
+#  Tunnel Pilot — Installer (v2 / Tauri)
 #  https://github.com/kalfian/tunnel-pilot
+#
+#  Fetches the latest v2 release from the GitHub Releases "latest" endpoint and
+#  installs the platform-native bundle:
+#    macOS   → .dmg          (mount, copy .app to /Applications)
+#    Linux   → .AppImage     (chmod +x, launcher + .desktop) — falls back to .deb
+#    Windows → NSIS setup.exe (run the installer)   [Git Bash / MSYS / Cygwin]
+#
+#  Bundles are UNSIGNED (open-source / unfunded — no paid OS-signing certs). The
+#  self-update path IS cryptographically signed (minisign). Gatekeeper /
+#  SmartScreen workarounds are printed at the end.
 # ══════════════════════════════════════════════════════════════════════════════
 
 REPO="kalfian/tunnel-pilot"
 APP_NAME="Tunnel Pilot"
 INSTALL_DIR="/Applications"
-BINARY_NAME="tunnel_pilot"
+BINARY_NAME="tunnel-pilot"
 
 # ── Colors & styles ───────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -91,29 +101,33 @@ print_divider() {
 }
 
 # ── Platform & architecture ───────────────────────────────────────────────────
+#
+# Asset filenames are matched by PATTERN (extension/arch), never a hardcoded
+# version — the `releases/latest` endpoint resolves the newest tag on its own.
+# GitHub rewrites spaces in asset names to '.', so "Tunnel Pilot_2.0.0_..." is
+# uploaded as "Tunnel.Pilot_2.0.0_...". Anchoring each pattern with '$' also
+# avoids matching updater sidecars (`*.sig`, `*.tar.gz`) and `latest.json`.
+LINUX_FALLBACK_PATTERN=""   # secondary pattern tried if the primary finds nothing
 detect_platform() {
   case "$(uname -s)" in
     Darwin)
       PLATFORM="macos"
       ARCH="$(uname -m)"
-      # Prefer arch-specific asset, fall back to universal
-      if [ "$ARCH" = "arm64" ]; then
-        ASSET_PATTERN="arm64.*\\.dmg$|aarch64.*\\.dmg$|\\.dmg$"
-      else
-        ASSET_PATTERN="x86_64.*\\.dmg$|\\.dmg$"
-      fi
-      # Use a simple .dmg pattern (pick first match)
+      # v2 ships a single universal .dmg; match any .dmg (excludes .app.tar.gz/.sig).
       ASSET_PATTERN="\\.dmg$"
       ;;
     Linux)
       PLATFORM="linux"
       ARCH="$(uname -m)"
-      ASSET_PATTERN="linux.*\\.tar\\.gz$"
+      # Prefer the portable, no-root AppImage; fall back to .deb if absent.
+      ASSET_PATTERN="\\.AppImage$"
+      LINUX_FALLBACK_PATTERN="\\.deb$"
       ;;
     MINGW*|MSYS*|CYGWIN*)
       PLATFORM="windows"
       ARCH="$(uname -m)"
-      ASSET_PATTERN="\\.zip$"
+      # NSIS installer: "..._x64-setup.exe" (excludes "-setup.exe.sig").
+      ASSET_PATTERN="-setup\\.exe$"
       ;;
     *)
       print_error "Unsupported platform: $(uname -s)\nThis installer supports macOS, Linux, and Windows (Git Bash)."
@@ -126,11 +140,6 @@ HAS_JQ=false
 check_deps() {
   if ! command -v curl &>/dev/null; then
     print_error "'curl' is required but not installed.\n  macOS: brew install curl\n  Linux: sudo apt install curl"
-  fi
-  if [ "$PLATFORM" = "windows" ]; then
-    if ! command -v unzip &>/dev/null && ! command -v powershell &>/dev/null && ! command -v pwsh &>/dev/null; then
-      print_error "'unzip' or PowerShell is required on Windows.\n  Install Git for Windows or ensure PowerShell is in PATH."
-    fi
   fi
   if command -v jq &>/dev/null; then
     HAS_JQ=true
@@ -197,6 +206,10 @@ fetch_latest() {
   fi
 
   ASSET_URL=$(json_asset_url "$RELEASE_JSON" "$ASSET_PATTERN")
+  # Linux: fall back to .deb if no AppImage was published.
+  if { [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; } && [ -n "$LINUX_FALLBACK_PATTERN" ]; then
+    ASSET_URL=$(json_asset_url "$RELEASE_JSON" "$LINUX_FALLBACK_PATTERN")
+  fi
   if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
     print_error "No $PLATFORM release asset found for $VERSION.\n  Visit: https://github.com/${REPO}/releases"
   fi
@@ -302,53 +315,60 @@ install_macos() {
 
 # ── Install: Linux ─────────────────────────────────────────────────────────────
 install_linux() {
+  case "$ASSET_NAME" in
+    *.deb) install_linux_deb ;;
+    *)     install_linux_appimage ;;
+  esac
+}
+
+install_linux_appimage() {
   INSTALL_APP_DIR="$HOME/.local/share/$BINARY_NAME"
   INSTALL_BIN="$HOME/.local/bin"
-
-  # Remove previous installation before recreating
-  if [ -d "$INSTALL_APP_DIR" ]; then
-    print_step "Removing previous installation..."
-    rm -rf "$INSTALL_APP_DIR"
-  fi
   mkdir -p "$INSTALL_APP_DIR" "$INSTALL_BIN"
 
-  spinner_start "Extracting archive"
-  # Extract full bundle (binary + lib/*.so + data/) into the app dir
-  # so the binary can find shared libs via $ORIGIN/lib at runtime
-  tar -xzf "$TMP_FILE" -C "$INSTALL_APP_DIR"
+  local APPIMAGE_DEST="$INSTALL_APP_DIR/$ASSET_NAME"
+
+  # Replace any previous AppImage(s) so we don't leave stale versions behind.
+  find "$INSTALL_APP_DIR" -maxdepth 1 -name '*.AppImage' -delete 2>/dev/null || true
+
+  spinner_start "Installing AppImage"
+  cp "$TMP_FILE" "$APPIMAGE_DEST"
+  chmod +x "$APPIMAGE_DEST"
   spinner_stop
 
-  LINUX_BINARY=$(find "$INSTALL_APP_DIR" -name "$BINARY_NAME" -maxdepth 2 -type f | head -1)
-  if [ -z "$LINUX_BINARY" ]; then
-    print_error "Binary '$BINARY_NAME' not found in archive."
-  fi
-
-  chmod +x "$LINUX_BINARY"
-
-  # Create a launcher wrapper so shared libs resolve via $ORIGIN/lib correctly.
-  # A plain symlink would set $ORIGIN to ~/.local/bin and miss the lib/ directory.
+  # Launcher wrapper on PATH → the AppImage. Kept indirect so the on-PATH name is
+  # stable ("tunnel-pilot") even though the AppImage filename carries the version.
   local LAUNCHER="$INSTALL_BIN/$BINARY_NAME"
   cat > "$LAUNCHER" << LAUNCHER_EOF
 #!/bin/bash
-exec "$LINUX_BINARY" "\$@"
+exec "$APPIMAGE_DEST" "\$@"
 LAUNCHER_EOF
   chmod +x "$LAUNCHER"
 
-  print_success "Installed to ${DIM}$INSTALL_APP_DIR${NC}"
+  print_success "Installed to ${DIM}$APPIMAGE_DEST${NC}"
   print_success "Launcher at ${DIM}$LAUNCHER${NC}"
 
-  # .desktop file for app menu + desktop shortcut
+  # Best-effort .desktop entry (icon extracted from the AppImage if possible).
   local DESKTOP_DIR="$HOME/.local/share/applications"
-  local ICON_SRC="$INSTALL_APP_DIR/data/flutter_assets/assets/icons/app_icon_256.png"
   local ICON_DEST="$HOME/.local/share/icons/tunnel_pilot.png"
   mkdir -p "$DESKTOP_DIR" "$HOME/.local/share/icons"
-  [ -f "$ICON_SRC" ] && cp "$ICON_SRC" "$ICON_DEST"
+
+  # `--appimage-extract` runs without FUSE; pull the embedded .DirIcon if present.
+  local EXTRACT_TMP
+  EXTRACT_TMP=$(mktemp -d)
+  if ( cd "$EXTRACT_TMP" && "$APPIMAGE_DEST" --appimage-extract '.DirIcon' &>/dev/null ); then
+    local EXTRACTED_ICON
+    EXTRACTED_ICON=$(find "$EXTRACT_TMP/squashfs-root" -maxdepth 1 -name '.DirIcon' 2>/dev/null | head -1 || true)
+    [ -n "$EXTRACTED_ICON" ] && cp "$EXTRACTED_ICON" "$ICON_DEST" 2>/dev/null || true
+  fi
+  rm -rf "$EXTRACT_TMP" 2>/dev/null || true
+
   cat > "$DESKTOP_DIR/tunnel_pilot.desktop" << DESKTOP_EOF
 [Desktop Entry]
 Name=Tunnel Pilot
 Comment=SSH Local Port Forwarding Manager
 Exec=$LAUNCHER %U
-Icon=$ICON_DEST
+Icon=${ICON_DEST}
 Terminal=false
 Type=Application
 Categories=Network;Utility;
@@ -378,27 +398,65 @@ DESKTOP_EOF
   fi
 }
 
-# ── Install: Windows ───────────────────────────────────────────────────────────
-install_windows() {
-  WIN_DEST="$APPDATA/Tunnel Pilot"
-  mkdir -p "$WIN_DEST"
-
-  spinner_start "Extracting archive"
-  if command -v unzip &>/dev/null; then
-    unzip -qo "$TMP_FILE" -d "$WIN_DEST"   # -o: overwrite existing files (safe for reinstall)
-  elif command -v pwsh &>/dev/null; then
-    pwsh -Command "Expand-Archive -Force -Path '$TMP_FILE' -DestinationPath '$WIN_DEST'"
+install_linux_deb() {
+  print_step "Installing .deb package (requires sudo)..."
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get install -y "$TMP_FILE" \
+      || print_error "apt-get failed to install the .deb.\n  Try manually: sudo apt-get install -y '$TMP_FILE'"
+  elif command -v dpkg &>/dev/null; then
+    sudo dpkg -i "$TMP_FILE" || sudo apt-get -f install -y \
+      || print_error "dpkg failed to install the .deb.\n  Try manually: sudo dpkg -i '$TMP_FILE'"
   else
-    powershell -Command "Expand-Archive -Force -Path '$TMP_FILE' -DestinationPath '$WIN_DEST'"
+    print_error "No apt-get/dpkg found — install the .deb manually:\n  $TMP_FILE"
   fi
-  spinner_stop
-  print_success "Extracted to ${DIM}$WIN_DEST${NC}"
+  print_success "Installed via package manager"
+}
+
+# ── Install: Windows (Git Bash / MSYS / Cygwin) ────────────────────────────────
+install_windows() {
+  # The v2 Windows artifact is an NSIS installer (…-setup.exe). Run it; NSIS is
+  # configured for a per-user install (no admin prompt). We launch it silently
+  # (/S) so the one-liner stays non-interactive.
+  print_step "Running installer..."
+  chmod +x "$TMP_FILE" 2>/dev/null || true
+  if command -v cmd.exe &>/dev/null; then
+    MSYS2_ARG_CONV_EXCL="*" cmd.exe /c "$(cygpath -w "$TMP_FILE" 2>/dev/null || echo "$TMP_FILE")" /S \
+      || print_error "Installer exited with an error.\n  Run it manually: $ASSET_NAME"
+  else
+    "$TMP_FILE" /S \
+      || print_error "Installer exited with an error.\n  Run it manually: $ASSET_NAME"
+  fi
+  print_success "Installer finished (per-user NSIS install)"
 }
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
   spinner_stop
   rm -rf "${TMP_DIR:-}" 2>/dev/null || true
+}
+
+# ── Unsigned-install note (bundles are not OS-code-signed) ─────────────────────
+print_unsigned_note() {
+  case "$PLATFORM" in
+    macos)
+      echo ""
+      print_warn "This build is not notarized by Apple."
+      print_info "If macOS blocks the first launch: right-click the app in"
+      print_info "/Applications → ${BOLD}Open${NC} → confirm ${BOLD}Open${NC}. (This installer"
+      print_info "already strips the quarantine flag, so a plain launch usually works.)"
+      ;;
+    windows)
+      echo ""
+      print_warn "This build is not code-signed."
+      print_info "If Windows SmartScreen warns on first run: click"
+      print_info "${BOLD}More info${NC} → ${BOLD}Run anyway${NC}."
+      ;;
+    linux)
+      : # No OS-signing gatekeeper on Linux.
+      ;;
+  esac
+  print_info "Self-updates ARE cryptographically signed (minisign); only the"
+  print_info "initial download is unsigned at the OS level."
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -411,17 +469,20 @@ print_summary() {
   case "$PLATFORM" in
     macos)
       print_info "App is launching from /Applications/$APP_NAME.app"
-      print_info "Find it in the menu bar — look for the  icon"
+      print_info "Find it in the menu bar — look for the tray icon"
       ;;
     linux)
       print_info "Run it with: ${CYAN}$BINARY_NAME${NC}"
-      print_info "App bundle: ${DIM}$HOME/.local/share/$BINARY_NAME${NC}"
+      case "$ASSET_NAME" in
+        *.deb) print_info "Installed via your package manager" ;;
+        *)     print_info "AppImage: ${DIM}$HOME/.local/share/$BINARY_NAME${NC}" ;;
+      esac
       ;;
     windows)
-      print_info "Run tunnel_pilot.exe from:"
-      print_info "${WIN_DEST:-$APPDATA/Tunnel Pilot}"
+      print_info "Launch ${BOLD}Tunnel Pilot${NC} from the Start Menu"
       ;;
   esac
+  print_unsigned_note
   echo ""
   print_info "Docs & support → https://github.com/$REPO"
   echo ""

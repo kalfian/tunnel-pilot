@@ -113,20 +113,20 @@ run_detect() {
   unset -f uname 2>/dev/null || true
 }
 
-# macOS
+# macOS → v2 .dmg
 result=$(run_detect "Darwin")
-assert_eq "Darwin → platform=macos"        "${result%%|*}" "macos"
-assert_contains "Darwin → .dmg pattern"    "${result##*|}" "dmg"
+assert_eq "Darwin → platform=macos"          "${result%%|*}" "macos"
+assert_contains "Darwin → .dmg pattern"      "${result##*|}" "dmg"
 
-# Linux
+# Linux → v2 .AppImage
 result=$(run_detect "Linux")
-assert_eq "Linux → platform=linux"         "${result%%|*}" "linux"
-assert_contains "Linux → .tar.gz pattern"  "${result##*|}" "tar"
+assert_eq "Linux → platform=linux"           "${result%%|*}" "linux"
+assert_contains "Linux → .AppImage pattern"  "${result##*|}" "AppImage"
 
-# Windows (MINGW)
+# Windows (MINGW) → v2 NSIS -setup.exe
 result=$(run_detect "MINGW64_NT")
-assert_eq "MINGW → platform=windows"       "${result%%|*}" "windows"
-assert_contains "MINGW → .zip pattern"     "${result##*|}" "zip"
+assert_eq "MINGW → platform=windows"         "${result%%|*}" "windows"
+assert_contains "MINGW → -setup.exe pattern" "${result##*|}" "setup"
 
 # Windows (MSYS)
 result=$(run_detect "MSYS_NT")
@@ -154,123 +154,97 @@ assert_eq "extracts tag_name"  "$(json_get "$JSON" "tag_name")" "v1.2.3"
 assert_eq "extracts name"      "$(json_get "$JSON" "name")"     "Release v1.2.3"
 HAS_JQ=true  # restore if jq available
 
-# ── 4. json_asset_url — grep/sed fallback ────────────────────────────────────
+# ── 4. json_asset_url — v2 Tauri asset names ─────────────────────────────────
 # Note: ASSET_PATTERN in install.sh uses double-quoted "\\." which bash stores
 # as "\." (one backslash). Both jq test() and grep -E treat "\." as literal dot.
+# GitHub rewrites spaces in asset names to '.', so fixtures use "Tunnel.Pilot".
+# The updater sidecars (.sig, .tar.gz) and latest.json must NOT be matched — the
+# '$' anchor on each pattern guarantees that.
 group "json_asset_url (grep/sed fallback)"
 HAS_JQ=false
 FAKE_JSON='{
   "assets": [
-    {"name":"TunnelPilot-v1.0-macos.dmg","browser_download_url":"https://example.com/TunnelPilot-v1.0-macos.dmg"},
-    {"name":"TunnelPilot-v1.0-linux.tar.gz","browser_download_url":"https://example.com/TunnelPilot-v1.0-linux.tar.gz"},
-    {"name":"TunnelPilot-v1.0-windows.zip","browser_download_url":"https://example.com/TunnelPilot-v1.0-windows.zip"}
+    {"name":"Tunnel.Pilot_2.0.0_universal.dmg","browser_download_url":"https://example.com/Tunnel.Pilot_2.0.0_universal.dmg"},
+    {"name":"Tunnel.Pilot_2.0.0_amd64.AppImage","browser_download_url":"https://example.com/Tunnel.Pilot_2.0.0_amd64.AppImage"},
+    {"name":"Tunnel.Pilot_2.0.0_amd64.AppImage.sig","browser_download_url":"https://example.com/Tunnel.Pilot_2.0.0_amd64.AppImage.sig"},
+    {"name":"Tunnel.Pilot_2.0.0_amd64.deb","browser_download_url":"https://example.com/Tunnel.Pilot_2.0.0_amd64.deb"},
+    {"name":"Tunnel.Pilot_2.0.0_x64-setup.exe","browser_download_url":"https://example.com/Tunnel.Pilot_2.0.0_x64-setup.exe"},
+    {"name":"Tunnel.Pilot_2.0.0_x64-setup.exe.sig","browser_download_url":"https://example.com/Tunnel.Pilot_2.0.0_x64-setup.exe.sig"},
+    {"name":"latest.json","browser_download_url":"https://example.com/latest.json"}
   ]
 }'
 # Use single-backslash patterns (same as what install.sh ASSET_PATTERN stores after bash expansion)
-assert_eq "macOS .dmg"    "$(json_asset_url "$FAKE_JSON" '\.dmg$')"             "https://example.com/TunnelPilot-v1.0-macos.dmg"
-assert_eq "Linux .tar.gz" "$(json_asset_url "$FAKE_JSON" 'linux.*\.tar\.gz$')"  "https://example.com/TunnelPilot-v1.0-linux.tar.gz"
-assert_eq "Windows .zip"  "$(json_asset_url "$FAKE_JSON" '\.zip$')"             "https://example.com/TunnelPilot-v1.0-windows.zip"
+assert_eq "macOS .dmg"        "$(json_asset_url "$FAKE_JSON" '\.dmg$')"        "https://example.com/Tunnel.Pilot_2.0.0_universal.dmg"
+assert_eq "Linux .AppImage"   "$(json_asset_url "$FAKE_JSON" '\.AppImage$')"   "https://example.com/Tunnel.Pilot_2.0.0_amd64.AppImage"
+assert_eq "Linux .deb"        "$(json_asset_url "$FAKE_JSON" '\.deb$')"        "https://example.com/Tunnel.Pilot_2.0.0_amd64.deb"
+assert_eq "Windows -setup.exe" "$(json_asset_url "$FAKE_JSON" '-setup\.exe$')" "https://example.com/Tunnel.Pilot_2.0.0_x64-setup.exe"
 
 if command -v jq &>/dev/null; then
   group "json_asset_url (jq)"
   HAS_JQ=true
-  assert_eq "macOS .dmg"    "$(json_asset_url "$FAKE_JSON" '\.dmg$')"             "https://example.com/TunnelPilot-v1.0-macos.dmg"
-  assert_eq "Linux .tar.gz" "$(json_asset_url "$FAKE_JSON" 'linux.*\.tar\.gz$')"  "https://example.com/TunnelPilot-v1.0-linux.tar.gz"
-  assert_eq "Windows .zip"  "$(json_asset_url "$FAKE_JSON" '\.zip$')"             "https://example.com/TunnelPilot-v1.0-windows.zip"
+  assert_eq "macOS .dmg"        "$(json_asset_url "$FAKE_JSON" '\.dmg$')"        "https://example.com/Tunnel.Pilot_2.0.0_universal.dmg"
+  assert_eq "Linux .AppImage"   "$(json_asset_url "$FAKE_JSON" '\.AppImage$')"   "https://example.com/Tunnel.Pilot_2.0.0_amd64.AppImage"
+  assert_eq "Linux .deb"        "$(json_asset_url "$FAKE_JSON" '\.deb$')"        "https://example.com/Tunnel.Pilot_2.0.0_amd64.deb"
+  assert_eq "Windows -setup.exe" "$(json_asset_url "$FAKE_JSON" '-setup\.exe$')" "https://example.com/Tunnel.Pilot_2.0.0_x64-setup.exe"
+  # The '$'-anchored patterns must NOT match updater sidecars / latest.json:
+  assert_eq "AppImage pattern skips .sig" \
+    "$(json_asset_url "$FAKE_JSON" '\.AppImage$')" "https://example.com/Tunnel.Pilot_2.0.0_amd64.AppImage"
+  assert_eq "-setup.exe pattern skips .sig" \
+    "$(json_asset_url "$FAKE_JSON" '-setup\.exe$')" "https://example.com/Tunnel.Pilot_2.0.0_x64-setup.exe"
 fi
 
-# ── 5. install_linux — full bundle extraction ─────────────────────────────────
-# Simulated on macOS: uses real bash + tar/mkdir, no Linux system required.
-group "install_linux (simulated)"
+# ── 5. install_linux — AppImage install ──────────────────────────────────────
+# Simulated anywhere: uses real bash + cp/chmod/find, no Linux system required.
+# The v2 Linux artifact is a single self-contained .AppImage.
+group "install_linux (AppImage, simulated)"
 
 TMP_TEST=$(mktemp -d)
 trap 'rm -rf "$TMP_TEST"' EXIT
 
-# Build a fake Flutter Linux release bundle (binary + lib/*.so + data/)
-FAKE_BUNDLE="$TMP_TEST/bundle"
-mkdir -p "$FAKE_BUNDLE/lib" "$FAKE_BUNDLE/data"
-printf '#!/bin/bash\necho "tunnel_pilot v1.2.3"\n' > "$FAKE_BUNDLE/tunnel_pilot"
-chmod +x "$FAKE_BUNDLE/tunnel_pilot"
-echo "fake_shared_lib" > "$FAKE_BUNDLE/lib/libflutter_linux_gtk.so"
-echo "fake_shared_lib" > "$FAKE_BUNDLE/lib/libscreen_retriever_linux_plugin.so"
-echo "fake_asset"      > "$FAKE_BUNDLE/data/flutter_assets"
-
-FAKE_TAR="$TMP_TEST/TunnelPilot-v1.2.3-linux.tar.gz"
-tar -czf "$FAKE_TAR" -C "$FAKE_BUNDLE" .
+# A fake AppImage: a harmless executable script that ignores --appimage-extract
+# (so the best-effort icon-extraction branch is exercised without side effects).
+FAKE_APPIMAGE="$TMP_TEST/Tunnel.Pilot_2.0.0_amd64.AppImage"
+printf '#!/bin/bash\nexit 0\n' > "$FAKE_APPIMAGE"
+chmod +x "$FAKE_APPIMAGE"
 
 # Point HOME and script vars to temp sandbox
 export HOME="$TMP_TEST/home"
 # Add install bin to PATH so the PATH-check branch doesn't trigger noisy output
 export PATH="$TMP_TEST/home/.local/bin:$PATH"
 PLATFORM="linux"
+ASSET_NAME="Tunnel.Pilot_2.0.0_amd64.AppImage"
 TMP_DIR="$TMP_TEST/tmp_dl"
-TMP_FILE="$FAKE_TAR"
+TMP_FILE="$FAKE_APPIMAGE"
 mkdir -p "$TMP_DIR"
 
 install_linux 2>/dev/null
 
-LINUX_APP_DIR="$TMP_TEST/home/.local/share/tunnel_pilot"
-LINUX_BIN="$TMP_TEST/home/.local/bin/tunnel_pilot"
+LINUX_APP_DIR="$TMP_TEST/home/.local/share/tunnel-pilot"
+LINUX_APPIMAGE="$LINUX_APP_DIR/Tunnel.Pilot_2.0.0_amd64.AppImage"
+LINUX_BIN="$TMP_TEST/home/.local/bin/tunnel-pilot"
+LINUX_DESKTOP="$TMP_TEST/home/.local/share/applications/tunnel_pilot.desktop"
 
-assert_file_exists     "app dir created"                  "$LINUX_APP_DIR"
-assert_file_exists     "binary extracted"                 "$LINUX_APP_DIR/tunnel_pilot"
-assert_file_executable "binary is executable"             "$LINUX_APP_DIR/tunnel_pilot"
-assert_file_exists     "lib/ dir preserved"               "$LINUX_APP_DIR/lib"
-assert_file_exists     "libflutter_linux_gtk.so present"  "$LINUX_APP_DIR/lib/libflutter_linux_gtk.so"
-assert_file_exists     "libscreen_retriever.so present"   "$LINUX_APP_DIR/lib/libscreen_retriever_linux_plugin.so"
-assert_file_exists     "data/ dir preserved"              "$LINUX_APP_DIR/data"
-assert_file_exists     "launcher script created"          "$LINUX_BIN"
-assert_file_executable "launcher is executable"           "$LINUX_BIN"
-assert_file_contains   "launcher points to real binary"   "$LINUX_BIN" "$LINUX_APP_DIR/tunnel_pilot"
-assert_file_contains   "launcher is a bash script"        "$LINUX_BIN" "#!/bin/bash"
+assert_file_exists     "app dir created"                "$LINUX_APP_DIR"
+assert_file_exists     "AppImage installed"             "$LINUX_APPIMAGE"
+assert_file_executable "AppImage is executable"         "$LINUX_APPIMAGE"
+assert_file_exists     "launcher script created"        "$LINUX_BIN"
+assert_file_executable "launcher is executable"         "$LINUX_BIN"
+assert_file_contains   "launcher points to AppImage"    "$LINUX_BIN" "$LINUX_APPIMAGE"
+assert_file_contains   "launcher is a bash script"      "$LINUX_BIN" "#!/bin/bash"
+assert_file_exists     ".desktop entry created"         "$LINUX_DESKTOP"
+assert_file_contains   ".desktop Exec points to launcher" "$LINUX_DESKTOP" "$LINUX_BIN"
 
-# Reinstall: stale files must be cleaned up
-echo "old_file" > "$LINUX_APP_DIR/stale_file"
+# Reinstall with a newer AppImage filename: old AppImage must be pruned.
+FAKE_APPIMAGE2="$TMP_TEST/Tunnel.Pilot_2.0.1_amd64.AppImage"
+printf '#!/bin/bash\nexit 0\n' > "$FAKE_APPIMAGE2"
+chmod +x "$FAKE_APPIMAGE2"
+ASSET_NAME="Tunnel.Pilot_2.0.1_amd64.AppImage"
+TMP_FILE="$FAKE_APPIMAGE2"
 install_linux 2>/dev/null
-assert_file_exists "reinstall: new bundle present" "$LINUX_APP_DIR/tunnel_pilot"
-[ ! -f "$LINUX_APP_DIR/stale_file" ] \
-  && pass "reinstall: stale files removed" \
-  || fail "reinstall: stale file was NOT removed"
-
-# ── 6. install_windows — extract logic ───────────────────────────────────────
-# Simulated on macOS: uses real bash + zip/unzip, no Windows system required.
-group "install_windows (simulated)"
-
-if command -v zip &>/dev/null && command -v unzip &>/dev/null; then
-  # Build a fake Windows release ZIP (mirrors CI: all files at root of archive)
-  FAKE_WIN_DIR="$TMP_TEST/win_bundle"
-  mkdir -p "$FAKE_WIN_DIR"
-  printf "fake exe\n" > "$FAKE_WIN_DIR/tunnel_pilot.exe"
-  printf "fake dll\n" > "$FAKE_WIN_DIR/flutter_windows.dll"
-  printf "fake dll\n" > "$FAKE_WIN_DIR/data_flutter.dll"
-
-  FAKE_ZIP="$TMP_TEST/TunnelPilot-v1.2.3-windows.zip"
-  # -j: junk paths (store files at root of zip, matching CI Compress-Archive behavior)
-  (cd "$FAKE_WIN_DIR" && zip -q -j "$FAKE_ZIP" tunnel_pilot.exe flutter_windows.dll data_flutter.dll)
-
-  PLATFORM="windows"
-  APPDATA="$TMP_TEST/appdata"
-  export APPDATA
-  TMP_FILE="$FAKE_ZIP"
-
-  install_windows 2>/dev/null
-
-  WIN_DEST_DIR="$TMP_TEST/appdata/Tunnel Pilot"
-  assert_file_exists "WIN_DEST directory created"  "$WIN_DEST_DIR"
-  assert_file_exists "tunnel_pilot.exe present"    "$WIN_DEST_DIR/tunnel_pilot.exe"
-  assert_file_exists "flutter_windows.dll present" "$WIN_DEST_DIR/flutter_windows.dll"
-  assert_file_exists "data dll present"            "$WIN_DEST_DIR/data_flutter.dll"
-
-  # Reinstall: update exe content and re-run; files must be overwritten silently
-  printf "updated exe\n" > "$FAKE_WIN_DIR/tunnel_pilot.exe"
-  rm -f "$FAKE_ZIP"
-  (cd "$FAKE_WIN_DIR" && zip -q -j "$FAKE_ZIP" tunnel_pilot.exe flutter_windows.dll data_flutter.dll)
-  install_windows 2>/dev/null
-  assert_eq "reinstall: exe content updated" \
-    "$(cat "$WIN_DEST_DIR/tunnel_pilot.exe")" "updated exe"
-else
-  echo "    ⚠  Skipping Windows simulation — zip/unzip not available"
-fi
+assert_file_exists "reinstall: new AppImage present" "$LINUX_APP_DIR/Tunnel.Pilot_2.0.1_amd64.AppImage"
+[ ! -f "$LINUX_APPIMAGE" ] \
+  && pass "reinstall: previous AppImage pruned" \
+  || fail "reinstall: stale AppImage was NOT removed"
 
 # ── 7. check_deps ─────────────────────────────────────────────────────────────
 group "check_deps"
