@@ -45,3 +45,10 @@ pub fn quit_app(app: AppHandle) -> Result<(), AppError> {
     crate::window::quit_app(&app);
     Ok(())
 }
+
+/// `hide_tray_popover` — hide the `tray_popover` window (the panel calls this to
+/// dismiss itself, e.g. after an action or on an explicit close).
+#[tauri::command]
+pub fn hide_tray_popover(app: AppHandle) {
+    crate::window::popover::hide_popover(&app);
+}

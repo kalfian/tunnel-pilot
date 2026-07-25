@@ -41,6 +41,10 @@ tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
+# Positioner: anchors the `tray_popover` window just below the tray icon
+# (`Position::TrayBottomCenter`). The `tray-icon` feature enables the tray-rect
+# cache fed by `on_tray_event` in the tray click handler (tray/mod.rs).
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 # russh 0.62 fixes the strict-kex negotiation bug that made 0.45 unable to talk
 # to OpenSSH 8.9+ servers (0.45 could select the `kex-strict-*` signaling MARKER
 # as the real KEX → `Error::UnknownAlgo`; see ssh/client.rs). Its `client`/

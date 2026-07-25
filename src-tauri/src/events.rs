@@ -37,3 +37,8 @@ pub const UPDATE_PROGRESS: &str = "update://progress";
 /// `()` — the window was re-shown (e.g. via single-instance); the frontend may
 /// refresh.
 pub const WINDOW_FOCUS: &str = "window://focus";
+
+/// `()` — the tray popover was opened (tray left-click). Emitted **only** to the
+/// `tray_popover` window so its panel UI rehydrates fresh tunnel/group/settings
+/// state on every open (the popover webview may have been idle while hidden).
+pub const POPOVER_OPENED: &str = "tray://opened";

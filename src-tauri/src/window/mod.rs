@@ -15,6 +15,8 @@
 //! fronts the window with no dock icon and no vanish. `showInDock` still drives
 //! the Windows/Linux taskbar entry for the shown state.
 
+pub mod popover;
+
 use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
@@ -34,6 +36,9 @@ pub const MAIN_WINDOW: &str = "main";
 /// webview may have been torn down while hidden.
 pub fn show_window(app: &AppHandle) {
     tracing::info!("showing main window");
+    // Opening the full Settings window supersedes the compact tray popover — the
+    // rich UI now lives in the main window, so dismiss the popover if it's open.
+    popover::hide_popover(app);
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.show();
         let _ = window.set_focus();

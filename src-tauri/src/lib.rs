@@ -72,6 +72,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // Positioner: anchors the `tray_popover` window below the tray icon
+        // (`Position::TrayBottomCenter`). The `tray-icon` feature's tray-rect
+        // cache is fed by `on_tray_event` in the tray click handler.
+        .plugin(tauri_plugin_positioner::init())
         // Full M4 command surface (spec 02 §6). Kept in lockstep with
         // `src/lib/ipc.ts` + `src/lib/types.ts` + the spec 02 tables (AGENTS §1);
         // the capabilities in `capabilities/default.json` scope these to the
@@ -121,6 +125,7 @@ pub fn run() {
             crate::commands::app::show_window,
             crate::commands::app::hide_window,
             crate::commands::app::quit_app,
+            crate::commands::app::hide_tray_popover,
         ])
         .setup(|app| {
             // The log ring buffer must exist BEFORE tracing init so the layer
@@ -234,6 +239,16 @@ pub fn run() {
             // with Retry-on-error, conditional bulk Start/Stop All, update-notice
             // slot; rebuilt (debounced) on `tunnel://status` changes.
             crate::tray::setup(app, state)?;
+
+            // Tray popover window (`tray_popover`): a compact, borderless panel
+            // shown on tray LEFT-click, anchored below the icon. Created hidden at
+            // boot; loads the SAME index.html as the main window (the FE branches
+            // on the window label). `PopoverState` guards blur-to-dismiss against
+            // the opening-click's transient blur — managed so the blur handler and
+            // the show path share one instance.
+            let popover_state = Arc::new(crate::window::popover::PopoverState::new());
+            app.manage(popover_state.clone());
+            crate::window::popover::create_popover(&app.handle().clone(), popover_state)?;
 
             // Hide-on-close intercept (spec 03 §14): the OS close button hides the
             // window and keeps the app alive in the tray; only Quit exits.
