@@ -293,9 +293,10 @@
     position: relative;
     display: grid;
     grid-template-columns: auto 1fr auto;
-    /* Top-align so a 2-line and a 3-line (stats) row share one top rhythm and
-       the dot / name / toggle land on the same line whatever the card height. */
-    align-items: start;
+    /* Vertically center the three columns (grip · dot+text · toggle/⋯) against
+       the card height — on a tall connected (stat-chip) card they center
+       relative to the whole card, which is the intended behavior. */
+    align-items: center;
     gap: var(--sp-2);
     min-height: var(--row-h);
     padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-2);
@@ -340,8 +341,6 @@
   .grip {
     display: flex;
     align-items: center;
-    /* Centre the grip on the name line (matches the dot + toggle). */
-    height: var(--lh-title-sm);
     color: var(--text-3);
     opacity: 0;
     cursor: grab;
@@ -365,7 +364,7 @@
 
   .body {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: var(--sp-3);
     min-width: 0;
     padding: 0;
@@ -383,7 +382,6 @@
   .dot {
     display: flex;
     align-items: center;
-    height: var(--lh-title-sm);
   }
   .info {
     display: flex;
@@ -424,9 +422,6 @@
   .actions {
     display: flex;
     align-items: center;
-    /* Pin controls to the name line; overflow (28px hit target) stays centred
-       on it so the toggle never drifts to the middle of a tall connected row. */
-    height: var(--lh-title-sm);
     gap: var(--sp-3);
   }
   .menu-wrap {
