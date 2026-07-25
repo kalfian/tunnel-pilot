@@ -16,6 +16,7 @@
       {
         "label": "main",
         "title": "Tunnel Pilot",
+        "dragDropEnabled": false,
         "width": 860,
         "height": 640,
         "minWidth": 560,
