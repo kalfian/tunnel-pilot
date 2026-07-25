@@ -661,9 +661,9 @@ fn gather_update_notice(app: &AppHandle) -> Option<UpdateNotice> {
 /// Rebuild the tray icon + menu from current state, on the main thread.
 ///
 /// Icon precedence: any transitional tunnel (connecting/disconnecting) → the
-/// connecting loading-dots ticker (owned by `animator`, so the static icon is
-/// *not* repainted here); else the connected-count badge / idle. Starting/
-/// stopping the ticker is idempotent, so this can be called on every change.
+/// connecting ticking-dots badge (owned by `animator`, so the static icon is
+/// *not* repainted here); else the connected-count badge / idle. Toggling the
+/// ticker is idempotent, so this can be called on every status change.
 pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>, animator: &ConnectingAnimator) {
     let tunnels = gather_tunnel_states(state);
     let groups = state.groups_snapshot();
@@ -673,13 +673,11 @@ pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>, animator: &Connecting
     let model = build_menu_model(&tunnels, &groups, update_notice);
 
     // Drive the connecting ticker before dispatching the (menu-only when
-    // connecting) main-thread paint. When settling, `stop()` first so the guard
-    // in `paint_frame` drops any late in-flight frame.
-    if transitional {
-        animator.start(app.clone());
-    } else {
-        animator.stop();
-    }
+    // connecting) main-thread paint. `set_active` is idempotent and never
+    // spawns/joins a task, so a status event mid-connect can't kill the timer;
+    // clearing it first lets the `paint_frame` guard drop any late frame so the
+    // static settle below wins.
+    animator.set_active(transitional);
 
     let app_main = app.clone();
     let dispatch = app.run_on_main_thread(move || {
@@ -710,9 +708,11 @@ pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>, animator: &Connecting
 /// debounced ~100 ms so a bulk operation coalesces into one rebuild.
 pub fn spawn_tray_sync(app: AppHandle, state: Arc<AppState>) {
     let notify = Arc::new(Notify::new());
-    // Single shared animator: the debounce loop and the initial paint drive the
-    // same guarded ticker task, so it can never double-run.
+    // Single shared animator with one long-lived ticker task (spawned here once).
+    // The debounce loop and the initial paint only toggle its `active` flag, so
+    // the timer keeps ticking for the whole connect and can never double-run.
     let animator = ConnectingAnimator::new();
+    animator.spawn(app.clone());
 
     // Any tunnel status transition marks the tray dirty.
     let dirty = notify.clone();
