@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/svelte";
+import { render, screen, fireEvent, within } from "@testing-library/svelte";
 import type {
   ForwardConfig,
   ForwardStatus,
@@ -26,7 +26,12 @@ vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
   writeText: vi.fn(() => Promise.resolve()),
 }));
 
-import { reorderForwards, updateGroup, startGroup } from "../ipc";
+import {
+  reorderForwards,
+  updateGroup,
+  startGroup,
+  assignForwardGroup,
+} from "../ipc";
 
 function mk(id: string, name: string, groupId: string | null, tags: string[] = []): ForwardConfig {
   return {
@@ -88,6 +93,8 @@ function renderList(
       onEdit: vi.fn(),
       onDelete: vi.fn(),
       onViewLog: vi.fn(),
+      onEditGroup: vi.fn(),
+      onDeleteGroup: vi.fn(),
     },
   });
 }
@@ -113,7 +120,11 @@ describe("ConnectionList — groups", () => {
 
   it("persists a collapse toggle via update_group", async () => {
     renderList();
-    const header = screen.getByRole("button", { name: /production/i });
+    // The disclosure (not the ⋯ actions button) is the one with aria-expanded.
+    const header = screen.getByRole("button", {
+      name: /production/i,
+      expanded: true,
+    });
     await fireEvent.click(header);
     expect(updateGroup).toHaveBeenCalledWith("g1", {
       name: "Production",
@@ -133,6 +144,70 @@ describe("ConnectionList — groups", () => {
     expect(screen.getByText("Alpha")).toBeInTheDocument();
     expect(screen.queryByText("Bravo")).not.toBeInTheDocument();
     expect(screen.queryByText("Charlie")).not.toBeInTheDocument();
+  });
+});
+
+describe("ConnectionList — group management (Feature A)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderWithSpies() {
+    const onEditGroup = vi.fn();
+    const onDeleteGroup = vi.fn();
+    render(ConnectionList, {
+      props: {
+        forwards: FORWARDS,
+        groups: GROUPS,
+        statusById: {},
+        statsById: { a: EMPTY, b: EMPTY, c: EMPTY },
+        lastErrorById: {},
+        selectedId: null,
+        filterQuery: "",
+        activeTag: null,
+        onSelect: vi.fn(),
+        onEdit: vi.fn(),
+        onDelete: vi.fn(),
+        onViewLog: vi.fn(),
+        onEditGroup,
+        onDeleteGroup,
+      },
+    });
+    return { onEditGroup, onDeleteGroup };
+  }
+
+  it("requests editing a group from its ⋯ menu", async () => {
+    const { onEditGroup } = renderWithSpies();
+    await fireEvent.click(
+      screen.getByRole("button", { name: /production group actions/i }),
+    );
+    await fireEvent.click(screen.getByRole("menuitem", { name: /edit group/i }));
+    expect(onEditGroup).toHaveBeenCalledWith(GROUPS[0]);
+  });
+
+  it("requests deleting a group from its ⋯ menu", async () => {
+    const { onDeleteGroup } = renderWithSpies();
+    await fireEvent.click(
+      screen.getByRole("button", { name: /production group actions/i }),
+    );
+    await fireEvent.click(
+      screen.getByRole("menuitem", { name: /delete group/i }),
+    );
+    expect(onDeleteGroup).toHaveBeenCalledWith(GROUPS[0]);
+  });
+
+  it("assigns a tunnel to a group from the row ⋯ menu", async () => {
+    renderWithSpies();
+    // Charlie is ungrouped → move it into Production via the row menu submenu.
+    const charlieRow = rowBody("c").closest(".card") as HTMLElement;
+    await fireEvent.click(
+      within(charlieRow).getByRole("button", { name: /tunnel actions/i }),
+    );
+    await fireEvent.click(
+      screen.getByRole("menuitem", { name: /assign group/i }),
+    );
+    // Submenu now lists groups; pick Production.
+    const items = screen.getAllByRole("menuitem", { name: "Production" });
+    await fireEvent.click(items[items.length - 1]);
+    expect(assignForwardGroup).toHaveBeenCalledWith("c", "g1");
   });
 });
 

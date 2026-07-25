@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ForwardConfig } from "../types";
+  import type { ForwardConfig, TunnelGroup } from "../types";
   import {
     forwards,
     statusById,
@@ -10,7 +10,12 @@
   import { settings } from "../stores/settings";
   import { groups } from "../stores/groups";
   import { activeTag } from "../stores/groups";
-  import { deleteForward, duplicateForward, copySshCommand } from "../ipc";
+  import {
+    deleteForward,
+    duplicateForward,
+    copySshCommand,
+    deleteGroup,
+  } from "../ipc";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { activeView } from "../ui/view";
   import { paletteOpen } from "../stores/palette";
@@ -20,6 +25,8 @@
   import TagFilterBar from "../components/TagFilterBar.svelte";
   import ForwardForm from "../components/ForwardForm.svelte";
   import ConfirmDialog from "../components/ConfirmDialog.svelte";
+  import GroupFormDialog from "../components/GroupFormDialog.svelte";
+  import Dialog from "../components/ui/Dialog.svelte";
   import Button from "../components/ui/Button.svelte";
   import Icon from "../components/ui/Icon.svelte";
   import Menu, { type MenuItem } from "../components/ui/Menu.svelte";
@@ -35,6 +42,12 @@
   let confirmTarget = $state<ForwardConfig | null>(null);
   let deleting = $state(false);
   let overflowOpen = $state(false);
+  // Group management (Feature A): create/rename dialog + delete confirm.
+  let groupForm = $state<{ mode: "add" | "edit"; group?: TunnelGroup } | null>(
+    null,
+  );
+  let groupDeleteTarget = $state<TunnelGroup | null>(null);
+  let deletingGroup = $state(false);
 
   // Skeleton only if the (local, fast) hydrate hasn't landed within 120ms.
   const hydrated = $derived($settings !== null);
@@ -77,8 +90,14 @@
   const selected = $derived($forwards.find((f) => f.id === selectedId) ?? null);
   const total = $derived($forwards.length);
 
-  // Toolbar overflow (Compact breakpoint collapses Duplicate/Delete into ⋯).
+  // Toolbar overflow (Compact breakpoint collapses New group / Duplicate /
+  // Delete into ⋯).
   const overflowItems = $derived<MenuItem[]>([
+    {
+      label: "New group",
+      icon: "folder",
+      run: () => (groupForm = { mode: "add" }),
+    },
     {
       label: "Duplicate",
       icon: "files",
@@ -160,6 +179,29 @@
     }
   }
 
+  async function confirmDeleteGroup(): Promise<void> {
+    if (!groupDeleteTarget) return;
+    deletingGroup = true;
+    try {
+      // Backend clears groupId on member tunnels → they fall to Ungrouped;
+      // deleting a group never deletes its tunnels (spec §4.2).
+      await deleteGroup(groupDeleteTarget.id);
+      pushToast("Group deleted", { tone: "success" });
+      groupDeleteTarget = null;
+    } catch (err) {
+      pushToast(`Delete group failed: ${String(err)}`, { tone: "error" });
+    } finally {
+      deletingGroup = false;
+    }
+  }
+
+  // Count members so the delete confirm can say where they'll go.
+  const groupMemberCount = $derived(
+    groupDeleteTarget
+      ? $forwards.filter((f) => f.groupId === groupDeleteTarget!.id).length
+      : 0,
+  );
+
   function isTypingTarget(el: EventTarget | null): boolean {
     const node = el as HTMLElement | null;
     return (
@@ -229,6 +271,14 @@
         />
       {/if}
       <span class="wide-only">
+        <Button
+          variant="ghost"
+          iconLeft="folder"
+          title="Create a new group"
+          onclick={() => (groupForm = { mode: "add" })}
+        >
+          New group
+        </Button>
         <Button
           variant="ghost"
           iconOnly="files"
@@ -332,6 +382,8 @@
         onEdit={(f) => (form = { mode: "edit", forward: f })}
         onDelete={(f) => (confirmTarget = f)}
         onViewLog={() => activeView.set("activity")}
+        onEditGroup={(g) => (groupForm = { mode: "edit", group: g })}
+        onDeleteGroup={(g) => (groupDeleteTarget = g)}
       />
     {/if}
     </div>
@@ -355,6 +407,39 @@
     onConfirm={() => void confirmDelete()}
     onClose={() => (confirmTarget = null)}
   />
+{/if}
+
+{#if groupForm}
+  <GroupFormDialog
+    mode={groupForm.mode}
+    group={groupForm.group}
+    onClose={() => (groupForm = null)}
+  />
+{/if}
+
+{#if groupDeleteTarget}
+  <Dialog title="Delete group?" size="sm" onClose={() => (groupDeleteTarget = null)}>
+    <p class="dlg-body">
+      <strong>{groupDeleteTarget.name}</strong> will be removed.
+      {#if groupMemberCount > 0}
+        Its {groupMemberCount}
+        {groupMemberCount === 1 ? "tunnel" : "tunnels"} will move to Ungrouped —
+        nothing is deleted.
+      {:else}
+        This group is empty.
+      {/if}
+    </p>
+    {#snippet footer()}
+      <Button onclick={() => (groupDeleteTarget = null)}>Cancel</Button>
+      <Button
+        variant="danger"
+        loading={deletingGroup}
+        onclick={() => void confirmDeleteGroup()}
+      >
+        Delete group
+      </Button>
+    {/snippet}
+  </Dialog>
 {/if}
 
 <style>
@@ -497,5 +582,11 @@
   }
   .link:hover {
     text-decoration: underline;
+  }
+  .dlg-body {
+    margin: 0;
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    color: var(--text);
   }
 </style>

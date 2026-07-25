@@ -1,12 +1,18 @@
 <script lang="ts">
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import type { ForwardConfig, ForwardStatus, TunnelStats } from "../types";
+  import type {
+    ForwardConfig,
+    ForwardStatus,
+    TunnelGroup,
+    TunnelStats,
+  } from "../types";
   import {
     connectForward,
     disconnectForward,
     retryForward,
     duplicateForward,
     copySshCommand,
+    assignForwardGroup,
   } from "../ipc";
   import { pushToast } from "../ui/toast";
   import { formatRoute } from "../ui/format";
@@ -23,6 +29,8 @@
     stats: TunnelStats;
     lastError: string | null;
     selected: boolean;
+    /** All groups — powers the "Assign group ▸" menu. Empty = no group UI. */
+    groups?: TunnelGroup[];
     /** When false, the drag grip + ⌥↑/↓ reorder are suppressed (e.g. while a
         filter is active — reorder would corrupt the persisted order, F43). */
     reorderable?: boolean;
@@ -42,6 +50,7 @@
     stats,
     lastError,
     selected,
+    groups = [],
     reorderable = true,
     onSelect,
     onEdit,
@@ -113,6 +122,31 @@
     }
   }
 
+  async function assignGroup(groupId: string | null): Promise<void> {
+    if ((forward.groupId ?? null) === groupId) return; // no-op
+    try {
+      await assignForwardGroup(forward.id, groupId);
+    } catch (err) {
+      pushToast(`Move to group failed: ${String(err)}`, { tone: "error" });
+    }
+  }
+
+  // "Assign group ▸": a check marks the current group; picking another moves it.
+  const assignSubmenu = $derived<MenuItem[]>([
+    {
+      label: "Ungrouped",
+      icon: (forward.groupId ?? null) === null ? "check" : undefined,
+      run: () => void assignGroup(null),
+    },
+    ...groups.map(
+      (g): MenuItem => ({
+        label: g.name,
+        icon: forward.groupId === g.id ? "check" : "folder",
+        run: () => void assignGroup(g.id),
+      }),
+    ),
+  ]);
+
   const menuItems = $derived<MenuItem[]>([
     {
       label: "Copy SSH command",
@@ -121,6 +155,7 @@
     },
     { label: "Edit", icon: "pencil", run: onEdit },
     { label: "Duplicate", icon: "files", run: () => void duplicate() },
+    { label: "Assign group", icon: "folder", submenu: assignSubmenu },
     { label: "Delete", icon: "trash", danger: true, run: onDelete },
   ]);
 

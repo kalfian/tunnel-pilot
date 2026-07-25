@@ -34,6 +34,10 @@
     onEdit: (forward: ForwardConfig) => void;
     onDelete: (forward: ForwardConfig) => void;
     onViewLog: () => void;
+    /** Rename/recolor a group (opens the group form). */
+    onEditGroup: (group: TunnelGroup) => void;
+    /** Delete a group (tunnels fall back to Ungrouped). */
+    onDeleteGroup: (group: TunnelGroup) => void;
   }
 
   const {
@@ -49,6 +53,8 @@
     onEdit,
     onDelete,
     onViewLog,
+    onEditGroup,
+    onDeleteGroup,
   }: Props = $props();
 
   let listEl: HTMLDivElement | undefined = $state();
@@ -264,6 +270,7 @@
         activeCount={section.activeCount}
         total={section.total}
         collapsed={section.collapsed}
+        color={section.group?.color ?? null}
         onToggle={() => toggleCollapse(section)}
         onStartAll={() =>
           section.group &&
@@ -276,6 +283,10 @@
             pushToast(`Stop all failed: ${String(err)}`, { tone: "error" }),
           )}
         showBulk={section.group !== null}
+        onEdit={section.group ? () => onEditGroup(section.group!) : undefined}
+        onDelete={section.group
+          ? () => onDeleteGroup(section.group!)
+          : undefined}
       />
     {/if}
 
@@ -304,6 +315,7 @@
           >
             <ConnectionRow
               {forward}
+              {groups}
               status={statusById[forward.id] ?? "disconnected"}
               stats={statsById[forward.id] ?? EMPTY_STATS}
               lastError={lastErrorById[forward.id] ?? null}
