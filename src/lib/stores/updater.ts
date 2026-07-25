@@ -32,3 +32,36 @@ export function applyUpdateProgress(e: UpdateProgressEvent): void {
 export function clearUpdateProgress(): void {
   updateProgress.set(null);
 }
+
+/**
+ * Coerce an unknown update failure into a human-readable string.
+ *
+ * Update errors reach the UI as an IPC rejection (a serialized Rust `AppError`)
+ * or, historically, an `update://status` failure. The shape is not guaranteed:
+ * it may be a bare `string`, an `Error`, a structured `{ message }` object, or
+ * something opaque. Coerce safely so an object can NEVER render as the literal
+ * "[object Object]".
+ *
+ * Returns an empty string when there is no meaningful message to show — callers
+ * treat that as "no error" and keep the banner idle (a silent/benign failure,
+ * e.g. a startup check with no release yet, must not raise a scary red banner).
+ */
+export function toUpdateErrorMessage(e: unknown): string {
+  if (e == null) return "";
+  if (typeof e === "string") return e.trim();
+  if (e instanceof Error) return e.message.trim();
+  if (typeof e === "object") {
+    const message = (e as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim() !== "") {
+      return message.trim();
+    }
+    try {
+      const json = JSON.stringify(e);
+      // `{}` carries no signal — treat as no message rather than showing braces.
+      return json === "{}" ? "" : json;
+    } catch {
+      return "";
+    }
+  }
+  return String(e).trim();
+}

@@ -6,6 +6,7 @@
     updateStatus,
     updateProgress,
     clearUpdateProgress,
+    toUpdateErrorMessage,
   } from "../stores/updater";
   import { importMode } from "../stores/backup";
   import { activeView } from "../ui/view";
@@ -57,7 +58,12 @@
   //
   // State is derived from live store signals plus two ephemeral local flags:
   //   - `checking`     — a `check_update()` call is in flight
-  //   - `updateError`  — the last check/install rejected (backend AppError)
+  //   - `updateError`  — a readable message from the last USER-INITIATED
+  //                      check/install rejection, or null. Silent startup checks
+  //                      never populate it, so a benign fresh-launch "no release
+  //                      yet" never surfaces a scary red banner. Always a string
+  //                      (coerced via `toUpdateErrorMessage`), never an object,
+  //                      so "[object Object]" can't reach the UI.
   // The backend never re-emits `update://status` on skip (it only persists
   // `lastSkippedVersion` + emits `settings://changed`), so `available` also
   // reconciles against `settings.lastSkippedVersion` — skipping a version hides
@@ -78,7 +84,9 @@
 
   const updateState = $derived<UpdateState>(
     (() => {
-      if (updateError !== null) return "error";
+      // Only a genuine, message-bearing error goes to the `error` state; an
+      // empty/absent message stays idle rather than showing "Update failed".
+      if (updateError) return "error";
       const prog = $updateProgress;
       if (prog) {
         const [downloaded, total] = prog;
@@ -121,7 +129,7 @@
         pushToast("You're on the latest version", { tone: "info" });
       }
     } catch (err) {
-      updateError = String(err);
+      updateError = toUpdateErrorMessage(err) || null;
     } finally {
       checking = false;
     }
@@ -136,7 +144,7 @@
       // the process restarts. A rejection means the install/verify failed.
       await installUpdate();
     } catch (err) {
-      updateError = String(err);
+      updateError = toUpdateErrorMessage(err) || null;
       clearUpdateProgress();
     }
   }

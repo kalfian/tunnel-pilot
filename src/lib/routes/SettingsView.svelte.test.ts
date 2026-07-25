@@ -203,6 +203,50 @@ describe("SettingsView — update banner (spec §8)", () => {
     expect(checkUpdate).toHaveBeenCalledOnce();
   });
 
+  it("renders a structured {message} error as a readable string, never [object Object]", async () => {
+    // The IPC layer rejects with a serialized Rust AppError (an object), which
+    // used to string-coerce to "[object Object]". It must render its message.
+    vi.mocked(installUpdate).mockRejectedValueOnce({
+      message: "Signature verification failed",
+      kind: "Update",
+    });
+    updateStatus.set(AVAILABLE);
+    render(SettingsView);
+    await fireEvent.click(
+      screen.getByRole("button", { name: /install & restart/i }),
+    );
+    const alert = await screen.findByRole("alert");
+    expect(
+      within(alert).getByText(/signature verification failed/i),
+    ).toBeInTheDocument();
+    expect(alert.textContent).not.toContain("[object Object]");
+  });
+
+  it("never shows [object Object] for an opaque object error", async () => {
+    // Object with no `message` — must fall back to JSON, not "[object Object]".
+    vi.mocked(installUpdate).mockRejectedValueOnce({ code: 500 });
+    updateStatus.set(AVAILABLE);
+    render(SettingsView);
+    await fireEvent.click(
+      screen.getByRole("button", { name: /install & restart/i }),
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).not.toContain("[object Object]");
+    expect(within(alert).getByText(/500/)).toBeInTheDocument();
+  });
+
+  it("stays idle (no failure banner) when the error carries no message", async () => {
+    // A benign/empty rejection (e.g. a silent startup check with no release)
+    // must NOT raise a scary red "Update failed" banner.
+    vi.mocked(checkUpdate).mockRejectedValueOnce({});
+    render(SettingsView);
+    await fireEvent.click(screen.getByRole("button", { name: /check now/i }));
+    // Let the rejected promise settle.
+    await Promise.resolve();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/update failed/i)).not.toBeInTheDocument();
+  });
+
   it("error 'View log' switches to the activity view", async () => {
     vi.mocked(installUpdate).mockRejectedValueOnce("nope");
     updateStatus.set(AVAILABLE);
