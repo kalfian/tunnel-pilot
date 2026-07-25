@@ -1,9 +1,9 @@
 //! The connecting animation for the menu-bar icon (spec 03 §10, connecting
-//! indicator): bare ticking dots in the bottom-right corner of the logo glyph
-//! (no badge disc) — `·` → `··` → `···` → `·` … growing left→right. While any
+//! indicator): big bright (non-template) ticking dots in the bottom-right corner
+//! of the logo glyph — `●` → `●●` → `●●●` → `●` … growing left→right. While any
 //! tunnel is in a transitional state (connecting/disconnecting) the corner dots
 //! tick continuously; when nothing is transitional anymore the ticker goes idle
-//! and [`super::menu::rebuild_now`] settles the static count/idle icon.
+//! and [`super::menu::rebuild_now`] settles the static (template) count/idle icon.
 //!
 //! ## Continuous-ticking guarantee (the "stuck" fix)
 //! A **single** tokio task is spawned once ([`ConnectingAnimator::spawn`]) and

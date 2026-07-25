@@ -32,9 +32,10 @@ pub enum TrayIcon {
     /// (1..=9, clamped).
     Badge(u8),
     /// At least one tunnel is in a transitional state (connecting /
-    /// disconnecting). Rendered as the base glyph with **bare ticking dots in
-    /// the bottom-right corner** (`·`/`··`/`···`, no badge disc); this variant
-    /// maps to the first frame when a single still is needed.
+    /// disconnecting). Rendered as the base glyph with **big bright ticking dots
+    /// in the bottom-right corner** (`●`/`●●`/`●●●`, non-template so they stay
+    /// visible); this variant maps to the first frame when a single still is
+    /// needed.
     Connecting,
 }
 
@@ -78,10 +79,11 @@ const BADGE_PNG: [&[u8]; MAX_BADGE] = [
     include_bytes!("../../../assets/icons/tray_icon_9.png"),
 ];
 
-/// Connecting ticking-dots frames (index = frame): the base glyph with 1 → 2 → 3
-/// bare dots in the bottom-right corner (no badge disc), growing left→right.
-/// Monochrome black+alpha **template** images (like idle/count), so they stay
-/// crisp and adapt to light/dark menu bars.
+/// Connecting ticking-dots frames (index = frame): the base glyph (baked mid-gray
+/// so it reads on light AND dark bars) with 1 → 2 → 3 big blue dots + white halo
+/// in the bottom-right corner, growing left→right. **Non-template** colored PNGs
+/// (see [`set_connecting_frame`]) so the dots stay bright instead of merging into
+/// the glyph — the only tray icons that are not template images.
 const CONNECTING_PNG: [&[u8]; CONNECTING_FRAMES] = [
     include_bytes!("../../../assets/icons/tray_icon_connecting_0.png"),
     include_bytes!("../../../assets/icons/tray_icon_connecting_1.png"),
@@ -191,12 +193,14 @@ pub fn update_tray_icon(app: &tauri::AppHandle, tray_id: &str, count: usize) {
     }
 }
 
-/// Paint one connecting corner-dots `frame` on the tray. Drawn as a **template
-/// image** on macOS (like idle/count) so the monochrome glyph + corner dots stay
-/// crisp and adapt to the light/dark menu bar. Must run on the main thread
-/// (AppKit) —
-/// callers dispatch via `AppHandle::run_on_main_thread`. Failures are logged,
-/// never fatal.
+/// Paint one connecting corner-dots `frame` on the tray. Drawn **non-template**
+/// (`set_icon_as_template(false)` on macOS) so the bright blue dots + white halo
+/// keep their color instead of being flattened to the menu-bar tint — a black
+/// template dot would merge into the black glyph and vanish. The glyph itself is
+/// baked as a mid-gray so it stays legible on both light and dark bars.
+/// [`update_tray_icon`] flips template back to `true` when settling to the
+/// count/idle icon. Must run on the main thread (AppKit) — callers dispatch via
+/// `AppHandle::run_on_main_thread`. Failures are logged, never fatal.
 pub fn set_connecting_frame(app: &tauri::AppHandle, tray_id: &str, frame: usize) {
     let Some(tray) = app.tray_by_id(tray_id) else {
         tracing::warn!(tray_id, "tray icon not found; cannot set connecting frame");
@@ -207,10 +211,11 @@ pub fn set_connecting_frame(app: &tauri::AppHandle, tray_id: &str, frame: usize)
             if let Err(e) = tray.set_icon(Some(img)) {
                 tracing::error!(error = %e, "failed to set connecting tray icon");
             }
-            // Monochrome template: auto-tint for light/dark menu bars.
+            // Non-template: render the frame's own colors (dots must not merge
+            // with the glyph). Settling re-enables template via update_tray_icon.
             #[cfg(target_os = "macos")]
-            if let Err(e) = tray.set_icon_as_template(true) {
-                tracing::error!(error = %e, "failed to set connecting icon as template");
+            if let Err(e) = tray.set_icon_as_template(false) {
+                tracing::error!(error = %e, "failed to clear template for connecting icon");
             }
         }
         Err(e) => tracing::error!(error = %e, frame, "failed to decode connecting frame PNG"),
