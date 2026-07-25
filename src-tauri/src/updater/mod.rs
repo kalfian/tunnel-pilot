@@ -86,6 +86,29 @@ impl UpdaterState {
             *g = status;
         }
     }
+
+    /// Mark `version` as skipped in the cached latest status (F51). Only mutates
+    /// when `version` is the version currently cached, so a stale skip of some
+    /// other version can never flip the flag on the current offer. Returns the
+    /// refreshed status for re-emitting `update://status`.
+    fn mark_skipped(&self, version: &str) -> UpdateStatus {
+        let mut g = self.latest_status.lock().unwrap_or_else(|e| e.into_inner());
+        if g.version.as_deref() == Some(version) {
+            g.skipped = true;
+        }
+        g.clone()
+    }
+}
+
+/// Apply a user skip to the cached update status and re-emit `update://status`
+/// (F51). Keeps the cache the single source of truth: the tray reads
+/// `latest_status` + listens on `update://status` and gates the notice on
+/// `available && !skipped`, so both the tray and the FE banner hide the just-
+/// skipped version immediately — not only after the next `check`/restart.
+pub fn apply_skip(app: &AppHandle, updater_state: &UpdaterState, version: &str) -> UpdateStatus {
+    let status = updater_state.mark_skipped(version);
+    emit_status(app, &status);
+    status
 }
 
 /// Emit `update://status` (best-effort — a dropped emit is not fatal).
@@ -215,5 +238,54 @@ pub async fn auto_check_on_startup(
         }
         Ok(_) => tracing::debug!("no update available"),
         Err(e) => tracing::warn!(error = %e, "startup update-check failed (ignored)"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tray::menu::update_notice_from_status;
+
+    fn available(version: &str) -> UpdateStatus {
+        UpdateStatus {
+            available: true,
+            version: Some(version.to_string()),
+            notes: None,
+            skipped: false,
+        }
+    }
+
+    /// F51: after skipping the cached version, the cached status flips to
+    /// `skipped=true` so the tray notice (`available && !skipped`) hides that
+    /// version immediately — no wait for the next `check_update`/restart.
+    #[test]
+    fn skip_flips_cached_status_and_hides_tray_notice() {
+        let state = UpdaterState::new();
+        state.set_latest_status(available("2.1.0"));
+
+        // Before skip: the tray offers the notice.
+        assert!(update_notice_from_status(&state.latest_status()).is_some());
+
+        let refreshed = state.mark_skipped("2.1.0");
+
+        // The returned + cached status both mark it skipped...
+        assert!(refreshed.skipped);
+        assert!(state.latest_status().skipped);
+        // ...and the tray notice is now hidden for that version.
+        assert!(update_notice_from_status(&state.latest_status()).is_none());
+    }
+
+    /// A skip for a DIFFERENT version than the one cached must NOT flip the flag
+    /// on the current offer (stale-skip guard).
+    #[test]
+    fn skip_of_other_version_leaves_current_offer_visible() {
+        let state = UpdaterState::new();
+        state.set_latest_status(available("2.1.0"));
+
+        let refreshed = state.mark_skipped("2.0.0");
+
+        assert!(!refreshed.skipped);
+        assert!(!state.latest_status().skipped);
+        assert!(update_notice_from_status(&state.latest_status()).is_some());
     }
 }

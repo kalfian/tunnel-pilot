@@ -44,15 +44,24 @@ pub async fn install_update(
 }
 
 /// `skip_update` — remember that the user dismissed `version` so it is not
-/// offered again (spec 02 §6.6). Persists `lastSkippedVersion` and notifies the
-/// frontend.
+/// offered again (spec 02 §6.6). Persists `lastSkippedVersion`, notifies the
+/// frontend, and (F51) refreshes the cached update status + re-emits
+/// `update://status` so the tray notice — which reads the cached `latest_status`
+/// and gates on `available && !skipped` — hides the just-skipped version
+/// immediately, not only after the next `check_update`/restart.
 #[tauri::command]
-pub async fn skip_update(state: State<'_, Arc<AppState>>, version: String) -> Result<(), AppError> {
+pub async fn skip_update(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    updater: State<'_, Arc<UpdaterState>>,
+    version: String,
+) -> Result<(), AppError> {
     let state = state.inner();
     let mut settings = state.settings_snapshot();
-    settings.last_skipped_version = Some(version);
+    settings.last_skipped_version = Some(version.clone());
     state.set_settings(settings);
     state.persist_settings().await?;
     state.emit_settings_changed();
+    crate::updater::apply_skip(&app, updater.inner(), &version);
     Ok(())
 }
