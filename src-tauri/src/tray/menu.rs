@@ -727,6 +727,23 @@ pub fn spawn_tray_sync(app: AppHandle, state: Arc<AppState>) {
         dirty_update.notify_one();
     });
 
+    // Group mutations (create/rename/delete/reorder) change the section headers
+    // the menu builds from `groups_snapshot`, so rebuild the tray on them too —
+    // otherwise a new/renamed group never appears until an unrelated status
+    // change. Coalesced through the same debounce.
+    let dirty_groups = notify.clone();
+    app.listen(events::GROUPS_CHANGED, move |_event| {
+        dirty_groups.notify_one();
+    });
+
+    // Forward mutations (add/edit/delete/reorder, and crucially group
+    // *assignment* changes) change which section a tunnel row lands under, so
+    // the tray must rebuild on them as well. Coalesced through the same debounce.
+    let dirty_forwards = notify.clone();
+    app.listen(events::FORWARDS_CHANGED, move |_event| {
+        dirty_forwards.notify_one();
+    });
+
     // Debounce loop: wake on the first change, wait out the window (coalescing
     // further changes), then do exactly one rebuild.
     let debounce_app = app.clone();
