@@ -62,9 +62,13 @@ impl client::Handler for ClientHandler {
 /// selects a name from our list, then the registry lookup returns `None`), so
 /// this list must never include an unregistered algorithm.
 ///
-/// The `ext-info-*` / `kex-strict-*` entries are negotiation markers (not real
-/// KEX algorithms) that russh's own default carries; keeping them preserves
-/// SSH-extension + strict-KEX support, which the RSA-SHA2 negotiation relies on.
+/// ONLY real key-exchange algorithms — never the `ext-info-*` / `kex-strict-*`
+/// negotiation MARKERS. Those are signaling pseudo-names, not runnable KEX; if
+/// they appear in the client's preferred `kex` list, russh can select the
+/// server's `kex-strict-s-v00@openssh.com` marker as the negotiated KEX and then
+/// fail with `Error::UnknownAlgo` trying to run it (observed against OpenSSH 8.9
+/// with strict-kex — the real `Unknown algorithm` bug). russh manages the
+/// strict-KEX / ext-info signaling itself; we must not offer those markers here.
 const PREFERRED_KEX: &[russh::kex::Name] = &[
     russh::kex::CURVE25519,
     russh::kex::CURVE25519_PRE_RFC_8731,
@@ -74,10 +78,6 @@ const PREFERRED_KEX: &[russh::kex::Name] = &[
     russh::kex::ECDH_SHA2_NISTP384,
     russh::kex::ECDH_SHA2_NISTP521,
     russh::kex::DH_G14_SHA1,
-    russh::kex::EXTENSION_SUPPORT_AS_CLIENT,
-    russh::kex::EXTENSION_SUPPORT_AS_SERVER,
-    russh::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
-    russh::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
 ];
 
 /// Host & public-key signature algorithms. Adds `ecdsa-sha2-nistp384` and
