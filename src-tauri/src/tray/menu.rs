@@ -237,17 +237,14 @@ pub fn gather_tunnel_states(state: &AppState) -> Vec<TunnelState> {
 
 // --- tauri menu construction ----------------------------------------------
 
-/// Build the MINIMAL right-click safety-net menu (tray-popover rework): just
-/// "Settings" and "Quit". The rich, state-driven menu now lives in the tray
-/// popover (LEFT-click); this native menu exists only so the app is always
-/// usable/quittable even if the popover webview fails to load. Ids reuse
-/// `ID_OPEN`/`ID_QUIT`, routed by [`handle_menu_event`]. Must run on the main
-/// thread (AppKit).
-pub fn build_minimal_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
-    let settings = MenuItem::with_id(app, ID_OPEN, "Settings", true, Some(ACCEL_SETTINGS))?;
-    let separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, ID_QUIT, "Quit", true, Some(ACCEL_QUIT))?;
-    Menu::with_items(app, &[&settings, &separator, &quit])
+/// Build the rich, state-driven native menu from current app + updater state.
+/// This is the menu shown on tray click; [`spawn_tray_sync`] rebuilds it on
+/// every status/update change. Must run on the main thread (AppKit).
+pub fn build_current_menu(app: &AppHandle, state: &Arc<AppState>) -> tauri::Result<Menu<Wry>> {
+    let tunnels = gather_tunnel_states(state);
+    let update_notice = gather_update_notice(app);
+    let model = build_menu_model(&tunnels, update_notice);
+    build_tauri_menu(app, &model)
 }
 
 /// Build a concrete `tauri::menu::Menu` from the pure model. Must run on the
@@ -527,44 +524,6 @@ pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>) {
     if let Err(e) = dispatch {
         tracing::error!(error = %e, "failed to dispatch tray rebuild to main thread");
     }
-}
-
-/// Update ONLY the dynamic count icon from current state, on the main thread.
-/// The right-click menu is static (minimal safety net), so no menu rebuild is
-/// needed — the rich, state-driven UI lives in the tray popover.
-pub fn update_icon_now(app: &AppHandle, state: &Arc<AppState>) {
-    let count = connected_count(&gather_tunnel_states(state));
-    let app_main = app.clone();
-    if let Err(e) = app.run_on_main_thread(move || {
-        super::icon::update_tray_icon(&app_main, super::TRAY_ID, count);
-    }) {
-        tracing::error!(error = %e, "failed to dispatch tray icon update to main thread");
-    }
-}
-
-/// Subscribe to `tunnel://status` and refresh the dynamic count ICON on change,
-/// debounced ~100 ms so a bulk operation coalesces into one update (tray-popover
-/// rework: menu is now a static safety net, so only the icon needs syncing).
-pub fn spawn_icon_sync(app: AppHandle, state: Arc<AppState>) {
-    let notify = Arc::new(Notify::new());
-
-    let dirty = notify.clone();
-    app.listen(events::TUNNEL_STATUS, move |_event| {
-        dirty.notify_one();
-    });
-
-    let debounce_app = app.clone();
-    let debounce_state = state.clone();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            notify.notified().await;
-            tokio::time::sleep(REBUILD_DEBOUNCE).await;
-            update_icon_now(&debounce_app, &debounce_state);
-        }
-    });
-
-    // Initial paint so the icon reflects the boot state immediately.
-    update_icon_now(&app, &state);
 }
 
 /// Subscribe to `tunnel://status` and rebuild the tray (icon + menu) on change,
