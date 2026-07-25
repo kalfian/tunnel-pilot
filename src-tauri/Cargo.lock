@@ -6081,6 +6081,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "keyring",
+ "mac-notification-sys",
  "objc2",
  "russh",
  "serde",

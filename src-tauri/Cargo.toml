@@ -59,6 +59,15 @@ keyring = { version = "3", features = ["apple-native"] }
 # (front the window when the app runs as an Accessory agent — BUG 1). objc2 is
 # already in the tree via Tauri; pinning it makes the shim's use explicit.
 objc2 = "0.6"
+# Native macOS notifications, used DIRECTLY (not via tauri-plugin-notification).
+# The plugin's desktop path (desktop.rs `show()`) is fire-and-forget through
+# notify-rust with no handle → no action buttons and no click callback on
+# desktop (those are mobile-only). mac-notification-sys is the same native
+# backend notify-rust wraps, and it exposes a "Show" action button plus a
+# blocking `send()` that returns whether the banner/body was clicked — that's
+# how a click/"Show" opens the window (notify.rs). Already in the tree via
+# notify-rust; pinned here to use it directly.
+mac-notification-sys = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }

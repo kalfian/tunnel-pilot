@@ -1,4 +1,4 @@
-//! Desktop notifications via `tauri-plugin-notification` (spec 03 §15).
+//! Desktop notifications (spec 03 §15).
 //!
 //! Rules (replicate v1 `notification_service.dart` + `forward_provider.dart`):
 //! - Notify on **connect** and on **terminal error** (unexpected states).
@@ -16,38 +16,57 @@
 //!   module, spec 03 §16).
 //! - All of the above honor the `showNotifications` setting.
 //!
-//! **macOS permission timing.** The desktop `tauri-plugin-notification` reports
-//! permission as always-`Granted` and has no meaningful `request_permission`
-//! (it is a no-op on desktop); the real macOS `UNUserNotificationCenter` prompt,
-//! if any, is triggered lazily by the first `show()`. We never call `show()` at
-//! startup — only on a real connect/error/update event — so the permission
+//! **Icon + click-to-open, per platform.**
+//!
+//! macOS gets a richer path than the cross-platform plugin can offer, because we
+//! want two things the plugin's desktop path cannot do:
+//! 1. show the **Tunnel Pilot app icon** (not a generic script/starburst icon), and
+//! 2. **open the window when the banner or its "Show" button is clicked.**
+//!
+//! `tauri-plugin-notification`'s desktop implementation (`desktop.rs::show`) is
+//! fire-and-forget: it hands a `notify_rust::Notification` to a detached task and
+//! discards any handle — there is no action button and no click callback on
+//! desktop (`register_action_types` / action events are **mobile-only**). The old
+//! macOS path here used `osascript display notification`, which likewise can show
+//! neither a real app icon nor a working, callback-wired action button (its icon
+//! is Script Editor's — the "starburst").
+//!
+//! So on macOS we call **`mac-notification-sys` directly** — the *same* native
+//! `NSUserNotificationCenter` backend `notify_rust` wraps, minus the fire-and-
+//! forget wrapper. It gives us a `MainButton::SingleAction("Show")` button and a
+//! **blocking** `send()` that returns a [`NotificationResponse`]; a `Click` (body
+//! tap) or `ActionButton` (the "Show" button) then calls
+//! [`crate::window::show_window`], which already fronts the window for a tray/
+//! accessory app (BUG 1). The blocking `send()` runs on `spawn_blocking` so it
+//! NEVER blocks the async runtime.
+//!
+//! **Icon — dev vs bundled.** On macOS the banner's icon is the *sending app's*
+//! icon, chosen by `set_application(bundle_id)`:
+//! - **Bundled `.app`:** we send as our own identifier, so the banner shows the
+//!   real Tunnel Pilot icon automatically (from `icons/icon.icns`, already set in
+//!   `tauri.conf.json`) — no explicit icon needed, and no risk of a wrong one.
+//! - **`tauri dev` (unbundled):** the bare binary has no registered bundle id, so
+//!   `NSUserNotificationCenter` can't deliver *as us*. We borrow `com.apple.
+//!   Terminal` (the same trick the plugin uses — `desktop.rs::show`) purely so the
+//!   banner delivers; its corner icon is then Terminal's. As a best-effort we ALSO
+//!   pass our resolved icon via `app_icon(...)` when the file is present, so the
+//!   logo shows in dev too — but only if it genuinely resolves (never a
+//!   placeholder). The authoritative, correct icon is the one in the built `.app`.
+//!
+//! Windows/Linux keep `tauri-plugin-notification` (the correct native path there;
+//! Linux needs a notification daemon, a missing one just logs). Click-to-open is a
+//! macOS concern here; the plugin has no desktop click callback to wire on Win/Linux.
+//!
+//! **osascript fallback.** Kept ONLY for when the native `send()` genuinely fails
+//! (e.g. `set_application` can't register the bundle id, or the notification center
+//! errors). It shows a plain banner with no icon/button — degraded but better than
+//! nothing. Notifications are advisory regardless: the tray icon state + the in-
+//! window log/status are the AUTHORITATIVE signal (F5). We never panic, never
+//! propagate — a failed notification is logged at `debug` and ignored.
+//!
+//! **macOS permission timing.** We never `show()` at startup — only on a real
+//! connect/error/update event — so any `UNUserNotificationCenter` permission
 //! interaction happens at a deliberate, user-triggered moment, not a boot race.
-//!
-//! **What works where (BUG 2 / F5).** macOS delivers plugin notifications
-//! through `UNUserNotificationCenter`, which requires a **code-signed /
-//! registered** bundle with a bundle identifier:
-//!
-//! | context                 | `tauri-plugin-notification` | `osascript` fallback |
-//! |-------------------------|-----------------------------|----------------------|
-//! | `tauri dev` (bare bin)  | silently dropped (no bundle id) | works           |
-//! | bundled `.app`, UNSIGNED| may be refused (F5), returns `Ok`| works           |
-//! | bundled `.app`, SIGNED  | works                       | works                |
-//!
-//! In `tauri dev` the binary is `target/debug/tunnel-pilot` (NOT a `.app`), so
-//! the plugin has no bundle id and the OS drops the notification — and it still
-//! returns `Ok(())`, so we cannot detect the drop. On an unsigned bundle the
-//! native center may likewise refuse. Because the plugin cannot be relied on and
-//! its silent-drop is undetectable, **macOS uses `osascript -e 'display
-//! notification ...'`**, which has no bundle-id/signing requirement and works in
-//! ALL three contexts. Windows/Linux use the plugin (the correct native path
-//! there; Linux needs a notification daemon, a missing one just logs).
-//!
-//! Everything remains **best-effort**: the tray icon state + the in-window
-//! log/status are the AUTHORITATIVE signal. Never panic, never propagate — a
-//! failed notification is logged at `debug` and ignored. To fully verify the
-//! native plugin path on macOS you need a bundled, code-signed `.app`
-//! (`pnpm tauri build` + signing); the osascript path is verifiable today in
-//! `pnpm tauri dev`.
 
 use tauri::AppHandle;
 #[cfg(not(target_os = "macos"))]
@@ -63,13 +82,7 @@ use crate::state::AppState;
 /// 03 §15). Callers must not pass credentials.
 fn show(app: &AppHandle, title: &str, body: &str) {
     #[cfg(target_os = "macos")]
-    {
-        // macOS: the plugin silently drops in dev/unsigned and we can't detect
-        // it (see module docs), so route through osascript, which works
-        // regardless of signing. The app handle is unused on this path.
-        let _ = app;
-        show_via_osascript(title, body);
-    }
+    show_native_macos(app, title, body);
 
     #[cfg(not(target_os = "macos"))]
     match app.notification().builder().title(title).body(body).show() {
@@ -84,8 +97,87 @@ fn show(app: &AppHandle, title: &str, body: &str) {
     }
 }
 
-/// macOS notification via `osascript -e 'display notification ...'` (BUG 2).
-/// Works unsigned and without a bundle id — unlike the native plugin.
+/// macOS notification via `mac-notification-sys` (the native backend): app icon +
+/// a "Show" action button + click/action detection → open the window.
+///
+/// The blocking `send()` waits for the banner's lifetime (interaction or auto-
+/// dismiss), so it runs on the blocking pool and NEVER blocks the async runtime.
+/// On failure it degrades to [`show_via_osascript`] (no icon/button).
+#[cfg(target_os = "macos")]
+fn show_native_macos(app: &AppHandle, title: &str, body: &str) {
+    use mac_notification_sys::{MainButton, Notification, NotificationResponse};
+
+    // Deliver as our own identifier in a bundled `.app` (→ real app icon), or as
+    // Terminal in `tauri dev` (unbundled → no registered bundle id). `set_application`
+    // is a one-shot global `Once`; an `AlreadySet`/`CouldNotSet` result is harmless
+    // here — `send()` still falls back to a sane default and we catch hard errors.
+    let bundle_id = if tauri::is_dev() {
+        "com.apple.Terminal".to_string()
+    } else {
+        app.config().identifier.clone()
+    };
+    let _ = mac_notification_sys::set_application(&bundle_id);
+
+    // In dev the corner icon is Terminal's; best-effort surface our real logo via
+    // `app_icon` if it resolves on disk. In a bundle the sending-app icon is
+    // already correct, so we don't double it up.
+    let icon_path = if tauri::is_dev() {
+        resolve_icon_path(app)
+    } else {
+        None
+    };
+
+    let app = app.clone();
+    let title = title.to_string();
+    let body = body.to_string();
+    // spawn_blocking: `send()` blocks until the banner is interacted with or
+    // auto-dismisses — must never run on the async runtime.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut notification = Notification::new();
+        notification
+            .title(&title)
+            .message(&body)
+            .main_button(MainButton::SingleAction("Show"));
+        if let Some(ref path) = icon_path {
+            notification.app_icon(path);
+        }
+        match notification.send() {
+            // Body tap OR the "Show" button → bring the window to the front.
+            Ok(NotificationResponse::Click) | Ok(NotificationResponse::ActionButton(_)) => {
+                tracing::debug!("notification clicked; showing window");
+                crate::window::show_window(&app);
+            }
+            // Ignored / closed / auto-dismissed — nothing to do.
+            Ok(_) => {
+                tracing::debug!("notification shown via mac-notification-sys (best-effort)");
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "native notification failed; falling back to osascript");
+                show_via_osascript(&title, &body);
+            }
+        }
+    });
+}
+
+/// Resolve the app icon file inside the macOS bundle (`Contents/Resources`) for
+/// the dev `app_icon` best-effort. Returns `None` if nothing resolves, so we
+/// never pass a non-existent/placeholder path (task: no wrong icon).
+#[cfg(target_os = "macos")]
+fn resolve_icon_path(app: &AppHandle) -> Option<String> {
+    use tauri::Manager;
+    let dir = app.path().resource_dir().ok()?;
+    for name in ["icon.icns", "128x128@2x.png", "128x128.png", "32x32.png"] {
+        let candidate = dir.join(name);
+        if candidate.exists() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+/// macOS notification via `osascript -e 'display notification ...'` — the degraded
+/// fallback when the native `send()` fails. Works unsigned and without a bundle
+/// id, but shows NO app icon and NO working action button.
 ///
 /// Runs the child process on the blocking pool so it never blocks the async
 /// runtime. `title`/`body` are escaped for the AppleScript string literal
@@ -109,7 +201,7 @@ fn show_via_osascript(title: &str, body: &str) {
             .output()
         {
             Ok(out) if out.status.success() => {
-                tracing::debug!("notification shown via osascript (best-effort)");
+                tracing::debug!("notification shown via osascript (fallback, best-effort)");
             }
             Ok(out) => {
                 tracing::debug!(
