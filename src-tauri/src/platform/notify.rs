@@ -23,19 +23,34 @@
 //! startup — only on a real connect/error/update event — so the permission
 //! interaction happens at a deliberate, user-triggered moment, not a boot race.
 //!
-//! **F5 — unsigned macOS caveat.** macOS delivers notifications through
-//! `UNUserNotificationCenter`, which generally requires a **code-signed /
-//! registered** bundle. v2.0 ships un-notarized/unsigned (spec 01 §3.3, 06 §4),
-//! so `show()` may **silently drop** on a bundled macOS app: the underlying
-//! `notify_rust`/`mac-notification-sys` call sets the app to the bundle
-//! identifier (`com.kalfian.tunnelpilot`), which is unregistered with the
-//! notification system on an unsigned build, and returns `Ok(())` even when
-//! nothing is displayed. We therefore treat every notification as **best-effort**
-//! and rely on the tray icon state + in-window log/status as the authoritative
-//! signal. Never panic, never propagate — a failed notification is logged at
-//! `debug` and ignored.
+//! **What works where (BUG 2 / F5).** macOS delivers plugin notifications
+//! through `UNUserNotificationCenter`, which requires a **code-signed /
+//! registered** bundle with a bundle identifier:
+//!
+//! | context                 | `tauri-plugin-notification` | `osascript` fallback |
+//! |-------------------------|-----------------------------|----------------------|
+//! | `tauri dev` (bare bin)  | silently dropped (no bundle id) | works           |
+//! | bundled `.app`, UNSIGNED| may be refused (F5), returns `Ok`| works           |
+//! | bundled `.app`, SIGNED  | works                       | works                |
+//!
+//! In `tauri dev` the binary is `target/debug/tunnel-pilot` (NOT a `.app`), so
+//! the plugin has no bundle id and the OS drops the notification — and it still
+//! returns `Ok(())`, so we cannot detect the drop. On an unsigned bundle the
+//! native center may likewise refuse. Because the plugin cannot be relied on and
+//! its silent-drop is undetectable, **macOS uses `osascript -e 'display
+//! notification ...'`**, which has no bundle-id/signing requirement and works in
+//! ALL three contexts. Windows/Linux use the plugin (the correct native path
+//! there; Linux needs a notification daemon, a missing one just logs).
+//!
+//! Everything remains **best-effort**: the tray icon state + the in-window
+//! log/status are the AUTHORITATIVE signal. Never panic, never propagate — a
+//! failed notification is logged at `debug` and ignored. To fully verify the
+//! native plugin path on macOS you need a bundled, code-signed `.app`
+//! (`pnpm tauri build` + signing); the osascript path is verifiable today in
+//! `pnpm tauri dev`.
 
 use tauri::AppHandle;
+#[cfg(not(target_os = "macos"))]
 use tauri_plugin_notification::NotificationExt;
 
 use crate::state::AppState;
@@ -43,17 +58,70 @@ use crate::state::AppState;
 /// Fire a best-effort desktop notification. Errors are swallowed (logged at
 /// `debug`) because notifications are advisory — the tray + log are the source
 /// of truth (F5). No-op paths are handled by the callers below.
+///
+/// Body/title may carry a tunnel name or SSH error text — NEVER a secret (spec
+/// 03 §15). Callers must not pass credentials.
 fn show(app: &AppHandle, title: &str, body: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        // macOS: the plugin silently drops in dev/unsigned and we can't detect
+        // it (see module docs), so route through osascript, which works
+        // regardless of signing. The app handle is unused on this path.
+        let _ = app;
+        show_via_osascript(title, body);
+    }
+
+    #[cfg(not(target_os = "macos"))]
     match app.notification().builder().title(title).body(body).show() {
         Ok(()) => {
             tracing::debug!(title, "notification shown (best-effort)");
         }
         Err(e) => {
-            // Expected on unsigned macOS bundles (F5) and headless Linux without
-            // a notification daemon. Tray/log remain authoritative.
+            // Expected on headless Linux without a notification daemon.
+            // Tray/log remain authoritative.
             tracing::debug!(error = %e, title, "notification not shown (best-effort; tray/log authoritative)");
         }
     }
+}
+
+/// macOS notification via `osascript -e 'display notification ...'` (BUG 2).
+/// Works unsigned and without a bundle id — unlike the native plugin.
+///
+/// Runs the child process on the blocking pool so it never blocks the async
+/// runtime. `title`/`body` are escaped for the AppleScript string literal
+/// (backslash + double-quote) so a name/error containing quotes can neither
+/// break the script nor inject AppleScript.
+#[cfg(target_os = "macos")]
+fn show_via_osascript(title: &str, body: &str) {
+    fn escape(s: &str) -> String {
+        s.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+    let script = format!(
+        "display notification \"{}\" with title \"{}\"",
+        escape(body),
+        escape(title),
+    );
+    // spawn_blocking: never block the async runtime on a Command (fire-and-forget).
+    tauri::async_runtime::spawn_blocking(move || {
+        match std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                tracing::debug!("notification shown via osascript (best-effort)");
+            }
+            Ok(out) => {
+                tracing::debug!(
+                    stderr = %String::from_utf8_lossy(&out.stderr),
+                    "osascript notification returned non-zero (tray/log authoritative)"
+                );
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "osascript spawn failed (tray/log authoritative)");
+            }
+        }
+    });
 }
 
 /// Whether notifications are enabled AND we have a live app handle (headless
