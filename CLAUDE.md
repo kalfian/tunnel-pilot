@@ -1,115 +1,136 @@
-# Tunnel Pilot
+# Tunnel Pilot (v2)
 
-Cross-platform SSH local port forwarding manager (macOS, Windows, Linux). Lives in the system tray - no Dock icon on macOS by default.
+Cross-platform SSH local port-forwarding manager (macOS, Windows, Linux). Lives in the
+system tray — no Dock icon on macOS by default; the webview is destroyed while the window
+is hidden so idle footprint stays small.
+
+**Stack:** Rust + Tauri v2 backend, Svelte 5 + TypeScript + Vite frontend. SSH via
+`russh` 0.62 (pure-Rust async on tokio). State persisted as JSON in the OS app-config dir;
+passwords in the OS keychain (`keyring`) with a plaintext-fallback file when no keychain is
+available. Signed self-updates via `tauri-plugin-updater` (minisign).
+
+> The `spec/` directory is the authoritative contract for this rewrite. This file is the
+> at-a-glance brief; deep detail lives in the spec. Start at `spec/00-README.md`, then
+> `spec/02-ARCHITECTURE.md` (IPC/event catalog + module tree) and `spec/AGENTS.md`
+> (the detailed conventions every agent must follow). `spec/PROGRESS.md` tracks build state.
 
 ## Quick Reference
 
 - **Package name**: `com.kalfian.tunnel_pilot`
-- **Run**: `flutter run -d macos`
-- **Test**: `flutter test`
-- **Build**: `flutter build macos`
+- **App version**: 2.0.0
+- **Toolchain**: Rust via rustup (do not use asdf-rust) · Node + pnpm via asdf
+
+### Dev commands
+
+```bash
+pnpm install                 # frontend deps
+pnpm tauri dev               # run app (Rust core + Vite HMR)
+pnpm tauri build             # release bundle for the current OS
+
+# Frontend (from repo root)
+pnpm check                   # svelte-check / tsc
+pnpm lint                    # prettier --check + eslint
+pnpm test                    # vitest (component/unit)
+
+# Rust (from src-tauri/)
+cargo build
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt
+```
 
 ## Project Structure
 
 ```
-lib/
-  main.dart                         # Entry point, window/tray/provider setup
-  app.dart                          # MaterialApp with light/dark themes
-  models/
-    forward_config.dart             # SSH forward config (toJson/fromJson/copyWith)
-    app_settings.dart               # Settings: theme, notifications, reconnect, dock visibility
-    forward_status.dart             # Enum: disconnected/connecting/connected/error
-  services/
-    ssh_tunnel_service.dart         # SSH connection via dartssh2 (keep-alive support)
-    storage_service.dart            # JSON persistence (path_provider)
-    tray_service.dart               # System tray icon & menu (dynamic icons)
-    notification_service.dart       # Desktop notifications (local_notifier)
-    startup_service.dart            # Launch at login (launch_at_startup)
-    log_service.dart                # In-memory log entries (max 500)
-  providers/
-    forward_provider.dart           # Forward list + connection status + auto-reconnect
-    app_settings_provider.dart      # App settings state + theme mode
-  screens/
-    settings_window.dart            # Main window with Connections/Logs/Settings tabs
-  widgets/
-    forward_list_tile.dart          # Forward row with hover, toggle, status
-    forward_form_dialog.dart        # Add/edit forward form (includes keep-alive settings)
-    app_settings_section.dart       # Theme picker, toggles, dock visibility
-    backup_restore_section.dart     # Export/import config
-    logs_section.dart               # Log viewer with copy/clear
-assets/icons/                       # Tray icons (idle, active, numbered 1-9), app icons
-docs/index.html                     # Landing page (GitHub Pages)
+src/                                  # Svelte 5 + TS frontend (presentation only)
+  main.ts                             # mount app, hydrate on boot, subscribe to events
+  App.svelte                          # shell: tab nav (Connections/Logs/Settings) + palette
+  app.css
+  lib/
+    ipc.ts                            # typed wrappers over invoke() — one fn per command (contract)
+    events.ts                         # typed listen() subscriptions -> store updates
+    types.ts                          # TS types mirroring Rust models (04-DATA-MODEL.md)
+    hydrate.ts                        # app_hydrate() reconciliation into stores
+    fuzzy.ts                          # command-palette fuzzy match
+    validation.ts                     # ForwardForm validation
+    components/                       # ConnectionRow/List, ForwardForm, CommandPalette, TrayPopover, ...
+    routes/                           # ConnectionsView, LogsView, SettingsView
+    stores/                           # forwards, groups, settings, logs, updater, palette, ...
+    ui/                               # design-system primitives (Button, Dialog, Input, Menu, Icon, ...)
+  styles/                            # tokens.css, base.css
+
+src-tauri/                            # Rust + Tauri v2 core (owns tray, tokio, SSH, state)
+  Cargo.toml  tauri.conf.json  build.rs  icons/
+  src/
+    main.rs                           # entrypoint: builder, plugins, setup, run
+    lib.rs                            # shared for integration tests
+    error.rs                          # AppError (thiserror), serde-serializable across IPC
+    events.rs                         # event name constants + payload structs (Rust -> FE)
+    logging.rs                        # tracing setup + LogEntry buffer bridge
+    state/                            # AppState, tunnel_registry, settings_state, log_buffer
+    ssh/                              # engine (per-tunnel supervisor), client, forward, health, reconnect, wake, stats
+    storage/                          # config_file (atomic RMW), migration (v1->v2), backup
+    credentials/                      # keychain via keyring; plaintext fallback + warning flag
+    tray/                             # dynamic count icon + native menu build/rebuild
+    window/                           # hide-on-close, show/focus, single-instance re-show
+    platform/                         # dock/activation policy, autostart, notifications
+    updater/                          # tauri-plugin-updater wiring; check/download/install
+    commands/                         # thin #[tauri::command] handlers: forwards, groups, settings, logs, backup, updater, app
+
+assets/icons/                         # tray icons (idle grey + numbered 1-9), app + menu icons (embedded via include_bytes!)
+docs/                                 # landing page (GitHub Pages) + screenshots + install scripts
+spec/                                 # full v2 spec package (00-07 + AGENTS.md + design-tokens.md + PROGRESS.md)
 ```
 
-## Architecture & Patterns
+## Architecture & Conventions
 
-- **State Management**: Provider (ChangeNotifier pattern)
-- **Storage**: Plain JSON file via `path_provider` + `dart:io`
-- **Theme**: Custom light/dark themes in `app.dart`, accent `#007BFF` (light) / `#3D9AFF` (dark)
-- **UI Style**: Modern desktop aesthetic (Linear/Raycast inspired) - custom toggles, grouped cards, no Material switches
-- **Window behavior**: Hidden on close (stays in tray). Always starts hidden after first frame.
-- **Dock/Taskbar**: Hidden by default. Controlled by `showInDock` setting + `windowManager.setSkipTaskbar()`. `NSApp.setActivationPolicy(.accessory)` in AppDelegate for macOS reliability.
-- **Tray icon**: Dynamic - grey when idle, blue `#007BFF` with connection count (1-9) when active
-- **Logging**: In-memory LogService (max 500 entries), shown in Logs tab
-- **Auto-reconnect**: Configurable retries/delay, tracks user-initiated disconnects
-- **SSH keep-alive**: Per-tunnel interval + max unanswered count settings
+The full rules live in `spec/AGENTS.md`; do not duplicate them here. The essentials:
 
-## Key Dependencies
+- **The IPC contract is the source of truth.** Every backend capability is a
+  `#[tauri::command]` with a typed wrapper in `src/lib/ipc.ts` and a matching TS type in
+  `src/lib/types.ts`. Never call `invoke()` with raw strings from components. Rust structs
+  use `#[serde(rename_all = "camelCase")]`; TS types are camelCase. See the command/event
+  catalog in `spec/02-ARCHITECTURE.md` §6/§7 — changing the IPC surface means updating the
+  Rust command, the `invoke_handler`, `ipc.ts`, `types.ts`, and the §6/§7 tables together.
+- **State ownership**: Rust `AppState` is the single source of truth. Svelte stores are
+  read-through mirrors kept in sync by events; a window reopen must fully rehydrate via
+  `app_hydrate()`. The frontend holds no authoritative tunnel state.
+- **SSH engine**: one long-lived per-tunnel supervisor task that owns its russh session and
+  loops across reconnect attempts (stable `JoinHandle`). Two-level `CancellationToken`
+  (durable parent + per-attempt child); disconnect = cancel parent + await join before
+  releasing the port. Liveness comes from russh keepalive + the session-future signal — no
+  app-level ping-failure counter. A single shared 3s sampler emits `tunnel://stats`.
+- **Guarded state machine**: 5-state status (disconnected/connecting/connected/
+  disconnecting/error) written only via `set_status` under the registry lock — supervisor
+  owns connecting/connected/error, command handler owns disconnecting/disconnected.
+- **Rust style**: tokio only, never block the runtime; no `unwrap()`/`expect()` in prod
+  code; `Result<T, AppError>` return types; `tracing` for logs. `cargo fmt` +
+  `cargo clippy -D warnings` must pass.
+- **Svelte/TS style**: strict mode, no `any`; components are presentational (props in,
+  store-writes/events out) and never call `invoke()` directly. Visual details (tokens,
+  spacing, states) are owned by the design spec (`spec/05-UI-UX-SPEC.md` +
+  `spec/design-tokens.md`).
+- **Tray/window**: native tray menu rebuilt on state change; dynamic icon (idle grey / blue
+  badge with connection count, clamp 9). macOS uses `LSUIElement=true` with runtime
+  activation-policy switching — window shown ⇒ Regular policy (Dock visible), hidden ⇒
+  Accessory (tray only).
 
-| Package | Purpose |
-|---------|---------|
-| `system_tray` | System tray icon & context menu |
-| `dartssh2` | SSH connections & port forwarding |
-| `window_manager` | Window hide/show/close behavior + skipTaskbar |
-| `provider` | State management |
-| `local_notifier` | Desktop notifications |
-| `launch_at_startup` | Auto-start on login |
-| `path_provider` | App support directory |
-| `file_picker` | Identity file & backup selection |
-| `uuid` | Forward config IDs |
+## Security (non-negotiable)
 
-## Platform Config (macOS)
+- **No secrets in config when a keychain is available.** Passwords go to the OS keychain via
+  `credentials/`; the config JSON stores only `hasStoredPassword`. Plaintext fallback lives
+  in a separate secrets file (with a visible UI warning) only when no keychain exists —
+  never in the main config or backups.
+- **Never** log, emit over IPC, include in `copy_ssh_command`, or write to backups any
+  password. Use placeholders when a value must be referenced (org policy: no credentials in
+  output).
+- **Signed updates only**: `tauri-plugin-updater` with the embedded minisign public key; the
+  private key lives solely in CI secrets. Never weaken signature verification.
+- macOS is deliberately **unsandboxed** — do not add App Sandbox without a spec change.
 
-- `Info.plist`: `LSUIElement = true` (no Dock icon by default)
-- `AppDelegate.swift`: `NSApp.setActivationPolicy(.accessory)` on launch (runtime Dock hide)
-- `MainFlutterWindow.swift`: Traffic lights hidden, titlebar transparent
-- `DebugProfile.entitlements`: `network.client`
-- `Release.entitlements`: `network.client`, `network.server`, `files.user-selected.read-write`
+## Branch & Release Model
 
-### Dock visibility behavior
-- `LSUIElement` alone is NOT enough — `window_manager` overrides it at runtime
-- Must use `windowManager.setSkipTaskbar(true/false)` to dynamically show/hide
-- `AppDelegate` sets `.accessory` policy on launch as safety net
-- When window opens: show in Dock only if `showInDock` setting is true
-- When window closes (custom close button or system close): always hide from Dock
-- Setting change applies immediately if window is visible
-
-## Testing
-
-Tests are in `test/` covering models, services, and providers. Run with:
-```
-flutter test
-```
-
-## Common Tasks
-
-### Adding a new setting
-1. Add field to `AppSettings` model (with toJson/fromJson)
-2. Add getter/setter to `AppSettingsProvider`
-3. Add UI row in `AppSettingsSection`
-
-### Adding a new forward config field
-1. Add field to `ForwardConfig` (with toJson/fromJson/copyWith/toJsonForBackup)
-2. Add form field in `ForwardFormDialog`
-3. Update `SshTunnelService.connect()` if needed
-4. Update tests
-
-## Conventions
-
-- Font: SF Pro Text (set in theme)
-- Border radius: 8px (inputs/buttons), 10px (cards), 12px (dialogs)
-- Custom toggle widget (36x20) instead of Material Switch
-- Status colors: green `#22C55E`, yellow `#F59E0B`, red `#EF4444`, grey `#6B7280`
-- All service inits wrapped in try-catch to prevent crashes
-- Backup exports exclude passwords, include identity file paths
-- Window close = hide (custom close button in settings_window.dart calls `windowManager.hide()` + `setSkipTaskbar(true)`)
+- Active work is on branch **`rewrite/tauri`**. The Flutter v1 app has been removed; the
+  last Flutter build is archived at tag **`v1.4.2-flutter-final`**.
+- **Never `git push` from the CLI.** Commit locally; releases are tag-triggered in CI
+  (push tag `v2.*` → `tauri-release.yml`). See `spec/06-MIGRATION-REPO.md`.
