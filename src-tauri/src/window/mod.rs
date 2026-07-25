@@ -24,13 +24,30 @@ pub const MAIN_WINDOW: &str = "main";
 /// `WINDOW_FOCUS` here guarantees the frontend re-hydrates on every show — the
 /// webview may have been torn down while hidden.
 pub fn show_window(app: &AppHandle) {
+    // macOS foreground fix (runtime F4): the app runs as an `.accessory` agent
+    // (no dock icon), and an accessory app cannot reliably steal focus from the
+    // frontmost app — `window.set_focus()` alone shows the window but leaves the
+    // previous app (e.g. iTerm) on top. Flip the activation policy to `Regular`
+    // BEFORE showing so the process can become active and the window actually
+    // comes to the front. The FINAL dock policy is reconciled by
+    // `dock::refresh(app, true)` below (back to `Accessory` when
+    // `showInDock == false`); the window stays frontmost across that switch.
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(e) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
+            tracing::error!(error = %e, "failed to set Regular activation policy before show");
+        }
+    }
+
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.show();
         let _ = window.set_focus();
     } else {
         tracing::warn!("main window not found; cannot show");
     }
-    // Window is now shown → dock visible iff the setting says so.
+    // Window is now shown → dock visible iff the setting says so. On macOS this
+    // may switch the activation policy back to `Accessory`; the just-activated
+    // window remains frontmost.
     crate::platform::dock::refresh(app, true);
     // Tell the frontend to rehydrate now that the window is visible again.
     let _ = app.emit(events::WINDOW_FOCUS, ());
