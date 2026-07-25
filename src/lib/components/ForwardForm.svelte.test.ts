@@ -81,4 +81,37 @@ describe("ForwardForm", () => {
     expect(arg).not.toHaveProperty("password");
     expect(setForwardPassword).toHaveBeenCalledWith("new-1", "s3cret");
   });
+
+  it("closes a pristine Add form immediately with no discard prompt", async () => {
+    const onClose = vi.fn();
+    render(ForwardForm, { props: { mode: "add", onClose } });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: /close dialog/i }),
+    );
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByText(/discard unsaved changes\?/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("prompts to discard when closing a dirty form, then closes on confirm", async () => {
+    const onClose = vi.fn();
+    render(ForwardForm, { props: { mode: "add", onClose } });
+    await type(/^name$/i, "Postgres");
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: /close dialog/i }),
+    );
+
+    // The confirm intercepts the close: onClose is deferred until confirmed.
+    expect(onClose).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/discard unsaved changes\?/i),
+    ).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
