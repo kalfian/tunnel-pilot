@@ -1,10 +1,18 @@
-//! Tray menu build + debounced rebuild-on-change: per-tunnel rows (Retry on
-//! error), conditional bulk Start/Stop All, update-notice slot (spec 03 §10/§11).
+//! Tray menu build + debounced rebuild-on-change, styled after Laravel Herd's
+//! native menu-bar menu: an update-notice slot at the top, per-tunnel rows with
+//! a colored status-dot leading icon, conditional bulk Start/Stop All, and an
+//! actions footer (Settings ⌘, / Check for Updates… ⌘U / Quit ⌘Q).
 //!
 //! The menu *model* ([`build_menu_model`]) is a pure function of the tunnel
 //! states + update availability, so the "which rows/actions/bulk items appear"
 //! logic is unit-testable without a display. Turning the model into a real
-//! `tauri::menu::Menu` and reacting to clicks is the impure layer below.
+//! `tauri::menu::Menu` (with `IconMenuItem` dots + accelerators) and reacting to
+//! clicks is the impure layer below.
+//!
+//! Each per-tunnel row is a single clickable `IconMenuItem`: clicking performs
+//! the row's *primary* action for its status — connect when disconnected,
+//! disconnect when connected/connecting, **retry** when errored. The transient
+//! `disconnecting` row is disabled (clicks ignored).
 //!
 //! Rebuilds are **debounced** (~100 ms): a burst of `tunnel://status` events
 //! (e.g. Start All flipping every tunnel) coalesces into a single rebuild
@@ -13,7 +21,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{IconMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{AppHandle, Listener, Manager, Wry};
 use tokio::sync::Notify;
 
@@ -32,6 +40,16 @@ pub const ID_QUIT: &str = "quit";
 pub const ID_START_ALL: &str = "start_all";
 pub const ID_STOP_ALL: &str = "stop_all";
 pub const ID_UPDATE: &str = "update_install";
+pub const ID_CHECK_UPDATE: &str = "check_update";
+
+// --- accelerators (rendered right-aligned, Herd-style) ---------------------
+
+/// Settings — ⌘, (macOS) / Ctrl+, elsewhere.
+const ACCEL_SETTINGS: &str = "CmdOrCtrl+,";
+/// Check for Updates… — ⌘U / Ctrl+U.
+const ACCEL_CHECK_UPDATE: &str = "CmdOrCtrl+U";
+/// Quit — ⌘Q / Ctrl+Q.
+const ACCEL_QUIT: &str = "CmdOrCtrl+Q";
 
 /// Per-tunnel item ids are `"t:<action>:<uuid>"`. UUIDs contain no `:` so a
 /// `splitn(3, ':')` cleanly recovers `(action, id)`.
@@ -44,6 +62,8 @@ const TUNNEL_PREFIX: &str = "t";
 pub struct TunnelState {
     pub id: String,
     pub name: String,
+    /// Local bind port, shown right of the name (e.g. `Qismo Prod   :5431`).
+    pub port: u16,
     pub status: ForwardStatus,
 }
 
@@ -60,9 +80,12 @@ pub enum TunnelAction {
 pub struct TunnelMenuRow {
     pub id: String,
     pub name: String,
+    pub port: u16,
     pub status: ForwardStatus,
     /// Actions available in this status (empty for the transient `disconnecting`).
     pub actions: Vec<TunnelAction>,
+    /// The single action a click on this row performs (`None` while transient).
+    pub primary: Option<TunnelAction>,
 }
 
 /// Content of the update-notice slot when an update is pending install.
@@ -111,6 +134,18 @@ fn actions_for(status: ForwardStatus) -> Vec<TunnelAction> {
     }
 }
 
+/// The single action a click on a per-tunnel row performs (Herd-style flat
+/// rows). Connect when idle, disconnect when live, **retry** when errored;
+/// `None` while `disconnecting` (row disabled, clicks ignored — F23).
+pub fn primary_action(status: ForwardStatus) -> Option<TunnelAction> {
+    match status {
+        ForwardStatus::Disconnected => Some(TunnelAction::Connect),
+        ForwardStatus::Connecting | ForwardStatus::Connected => Some(TunnelAction::Disconnect),
+        ForwardStatus::Error => Some(TunnelAction::Retry),
+        ForwardStatus::Disconnecting => None,
+    }
+}
+
 /// Build the pure tray-menu model from the current tunnel states + update
 /// availability. Bulk items appear conditionally: Start All when anything is
 /// startable (disconnected/error), Stop All when anything is stoppable
@@ -121,8 +156,10 @@ pub fn build_menu_model(tunnels: &[TunnelState], update_notice: Option<UpdateNot
         .map(|t| TunnelMenuRow {
             id: t.id.clone(),
             name: t.name.clone(),
+            port: t.port,
             status: t.status,
             actions: actions_for(t.status),
+            primary: primary_action(t.status),
         })
         .collect();
 
@@ -152,17 +189,6 @@ pub fn connected_count(tunnels: &[TunnelState]) -> usize {
         .count()
 }
 
-/// A short status glyph + label for menu display (geometric symbols, not emoji).
-fn status_glyph(status: ForwardStatus) -> &'static str {
-    match status {
-        ForwardStatus::Connected => "●",
-        ForwardStatus::Connecting => "◐",
-        ForwardStatus::Disconnected => "○",
-        ForwardStatus::Disconnecting => "◌",
-        ForwardStatus::Error => "⚠",
-    }
-}
-
 fn status_label(status: ForwardStatus) -> &'static str {
     match status {
         ForwardStatus::Connected => "Connected",
@@ -170,6 +196,18 @@ fn status_label(status: ForwardStatus) -> &'static str {
         ForwardStatus::Disconnected => "Disconnected",
         ForwardStatus::Disconnecting => "Disconnecting…",
         ForwardStatus::Error => "Error",
+    }
+}
+
+/// The label for a per-tunnel row: name with the local port appended, Herd-style
+/// (`Qismo Prod   :5431`). A transient `disconnecting` row also carries its
+/// state so the disabled row reads clearly.
+fn tunnel_row_label(row: &TunnelMenuRow) -> String {
+    let base = format!("{}   :{}", row.name, row.port);
+    if row.primary.is_none() {
+        format!("{base}  ({})", status_label(row.status))
+    } else {
+        base
     }
 }
 
@@ -190,6 +228,7 @@ pub fn gather_tunnel_states(state: &AppState) -> Vec<TunnelState> {
             TunnelState {
                 id: c.id,
                 name: c.name,
+                port: c.local_port,
                 status,
             }
         })
@@ -220,7 +259,8 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
         items.push(Box::new(PredefinedMenuItem::separator(app)?));
     }
 
-    // Per-tunnel rows.
+    // Per-tunnel rows: each a single clickable IconMenuItem with a colored
+    // status-dot leading icon. Clicking runs the row's primary action.
     if model.tunnels.is_empty() {
         items.push(Box::new(MenuItem::with_id(
             app,
@@ -231,19 +271,7 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
         )?));
     } else {
         for row in &model.tunnels {
-            let label = format!("{}  {}", status_glyph(row.status), row.name);
-            if row.actions.is_empty() {
-                // Transient (disconnecting) — a disabled label, no actions.
-                items.push(Box::new(MenuItem::with_id(
-                    app,
-                    format!("noop:{}", row.id),
-                    format!("{}  ({})", label, status_label(row.status)),
-                    false,
-                    None::<&str>,
-                )?));
-            } else {
-                items.push(Box::new(build_tunnel_submenu(app, row, &label)?));
-            }
+            items.push(build_tunnel_row(app, row)?);
         }
     }
 
@@ -272,6 +300,8 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
         items.push(Box::new(PredefinedMenuItem::separator(app)?));
     }
 
+    // Actions footer with accelerators (rendered right-aligned, Herd-style).
+    //
     // The main window IS the settings/config window (v1 parity), so the tray
     // entry reads "Settings". Id stays `ID_OPEN` — the action still shows the
     // window via `window::show_window` (see `handle_menu_event`).
@@ -280,55 +310,53 @@ pub fn build_tauri_menu(app: &AppHandle, model: &MenuModel) -> tauri::Result<Men
         ID_OPEN,
         "Settings",
         true,
-        None::<&str>,
+        Some(ACCEL_SETTINGS),
+    )?));
+    items.push(Box::new(MenuItem::with_id(
+        app,
+        ID_CHECK_UPDATE,
+        "Check for Updates…",
+        true,
+        Some(ACCEL_CHECK_UPDATE),
     )?));
     items.push(Box::new(MenuItem::with_id(
         app,
         ID_QUIT,
         "Quit",
         true,
-        None::<&str>,
+        Some(ACCEL_QUIT),
     )?));
 
     let refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(|b| b.as_ref()).collect();
     Menu::with_items(app, &refs)
 }
 
-/// Build the submenu for a single tunnel row: a disabled status line + the
-/// available action items.
-fn build_tunnel_submenu(
+/// Build a single per-tunnel row as an `IconMenuItem` (colored status dot +
+/// name/port). Enabled rows carry the primary-action id (`t:<action>:<uuid>`);
+/// a transient `disconnecting` row is disabled with a `noop:` id. If the dot
+/// image fails to decode, the row still renders (icon omitted).
+fn build_tunnel_row(
     app: &AppHandle,
     row: &TunnelMenuRow,
-    label: &str,
-) -> tauri::Result<Submenu<Wry>> {
-    let mut children: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
+) -> tauri::Result<Box<dyn IsMenuItem<Wry>>> {
+    let label = tunnel_row_label(row);
+    let dot = super::icon::load_dot(row.status).ok();
 
-    children.push(Box::new(MenuItem::with_id(
+    let (id, enabled) = match row.primary {
+        Some(TunnelAction::Connect) => (tunnel_item_id("connect", &row.id), true),
+        Some(TunnelAction::Disconnect) => (tunnel_item_id("disconnect", &row.id), true),
+        Some(TunnelAction::Retry) => (tunnel_item_id("retry", &row.id), true),
+        None => (format!("noop:{}", row.id), false),
+    };
+
+    Ok(Box::new(IconMenuItem::with_id(
         app,
-        format!("noop:status:{}", row.id),
-        format!("Status: {}", status_label(row.status)),
-        false,
+        id,
+        label,
+        enabled,
+        dot,
         None::<&str>,
-    )?));
-    children.push(Box::new(PredefinedMenuItem::separator(app)?));
-
-    for action in &row.actions {
-        let (id, text) = match action {
-            TunnelAction::Connect => (tunnel_item_id("connect", &row.id), "Connect"),
-            TunnelAction::Disconnect => (tunnel_item_id("disconnect", &row.id), "Disconnect"),
-            TunnelAction::Retry => (tunnel_item_id("retry", &row.id), "Retry"),
-        };
-        children.push(Box::new(MenuItem::with_id(
-            app,
-            id,
-            text,
-            true,
-            None::<&str>,
-        )?));
-    }
-
-    let refs: Vec<&dyn IsMenuItem<Wry>> = children.iter().map(|b| b.as_ref()).collect();
-    Submenu::with_items(app, label, true, &refs)
+    )?))
 }
 
 fn tunnel_item_id(action: &str, id: &str) -> String {
@@ -372,6 +400,28 @@ pub fn handle_menu_event(app: &AppHandle, item_id: &str) {
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = crate::updater::run_install(&app_for_install, &updater).await {
                     tracing::error!(error = %e, "tray update-install failed");
+                }
+            });
+        }
+        ID_CHECK_UPDATE => {
+            // Manual "Check for Updates…" — same path as the `check_update`
+            // command (no auto-notify: the user asked, so any result surfaces via
+            // the emitted `update://status` → rebuilds the tray notice slot).
+            let (Some(state), Some(updater)) = (
+                app.try_state::<Arc<AppState>>(),
+                app.try_state::<Arc<UpdaterState>>(),
+            ) else {
+                tracing::error!("state/updater not managed; tray update-check dropped");
+                return;
+            };
+            let state = state.inner().clone();
+            let updater = updater.inner().clone();
+            let app_for_check = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) =
+                    crate::updater::run_check(&app_for_check, &state, &updater, false).await
+                {
+                    tracing::error!(error = %e, "tray update-check failed");
                 }
             });
         }
@@ -501,6 +551,7 @@ mod tests {
         TunnelState {
             id: id.to_string(),
             name: format!("fwd-{id}"),
+            port: 5000,
             status,
         }
     }
@@ -537,6 +588,64 @@ mod tests {
     fn disconnecting_row_has_no_actions() {
         let m = build_menu_model(&[ts("a", ForwardStatus::Disconnecting)], None);
         assert!(m.tunnels[0].actions.is_empty());
+    }
+
+    #[test]
+    fn primary_action_toggles_by_status() {
+        // Flat-row click behaviour: idle→connect, live→disconnect, error→retry.
+        assert_eq!(
+            primary_action(ForwardStatus::Disconnected),
+            Some(TunnelAction::Connect)
+        );
+        assert_eq!(
+            primary_action(ForwardStatus::Connecting),
+            Some(TunnelAction::Disconnect)
+        );
+        assert_eq!(
+            primary_action(ForwardStatus::Connected),
+            Some(TunnelAction::Disconnect)
+        );
+        assert_eq!(
+            primary_action(ForwardStatus::Error),
+            Some(TunnelAction::Retry)
+        );
+        assert_eq!(primary_action(ForwardStatus::Disconnecting), None);
+    }
+
+    #[test]
+    fn error_row_primary_is_retry() {
+        // On error, clicking the row retries (keeps a way to retry — acceptance).
+        let m = build_menu_model(&[ts("a", ForwardStatus::Error)], None);
+        assert_eq!(m.tunnels[0].primary, Some(TunnelAction::Retry));
+    }
+
+    #[test]
+    fn disconnecting_row_has_no_primary() {
+        let m = build_menu_model(&[ts("a", ForwardStatus::Disconnecting)], None);
+        assert!(m.tunnels[0].primary.is_none());
+    }
+
+    #[test]
+    fn row_carries_port_and_label() {
+        let mut t = ts("a", ForwardStatus::Connected);
+        t.name = "Qismo Prod".to_string();
+        t.port = 5431;
+        let m = build_menu_model(&[t], None);
+        let row = &m.tunnels[0];
+        assert_eq!(row.port, 5431);
+        assert_eq!(tunnel_row_label(row), "Qismo Prod   :5431");
+    }
+
+    #[test]
+    fn disconnecting_label_includes_state() {
+        let mut t = ts("a", ForwardStatus::Disconnecting);
+        t.name = "DB".to_string();
+        t.port = 6001;
+        let m = build_menu_model(&[t], None);
+        assert_eq!(
+            tunnel_row_label(&m.tunnels[0]),
+            "DB   :6001  (Disconnecting…)"
+        );
     }
 
     #[test]
