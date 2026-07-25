@@ -42,9 +42,11 @@
     "downloadUrl": "https://github.com/kalfian/tunnel-pilot/releases/latest",
     "image": "https://kalfian.github.io/tunnel-pilot/og-banner.png",
     "screenshot": [
-      "https://kalfian.github.io/tunnel-pilot/Screenshot/connections.png",
-      "https://kalfian.github.io/tunnel-pilot/Screenshot/settings.png",
-      "https://kalfian.github.io/tunnel-pilot/Screenshot/new-tunnel.png"
+      "https://kalfian.github.io/tunnel-pilot/screenshots/connections.png",
+      "https://kalfian.github.io/tunnel-pilot/screenshots/tray-menu.png",
+      "https://kalfian.github.io/tunnel-pilot/screenshots/command-palette.png",
+      "https://kalfian.github.io/tunnel-pilot/screenshots/add-tunnel.png",
+      "https://kalfian.github.io/tunnel-pilot/screenshots/settings.png"
     ],
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "macOS, Windows, Linux",
@@ -256,68 +258,42 @@
     .os-inline { display:inline-flex; gap:var(--sp-4); align-items:center; color:var(--text-2); }
     .os-inline .icon { width:18px; height:18px; }
 
-    /* ---------- App mockup (the "screenshot") ---------- */
-    .mock {
-      background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
-      box-shadow:var(--shadow-3); overflow:hidden; user-select:none;
+    /* ---------- Real app screenshots (framed) ----------
+       The raw captures carry a thin strip of terminal/desktop bleed at
+       their edges. Each is placed in an overflow-clipped rounded frame
+       and slightly up-scaled (transform: scale) so the outer ~2.8% —
+       the bleed — is cropped by the frame. transform is resolution-
+       independent, so the crop holds at every responsive width. */
+    .shot {
+      border:1px solid var(--border); border-radius:var(--radius-lg);
+      box-shadow:var(--shadow-3); background:var(--surface);
+      overflow:hidden; position:relative;
     }
-    .mock-titlebar {
-      height:40px; display:flex; align-items:center; gap:var(--sp-4);
-      padding:0 var(--sp-4); border-bottom:1px solid var(--divider); background:var(--surface);
+    .shot img { display:block; width:100%; height:auto; }
+    /* landscape window shots (891×667): scale 1.06 crops ~19px top/bottom,
+       ~25px left/right — hides the edge bleed, keeps the app title bar. */
+    .shot.win img { transform:scale(1.06); transform-origin:center; }
+
+    /* Hero: backdrop panel so the screenshot reads as a marketing shot */
+    .hero-figure { position:relative; margin:0; }
+    .hero-figure::before {
+      content:""; position:absolute; inset:-8% -6% -12%;
+      background:radial-gradient(60% 70% at 70% 30%, var(--accent-subtle-2), transparent 70%);
+      filter:blur(8px); z-index:-1; pointer-events:none;
     }
-    .traffic { display:flex; gap:var(--sp-3); }
-    .traffic i { width:11px; height:11px; border-radius:var(--radius-full); display:block; }
-    .traffic .r{background:#FF5F57;} .traffic .y{background:#FEBC2E;} .traffic .g{background:#28C840;}
-    .mock-title { font-size:12px; font-weight:600; color:var(--text-2); }
-    .mock-kbar {
-      margin-left:auto; display:flex; align-items:center; gap:var(--sp-2);
-      height:24px; padding:0 var(--sp-3); border-radius:var(--radius-sm);
-      border:1px solid var(--border); background:var(--surface-2);
-      font-size:11px; color:var(--text-3);
-    }
-    .mock-kbar kbd { font-family:var(--font-mono); font-size:10px; color:var(--text-2); background:var(--surface-3); border-radius:var(--radius-xs); padding:1px var(--sp-2); }
-    .mock-body { display:grid; grid-template-columns:150px 1fr; min-height:340px; }
-    .mock-rail { border-right:1px solid var(--divider); padding:var(--sp-4) var(--sp-3); display:flex; flex-direction:column; gap:var(--sp-1); background:var(--surface); }
-    .rail-item { display:flex; align-items:center; gap:var(--sp-3); height:34px; padding:0 var(--sp-3); border-radius:var(--radius-sm); color:var(--text-2); font-size:13px; font-weight:500; position:relative; }
-    .rail-item .icon { width:16px; height:16px; }
-    .rail-item.active { background:var(--accent-subtle); color:var(--text); }
-    .rail-item.active::before { content:""; position:absolute; left:0; top:7px; bottom:7px; width:2px; border-radius:var(--radius-full); background:var(--accent); }
-    .rail-spacer { flex:1; }
-    .rail-kbar { display:flex; align-items:center; gap:var(--sp-2); height:30px; padding:0 var(--sp-3); border-radius:var(--radius-sm); border:1px solid var(--border); color:var(--text-3); font-size:11px; }
-    .rail-kbar kbd { margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--text-2); background:var(--surface-2); border-radius:var(--radius-xs); padding:1px var(--sp-2); }
 
-    .mock-content { padding:var(--sp-5); overflow:hidden; }
-    .content-head { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:var(--sp-5); }
-    .content-head .title { font-size:18px; font-weight:700; letter-spacing:-0.01em; }
-    .content-head .sub { font-size:12px; color:var(--text-2); margin-top:var(--sp-1); }
-    .content-head .sub b { color:var(--status-connected-fg); font-weight:600; }
-    .add-btn { display:inline-flex; align-items:center; gap:var(--sp-2); height:28px; padding:0 var(--sp-4); border-radius:var(--radius-sm); background:var(--accent-solid); color:var(--on-accent-btn); font-size:12px; font-weight:600; }
-    .add-btn .icon { width:13px; height:13px; }
+    /* Tray menu (native macOS menu): pre-cropped to the menu card itself
+       (menu-bar strip + desktop bleed removed from the PNG), shown as a
+       floating card with shadow. */
+    .tray-shot { max-width:280px; margin:0 auto; border-radius:var(--radius-md); }
 
-    .group-head { display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-2); font-size:11px; font-weight:600; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-2); }
-    .group-head .icon { width:12px; height:12px; }
-    .group-head .count { margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--status-connected-fg); text-transform:none; letter-spacing:0; }
-
-    .trow { display:grid; grid-template-columns:auto 1fr auto; gap:var(--sp-4); align-items:center; padding:var(--sp-4); border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); margin-bottom:var(--sp-3); position:relative; }
-    .trow.on { border-color:var(--border-strong); }
-    .trow.on::before { content:""; position:absolute; left:0; top:10px; bottom:10px; width:2px; border-radius:var(--radius-full); background:var(--accent); }
-    .dot { width:8px; height:8px; border-radius:var(--radius-full); flex-shrink:0; }
-    .dot-green{background:var(--status-connected);} .dot-grey{background:var(--status-idle);}
-    .dot-amber{background:var(--status-pending); animation:pulse 1.1s var(--ease-standard) infinite;}
-    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
-    .trow .name { font-size:13px; font-weight:600; color:var(--text); }
-    .trow .tags { display:inline-flex; gap:var(--sp-2); margin-left:var(--sp-3); }
-    .tag { font-size:10px; padding:1px var(--sp-2); border-radius:var(--radius-full); background:var(--surface-2); color:var(--text-2); font-weight:500; }
-    .trow .route { font-family:var(--font-mono); font-size:11.5px; color:var(--text-2); margin-top:var(--sp-1); }
-    .trow .route .arw { color:var(--text-3); margin:0 var(--sp-1); }
-    .trow .chips { display:flex; flex-wrap:wrap; gap:var(--sp-2); margin-top:var(--sp-3); }
-    .chip { font-family:var(--font-mono); font-size:10px; color:var(--text-2); background:var(--surface-2); border-radius:var(--radius-xs); padding:1px var(--sp-2); }
-    .chip b { color:var(--text); font-weight:600; }
-
-    .tgl { width:36px; height:20px; border-radius:var(--radius-full); background:var(--surface-3); position:relative; flex-shrink:0; transition:background var(--dur-fast); }
-    .tgl::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:var(--radius-full); background:#fff; box-shadow:var(--shadow-1); transition:transform var(--dur-fast) var(--ease-spring); }
-    .tgl.on { background:var(--accent); }
-    .tgl.on::after { transform:translateX(16px); }
+    /* Gallery of secondary screens */
+    .gallery { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-6); }
+    .gcard { margin:0; display:flex; flex-direction:column; }
+    .gcard .shot { border-radius:var(--radius-md); }
+    .gcard figcaption { margin-top:var(--sp-4); }
+    .gcard figcaption b { display:block; font-size:14px; font-weight:600; color:var(--text); margin-bottom:2px; }
+    .gcard figcaption span { font-size:13px; color:var(--text-2); line-height:1.55; }
 
     /* ---------- Section scaffolding ---------- */
     section { padding:var(--sp-11) 0; }
@@ -360,37 +336,6 @@
     .showcase li { display:flex; gap:var(--sp-3); font-size:14px; color:var(--text-2); }
     .showcase li .icon { width:17px; height:17px; color:var(--accent); flex-shrink:0; margin-top:2px; }
     .showcase li b { color:var(--text); font-weight:600; }
-
-    /* tray menu mock */
-    .tray-wrap { display:flex; justify-content:center; }
-    .tray {
-      width:300px; background:var(--surface-overlay); border:1px solid var(--border);
-      border-radius:var(--radius-lg); box-shadow:var(--shadow-3); padding:var(--sp-3); user-select:none;
-    }
-    .tray-update { display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-3); border-radius:var(--radius-sm); background:var(--accent-subtle); color:var(--accent-text); font-size:12px; font-weight:600; margin-bottom:var(--sp-2); }
-    .tray-update .icon { width:14px; height:14px; }
-    .tray-hd { font-size:10px; font-weight:600; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-3); padding:var(--sp-3) var(--sp-3) var(--sp-2); }
-    .tray-row { display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-3); border-radius:var(--radius-sm); font-size:12.5px; }
-    .tray-row:hover { background:var(--hover); }
-    .tray-row .nm { color:var(--text); font-weight:500; }
-    .tray-row .rt { margin-left:auto; font-family:var(--font-mono); font-size:10.5px; color:var(--text-3); }
-    .tray-sep { height:1px; background:var(--divider); margin:var(--sp-2) 0; }
-    .tray-action { display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-2) var(--sp-3); border-radius:var(--radius-sm); font-size:12.5px; color:var(--text-2); }
-    .tray-action:hover { background:var(--hover); color:var(--text); }
-    .tray-action .icon { width:14px; height:14px; }
-
-    /* command palette mock */
-    .palette { width:360px; background:var(--surface-overlay); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow-3); overflow:hidden; margin:0 auto; user-select:none; }
-    .pal-input { display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-4) var(--sp-5); border-bottom:1px solid var(--divider); }
-    .pal-input .icon { width:16px; height:16px; color:var(--text-3); }
-    .pal-input .q { font-size:14px; color:var(--text); }
-    .pal-input .caret { width:1px; height:16px; background:var(--accent); animation:blink 1s step-end infinite; }
-    @keyframes blink { 50%{opacity:0;} }
-    .pal-list { padding:var(--sp-2); }
-    .pal-row { display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-3); border-radius:var(--radius-sm); font-size:13px; color:var(--text-2); }
-    .pal-row .icon { width:15px; height:15px; }
-    .pal-row.sel { background:var(--accent-subtle); color:var(--text); }
-    .pal-row .k { margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--text-3); }
 
     /* ---------- Download ---------- */
     .dl-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-4); margin-bottom:var(--sp-6); }
@@ -462,22 +407,20 @@
     @media (max-width:960px) {
       .hero-grid, .ram-grid, .showcase { grid-template-columns:1fr; gap:var(--sp-8); }
       .showcase.rev { direction:ltr; }
-      .hero .mock-order { order:-1; }
-      .fgrid, .dl-grid { grid-template-columns:repeat(2,1fr); }
+      .fgrid, .dl-grid, .gallery { grid-template-columns:repeat(2,1fr); }
+      .gallery .gcard:nth-child(3) { grid-column:1 / -1; max-width:520px; }
       .hero h1 { font-size:36px; }
     }
     @media (max-width:680px) {
       .wrap { padding:0 var(--sp-5); }
       .nav-links a:not(.btn) { display:none; }
-      .fgrid, .dl-grid, .callout-2 { grid-template-columns:1fr; }
+      .fgrid, .dl-grid, .callout-2, .gallery { grid-template-columns:1fr; }
+      .gallery .gcard:nth-child(3) { max-width:none; }
       .hero { padding:var(--sp-9) 0; }
       .hero h1 { font-size:30px; }
       .hero .lede { font-size:16px; }
       section { padding:var(--sp-9) 0; }
       .sec-head h2 { font-size:24px; }
-      .mock-body { grid-template-columns:56px 1fr; }
-      .rail-item span, .rail-kbar { display:none; }
-      .rail-item { justify-content:center; padding:0; }
       .callout .os-list li { grid-template-columns:1fr; gap:var(--sp-1); }
       .cta-row .btn { flex:1; justify-content:center; }
       .foot { flex-direction:column; align-items:flex-start; }
@@ -511,21 +454,11 @@
     <symbol id="i-linux" viewBox="0 0 24 24"><path d="M9 3a3 3 0 0 1 6 0c0 1.5-.5 2.3-.5 3.5 0 1 .8 1.7 1.5 3 1 1.8 2 3.4 2 5.5 0 2-1 3.5-1.8 4.7-.4.6-1 .8-1.6.5-.5-.2-.8-.8-1.4-.8h-3.4c-.6 0-.9.6-1.4.8-.6.3-1.2.1-1.6-.5C4.9 18.5 4 17 4 15c0-2.1 1-3.7 2-5.5.7-1.3 1.5-2 1.5-3C7.5 5.3 7 4.5 9 3Z"/><path d="M10 8h.01M14 8h.01"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
-    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
     <symbol id="i-chevron-down" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
-    <symbol id="i-chevron-right" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></symbol>
-    <symbol id="i-arrow-right" viewBox="0 0 24 24"><line x1="5" x2="19" y1="12" y2="12"/><polyline points="12 5 19 12 12 19"/></symbol>
     <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
-    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
-    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></symbol>
     <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
-    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
-    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
-    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
-    <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
-    <symbol id="i-square" viewBox="0 0 24 24"><rect width="16" height="16" x="4" y="4" rx="2"/></symbol>
   </svg>
 
   <header class="nav">
@@ -595,78 +528,14 @@
           </div>
         </div>
 
-        <!-- App mockup = the "screenshot", built in CSS -->
-        <div class="mock mock-order" role="img" aria-label="Tunnel Pilot's Connections screen: a left sidebar with Connections, Activity and Settings, and a list of SSH tunnels showing status dots, local-to-remote routes, and toggles.">
-          <div class="mock-titlebar">
-            <span class="traffic" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></span>
-            <span class="mock-title">Tunnel Pilot</span>
-            <span class="mock-kbar"><svg class="icon" style="width:12px;height:12px" aria-hidden="true"><use href="#i-search"/></svg> Search <kbd>⌘K</kbd></span>
+        <!-- Real app screenshot: the Connections tab -->
+        <figure class="hero-figure">
+          <div class="shot win">
+            <img src="screenshots/connections.png" width="891" height="667"
+                 loading="eager" fetchpriority="high" decoding="async"
+                 alt="Tunnel Pilot's Connections window: a sidebar with Connections, Activity and Settings; a toolbar with Filter, Tag, New group and Add; and SSH tunnels grouped under Production, Staging and Ungrouped — each row shows a status dot, a name with tags, and a 127.0.0.1 local-to-remote forwarding route with an on/off toggle.">
           </div>
-          <div class="mock-body">
-            <nav class="mock-rail" aria-hidden="true">
-              <span class="rail-item active"><svg class="icon" aria-hidden="true"><use href="#i-network"/></svg><span>Connections</span></span>
-              <span class="rail-item"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg><span>Activity</span></span>
-              <span class="rail-item"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></span>
-              <span class="rail-spacer"></span>
-              <span class="rail-kbar"><svg class="icon" style="width:13px;height:13px" aria-hidden="true"><use href="#i-command"/></svg> Command <kbd>⌘K</kbd></span>
-            </nav>
-            <div class="mock-content" aria-hidden="true">
-              <div class="content-head">
-                <div>
-                  <div class="title">Connections</div>
-                  <div class="sub">4 tunnels &middot; <b>2 active</b></div>
-                </div>
-                <span class="add-btn"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add</span>
-              </div>
-
-              <div class="group-head">
-                <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg>
-                Production <span class="count">2/3 active</span>
-              </div>
-
-              <div class="trow on">
-                <span class="dot dot-green"></span>
-                <div>
-                  <span class="name">Postgres</span>
-                  <span class="tags"><span class="tag">db</span><span class="tag">prod</span></span>
-                  <div class="route">127.0.0.1:5432<span class="arw">&rarr;</span>10.0.4.12:5432</div>
-                  <div class="chips"><span class="chip">↑ <b>12.4 MB</b></span><span class="chip">↓ <b>88.1 MB</b></span><span class="chip">⟳ <b>41 ms</b></span><span class="chip">◷ <b>2h 14m</b></span></div>
-                </div>
-                <span class="tgl on"></span>
-              </div>
-
-              <div class="trow on">
-                <span class="dot dot-green"></span>
-                <div>
-                  <span class="name">Redis</span>
-                  <span class="tags"><span class="tag">cache</span></span>
-                  <div class="route">127.0.0.1:6379<span class="arw">&rarr;</span>10.0.4.20:6379</div>
-                </div>
-                <span class="tgl on"></span>
-              </div>
-
-              <div class="trow">
-                <span class="dot dot-amber"></span>
-                <div>
-                  <span class="name">Grafana</span>
-                  <span class="tags"><span class="tag">obs</span></span>
-                  <div class="route">127.0.0.1:3000<span class="arw">&rarr;</span>10.2.1.9:3000</div>
-                </div>
-                <span class="tgl"></span>
-              </div>
-
-              <div class="trow">
-                <span class="dot dot-grey"></span>
-                <div>
-                  <span class="name">Kibana</span>
-                  <span class="tags"><span class="tag">logs</span></span>
-                  <div class="route">127.0.0.1:5601<span class="arw">&rarr;</span>10.2.1.14:5601</div>
-                </div>
-                <span class="tgl"></span>
-              </div>
-            </div>
-          </div>
-        </div>
+        </figure>
       </div>
     </section>
 
@@ -749,29 +618,21 @@
     <section style="padding-top:0;">
       <div class="wrap showcase">
         <div class="reveal">
-          <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-window"/></svg> The tray menu</span>
+          <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg> The menu-bar menu</span>
           <h3>Toggle everything without opening the window</h3>
-          <p>Right-click the tray icon for a live menu of every tunnel: status dot, route, and a one-click toggle. Bulk Start&nbsp;/&nbsp;Stop&nbsp;All when you need it, and an update notice surfaced right at the top.</p>
+          <p>Click the menu-bar icon for a native menu of every tunnel, grouped exactly like the app. Each row is a status dot and its port &mdash; click to connect or disconnect. <b>Start All</b>, open <b>Settings</b>, <b>Check for Updates</b>, or <b>Quit</b>, all without opening the window.</p>
           <ul>
-            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Status at a glance</b> &mdash; green connected, grey off, amber connecting.</span></li>
-            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Retry on error</b> &mdash; a failed tunnel offers a one-click retry inline.</span></li>
-            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Never in the way</b> &mdash; closing the window keeps the app alive in the tray.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Status at a glance</b> &mdash; green connected, grey idle, red on error.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Grouped like the app</b> &mdash; Production, Staging and Ungrouped, in order, with a status line up top.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Keyboard shortcuts</b> &mdash; Settings <span class="mono">⌘,</span>, Check for Updates <span class="mono">⌘U</span>, Quit <span class="mono">⌘Q</span>.</span></li>
           </ul>
         </div>
-        <div class="tray-wrap reveal">
-          <div class="tray" role="img" aria-label="Tunnel Pilot tray menu with an update notice, four tunnels each showing a status dot and route, and Start all, Open, and Quit actions.">
-            <div class="tray-update"><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg> Update available &middot; v2.0.1</div>
-            <div class="tray-hd">Production</div>
-            <div class="tray-row"><span class="dot dot-green"></span><span class="nm">Postgres</span><span class="rt">:5432</span></div>
-            <div class="tray-row"><span class="dot dot-green"></span><span class="nm">Redis</span><span class="rt">:6379</span></div>
-            <div class="tray-row"><span class="dot dot-amber"></span><span class="nm">Grafana</span><span class="rt">:3000</span></div>
-            <div class="tray-hd">Staging</div>
-            <div class="tray-row"><span class="dot dot-grey"></span><span class="nm">Kibana</span><span class="rt">:5601</span></div>
-            <div class="tray-sep"></div>
-            <div class="tray-action"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Start all</div>
-            <div class="tray-action"><svg class="icon" aria-hidden="true"><use href="#i-window"/></svg> Open Tunnel Pilot</div>
-            <div class="tray-action"><svg class="icon" aria-hidden="true"><use href="#i-power"/></svg> Quit</div>
-          </div>
+        <div class="reveal">
+          <figure class="shot tray-shot">
+            <img src="screenshots/tray-menu.png" width="267" height="464"
+                 loading="lazy" decoding="async"
+                 alt="Tunnel Pilot's native macOS menu-bar menu: a 'Tunnel Pilot' title with a status line, tunnels grouped under Production (Postgres :5432, Redis Cache :6379, Analytics DB :5433), Staging (Postgres (staging) :6432, Elasticsearch :9200) and Ungrouped (Grafana :3000, Prometheus :9090), then Start All, Settings ⌘comma, Check for Updates ⌘U, and Quit ⌘Q.">
+          </figure>
         </div>
       </div>
     </section>
@@ -790,18 +651,48 @@
           </ul>
         </div>
         <div class="reveal">
-          <div class="palette" role="img" aria-label="Command palette searching for 'post' with matching actions: connect Postgres, edit Postgres, and copy its SSH command.">
-            <div class="pal-input">
-              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
-              <span class="q">post</span><span class="caret" aria-hidden="true"></span>
+          <figure class="shot win" style="margin:0;">
+            <img src="screenshots/command-palette.png" width="891" height="667"
+                 loading="lazy" decoding="async"
+                 alt="Tunnel Pilot's ⌘K command palette open over the Connections window: a 'Search tunnels and actions' field, a TUNNELS list where each tunnel shows its 127.0.0.1 route and a Connect action, an ACTIONS section with 'Add tunnel ⌘N', and a footer of keyboard hints — navigate, run, edit, actions, esc close.">
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ GALLERY: dialog / settings / activity ============ -->
+    <section style="padding-top:0;">
+      <div class="wrap">
+        <div class="sec-head center reveal">
+          <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-window"/></svg> A closer look</span>
+          <h2>Everything you'd expect, nothing you wouldn't</h2>
+          <p>A clean form to add a tunnel, the handful of settings that actually matter, and an activity log when you need to see what happened.</p>
+        </div>
+        <div class="gallery">
+          <figure class="gcard reveal">
+            <div class="shot win">
+              <img src="screenshots/add-tunnel.png" width="891" height="667"
+                   loading="lazy" decoding="async"
+                   alt="Tunnel Pilot's Add tunnel dialog with General and Advanced tabs: a Name field, a Group & Tags section (Group set to Ungrouped, a free-form Tags field), and an SSH Server section with Host (bastion.example.com), Port 22, Username, and Password / Identity file authentication.">
             </div>
-            <div class="pal-list">
-              <div class="pal-row sel"><svg class="icon" aria-hidden="true"><use href="#i-network"/></svg> Connect <b style="color:inherit;font-weight:600">Postgres</b> <span class="k">↵</span></div>
-              <div class="pal-row"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg> Edit Postgres…</div>
-              <div class="pal-row"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> Copy SSH command</div>
-              <div class="pal-row"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Start all in Production</div>
+            <figcaption><b>Add a tunnel</b><span>Name it, drop it in a group, add tags, point it at an SSH server. Password or identity-file auth.</span></figcaption>
+          </figure>
+          <figure class="gcard reveal">
+            <div class="shot win">
+              <img src="screenshots/settings.png" width="891" height="667"
+                   loading="lazy" decoding="async"
+                   alt="Tunnel Pilot's Settings screen: Startup (Launch at login, Show in Dock / taskbar), Connections (Desktop notifications, Auto-reconnect with Retries and Delay controls), and Updates (Automatically check for updates, with a Check now button).">
             </div>
-          </div>
+            <figcaption><b>Settings that matter</b><span>Launch at login, Dock visibility, desktop notifications, auto-reconnect retries and delay, and update checks.</span></figcaption>
+          </figure>
+          <figure class="gcard reveal">
+            <div class="shot win">
+              <img src="screenshots/activity.png" width="891" height="667"
+                   loading="lazy" decoding="async"
+                   alt="Tunnel Pilot's Activity log: timestamped entries with level tags (WARN, INFO), a level filter, a search field, and Copy all and Clear actions.">
+            </div>
+            <figcaption><b>Activity log</b><span>Filter by level, search, and copy the log — so a connection issue is never a mystery.</span></figcaption>
+          </figure>
         </div>
       </div>
     </section>
