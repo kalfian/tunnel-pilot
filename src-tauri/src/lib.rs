@@ -34,6 +34,17 @@ use crate::credentials::CredentialStore;
 use crate::state::AppState;
 use crate::storage::config_file::{ConfigDocument, ConfigStore};
 
+/// CLI flag baked into the OS autostart registration (see the autostart plugin
+/// init below). Present in argv ⇒ this launch was triggered at login ⇒ stay
+/// hidden in the tray. Absent ⇒ a normal user launch ⇒ show + focus the window.
+const AUTOSTART_ARG: &str = "--minimized";
+
+/// True iff this process was started by the OS autostart/login registration,
+/// detected via the [`AUTOSTART_ARG`] flag in argv (spec 03 §12).
+fn launched_from_autostart() -> bool {
+    std::env::args().any(|a| a == AUTOSTART_ARG)
+}
+
 /// Build and run the Tauri application.
 ///
 /// The window starts hidden (`visible: false` in `tauri.conf.json`) so the app
@@ -47,9 +58,12 @@ pub fn run() {
             crate::window::focus_from_second_instance(app);
         }))
         // Launch-at-login. Reconciled with the `launchAtLogin` setting in M3.
+        // The `--minimized` arg is baked into the OS autostart registration, so a
+        // login-triggered launch carries it in argv while a normal user launch
+        // does not — that's how boot decides to show vs stay hidden (spec 03 §12).
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![AUTOSTART_ARG]),
         ))
         .plugin(tauri_plugin_notification::init())
         // Self-updater (spec 03 §16). Endpoints + the minisign public key live in
@@ -220,7 +234,16 @@ pub fn run() {
             // window and keeps the app alive in the tray; only Quit exits.
             crate::window::install_close_handler(&app.handle().clone());
 
-            // Tracing→log-buffer layer is initialized in the next M0 item.
+            // First-frame visibility (spec 03 §12): a NORMAL launch shows +
+            // focuses the window; an AUTOSTART (login) launch stays hidden in the
+            // tray. The window boots hidden (`visible: false`), so we only ever
+            // opt IN to showing — an autostart launch simply leaves it hidden.
+            if launched_from_autostart() {
+                tracing::info!("launched from autostart; staying hidden in the tray");
+            } else {
+                crate::window::show_window(&app.handle().clone());
+            }
+
             Ok(())
         })
         // `expect` is acceptable at this binary edge: a failure here means the
