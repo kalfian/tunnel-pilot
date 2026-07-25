@@ -6081,6 +6081,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "keyring",
+ "objc2",
  "russh",
  "serde",
  "serde_json",

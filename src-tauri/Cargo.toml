@@ -55,6 +55,10 @@ russh = "0.62"
 # per-target dependency blocks below.
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
+# Minimal objc2 msg_send shim for `NSApplication.activateIgnoringOtherApps`
+# (front the window when the app runs as an Accessory agent — BUG 1). objc2 is
+# already in the tree via Tauri; pinning it makes the shim's use explicit.
+objc2 = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }

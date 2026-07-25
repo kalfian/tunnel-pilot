@@ -1,27 +1,40 @@
-//! Dock/taskbar visibility: macOS `AppHandle::set_activation_policy`
-//! (Regular/Accessory — NOT objc FFI, F11); Win/Linux `set_skip_taskbar`.
+//! Dock/taskbar visibility.
 //!
-//! # macOS activation model (runtime BUG A fix)
+//! # macOS activation model (BUG 1 fix — policy follows the SETTING)
 //!
-//! On macOS the activation policy MUST follow **window visibility**, not the
-//! `showInDock` setting:
+//! The macOS activation policy follows the `showInDock` **setting alone**, NOT
+//! window visibility:
 //!
-//! - **Window shown ⇒ `ActivationPolicy::Regular`** (dock icon present, window
-//!   visible + frontmost).
-//! - **Window hidden ⇒ `ActivationPolicy::Accessory`** (tray-only, no dock icon).
+//! - `showInDock == true`  ⇒ [`tauri::ActivationPolicy::Regular`]  (dock icon)
+//! - `showInDock == false` ⇒ [`tauri::ActivationPolicy::Accessory`] (tray-only)
 //!
-//! Reason: transitioning `Regular → Accessory` *while a window is open* orders
-//! the window out on macOS — it silently vanishes. The old model flipped back to
-//! `Accessory` right after showing when `showInDock == false`, which is exactly
-//! why the window never appeared. So on macOS `showInDock` can no longer mean
-//! "no dock icon while the window is shown" — a visible macOS window always
-//! carries a dock icon (a working visible window is preferred over a hidden
-//! one). `showInDock` still governs the Windows/Linux taskbar entry, where no
-//! vanish problem exists.
+//! It is set once on boot from the loaded setting, and again whenever the
+//! setting changes (the settings-update path). It is **deliberately never
+//! touched on window show/hide**, because a `Regular → Accessory` transition
+//! *while a window is open* orders the window out (macOS hides it). The earlier
+//! fix tied the policy to visibility, so closing the window flipped it to
+//! `Accessory` and the dock icon vanished even with `showInDock` on — that is
+//! the bug. With the policy pinned to the setting, the dock icon now persists
+//! across window open/close.
 //!
-//! The taskbar decision (non-macOS) stays a pure function ([`dock_visible`]) so
-//! the truth table (window-shown × showInDock) is unit-testable without a
-//! display: visible only when the window is shown AND `showInDock` is on.
+//! Fronting the window when the app is `Accessory` (showInDock off) is handled
+//! by [`crate::window::show_window`] via `activateIgnoringOtherApps` — an
+//! *activation*, not a *policy transition*, so it fronts the app+window without
+//! adding a dock icon and without triggering the vanish.
+//!
+//! ## Matrix (macOS)
+//!
+//! | `showInDock` | window closed          | window open                     |
+//! |--------------|------------------------|---------------------------------|
+//! | ON           | dock icon present      | dock icon present + window      |
+//! | OFF          | no dock icon           | no dock icon, window still fronts |
+//!
+//! Toggling `showInDock` at runtime re-applies the policy immediately (the
+//! settings command calls [`apply_dock_policy`]).
+//!
+//! On Windows/Linux there is no activation policy; the taskbar entry is driven
+//! by `showInDock` for the shown state ([`taskbar_visible`] / [`apply_taskbar`]).
+//! A hidden window has no taskbar entry regardless of the setting.
 
 use std::sync::Arc;
 
@@ -29,44 +42,60 @@ use tauri::{AppHandle, Manager};
 
 use crate::state::AppState;
 
-/// Pure decision: is the **taskbar** entry visible (Windows/Linux)? (spec 03 §13)
-///
-/// `true` only when the window is shown and `showInDock` is enabled; a hidden
-/// window is never in the taskbar regardless of the setting.
-///
-/// Note: this governs the Win/Linux taskbar only. On macOS the dock icon follows
-/// window visibility alone (see the module docs) — `showInDock` is not consulted
-/// for the shown state there.
-pub fn dock_visible(window_shown: bool, show_in_dock: bool) -> bool {
+/// Pure decision (macOS): should the dock icon be present? Follows the
+/// `showInDock` setting **alone** — window visibility is intentionally NOT a
+/// parameter (BUG 1: the dock icon persists whether the window is open or
+/// closed). Used by [`apply_dock_policy`] so the decision is unit-testable
+/// without a display.
+pub fn macos_dock_icon_present(show_in_dock: bool) -> bool {
+    show_in_dock
+}
+
+/// Pure decision (Windows/Linux): is the taskbar entry visible? `true` only
+/// when the window is shown AND `showInDock` is on (a hidden window has no
+/// taskbar entry regardless). macOS does not use this — its dock is governed by
+/// the activation policy ([`macos_dock_icon_present`]).
+pub fn taskbar_visible(window_shown: bool, show_in_dock: bool) -> bool {
     window_shown && show_in_dock
 }
 
-/// Apply dock/taskbar visibility for the given window-shown state.
-///
-/// - macOS: activation policy follows `window_shown` alone — `Regular` when the
-///   window is shown, `Accessory` when hidden (the Tauri v2 built-in API, NOT
-///   objc FFI, F11). `show_in_dock` is intentionally ignored here (see module
-///   docs: flipping to `Accessory` while shown hides the window).
-/// - Windows/Linux: toggle `skipTaskbar` per [`dock_visible`] (`showInDock`).
-pub fn apply(app: &AppHandle, window_shown: bool, show_in_dock: bool) {
+/// Apply the macOS dock/activation policy from the `showInDock` **setting alone**
+/// (BUG 1). `Regular` ⇒ dock icon, `Accessory` ⇒ tray-only. Call on boot and on
+/// every settings change — NEVER on window show/hide (see module docs: tying the
+/// policy to visibility makes the dock icon vanish on close and orders an open
+/// window out). No-op on Windows/Linux (no activation policy there).
+pub fn apply_dock_policy(app: &AppHandle, show_in_dock: bool) {
     #[cfg(target_os = "macos")]
     {
-        // macOS ignores the setting for the shown state — the policy tracks
-        // window visibility so a shown window is never ordered out.
-        let _ = show_in_dock;
-        let policy = if window_shown {
+        let policy = if macos_dock_icon_present(show_in_dock) {
             tauri::ActivationPolicy::Regular
         } else {
             tauri::ActivationPolicy::Accessory
         };
         if let Err(e) = app.set_activation_policy(policy) {
-            tracing::error!(error = %e, window_shown, "failed to set macOS activation policy");
+            tracing::error!(error = %e, show_in_dock, "failed to set macOS activation policy");
         }
     }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, show_in_dock);
+}
 
+/// Apply the macOS dock policy reading `showInDock` from [`AppState`]. No-op on
+/// Windows/Linux.
+pub fn refresh_dock_policy(app: &AppHandle) {
+    let show_in_dock = app
+        .try_state::<Arc<AppState>>()
+        .map(|s| s.settings_snapshot().show_in_dock)
+        .unwrap_or(false);
+    apply_dock_policy(app, show_in_dock);
+}
+
+/// Apply the Windows/Linux taskbar entry for the given shown state, driven by
+/// `showInDock`. No-op on macOS (the dock is governed by the activation policy).
+pub fn apply_taskbar(app: &AppHandle, window_shown: bool, show_in_dock: bool) {
     #[cfg(not(target_os = "macos"))]
     {
-        let visible = dock_visible(window_shown, show_in_dock);
+        let visible = taskbar_visible(window_shown, show_in_dock);
         if let Some(window) = app.get_webview_window(crate::window::MAIN_WINDOW) {
             // skipTaskbar is the inverse of "visible in taskbar".
             if let Err(e) = window.set_skip_taskbar(!visible) {
@@ -74,37 +103,40 @@ pub fn apply(app: &AppHandle, window_shown: bool, show_in_dock: bool) {
             }
         }
     }
+    #[cfg(target_os = "macos")]
+    let _ = (app, window_shown, show_in_dock);
 }
 
-/// Recompute + apply dock/taskbar visibility for a given window-shown state,
-/// reading the current `showInDock` setting from `AppState`. Called by
-/// `window::show_window` / `hide_window` and by the settings command when
-/// `showInDock` changes. On macOS the policy follows `window_shown` alone.
-pub fn refresh(app: &AppHandle, window_shown: bool) {
+/// Apply the Windows/Linux taskbar for the given shown state, reading
+/// `showInDock` from [`AppState`]. No-op on macOS.
+pub fn refresh_taskbar(app: &AppHandle, window_shown: bool) {
     let show_in_dock = app
         .try_state::<Arc<AppState>>()
         .map(|s| s.settings_snapshot().show_in_dock)
         .unwrap_or(false);
-    apply(app, window_shown, show_in_dock);
+    apply_taskbar(app, window_shown, show_in_dock);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// BUG 1: the macOS dock decision follows the SETTING, not window
+    /// visibility. There is no window-shown parameter, so open vs closed cannot
+    /// change dock presence — the icon persists across window open/close.
     #[test]
-    fn visible_only_when_shown_and_enabled() {
-        assert!(dock_visible(true, true));
+    fn macos_dock_follows_setting_not_visibility() {
+        assert!(macos_dock_icon_present(true));
+        assert!(!macos_dock_icon_present(false));
     }
 
+    /// Windows/Linux taskbar: visible only when shown AND enabled; a hidden
+    /// window is never in the taskbar regardless of the setting.
     #[test]
-    fn hidden_window_is_always_dockless() {
-        assert!(!dock_visible(false, true));
-        assert!(!dock_visible(false, false));
-    }
-
-    #[test]
-    fn shown_but_setting_off_is_dockless() {
-        assert!(!dock_visible(true, false));
+    fn taskbar_visible_only_when_shown_and_enabled() {
+        assert!(taskbar_visible(true, true));
+        assert!(!taskbar_visible(false, true));
+        assert!(!taskbar_visible(true, false));
+        assert!(!taskbar_visible(false, false));
     }
 }

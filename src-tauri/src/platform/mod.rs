@@ -5,4 +5,6 @@
 
 pub mod autostart;
 pub mod dock;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod notify;

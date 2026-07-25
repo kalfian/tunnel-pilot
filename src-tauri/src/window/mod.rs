@@ -4,13 +4,16 @@
 //! The app lives in the tray: closing the window HIDES it (the process keeps
 //! running); only `quit_app` actually exits, after tearing down every tunnel.
 //!
-//! Activation model (runtime BUG A fix): the dock/taskbar policy follows WINDOW
-//! VISIBILITY, not the `showInDock` setting. Window shown ⇒ macOS `Regular`
-//! (dock icon + frontmost window); window hidden ⇒ macOS `Accessory` (tray-only,
-//! no dock). On macOS a `Regular → Accessory` flip while a window is open orders
-//! it out, so we never switch to `Accessory` while the window is visible — that
-//! is exactly what made the window vanish before. `showInDock` still drives the
-//! Windows/Linux taskbar entry. Applied here via `platform::dock`.
+//! Activation model (BUG 1 fix): the macOS dock/activation policy follows the
+//! `showInDock` SETTING alone, NOT window visibility — it is applied on boot and
+//! on settings-change (see [`crate::platform::dock`]) and is NEVER touched on
+//! show/hide here. A `Regular → Accessory` flip while a window is open orders it
+//! out (the vanish bug), so `show_window`/`hide_window` leave the policy alone:
+//! the dock icon persists across open/close iff `showInDock` is on. Fronting an
+//! `Accessory` app (showInDock off) when showing is done via
+//! `activateIgnoringOtherApps` — an activation, not a policy transition, so it
+//! fronts the window with no dock icon and no vanish. `showInDock` still drives
+//! the Windows/Linux taskbar entry for the shown state.
 
 use std::sync::Arc;
 
@@ -30,44 +33,47 @@ pub const MAIN_WINDOW: &str = "main";
 /// `WINDOW_FOCUS` here guarantees the frontend re-hydrates on every show — the
 /// webview may have been torn down while hidden.
 pub fn show_window(app: &AppHandle) {
-    tracing::info!("showing main window (activation → Regular)");
-    // macOS foreground fix (runtime F4 + BUG A): the app sits in the tray as an
-    // `.accessory` agent (no dock icon) while hidden, and an accessory app cannot
-    // reliably steal focus — `window.set_focus()` alone shows the window but
-    // leaves the previously-frontmost app (e.g. iTerm) on top. Flip to `Regular`
-    // BEFORE showing so the process becomes active and the window comes frontmost.
-    // Crucially we STAY `Regular` while shown: `dock::refresh(app, true)` below
-    // now keeps `Regular` (it no longer flips back to `Accessory` for
-    // `showInDock == false`, which used to order the just-shown window out).
-    #[cfg(target_os = "macos")]
-    {
-        if let Err(e) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
-            tracing::error!(error = %e, "failed to set Regular activation policy before show");
-        }
-    }
-
+    tracing::info!("showing main window");
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.show();
         let _ = window.set_focus();
     } else {
         tracing::warn!("main window not found; cannot show");
     }
-    // Window is shown → macOS stays `Regular` (dock icon present); Win/Linux
-    // taskbar follows `showInDock`.
-    crate::platform::dock::refresh(app, true);
+    // macOS foreground fix (BUG 1): the app may sit in the tray as an
+    // `.accessory` agent (showInDock off, no dock icon), where `set_focus()`
+    // alone shows the window but leaves the previously-frontmost app (e.g.
+    // iTerm) on top. We front it via `activateIgnoringOtherApps` — an
+    // ACTIVATION, not a POLICY TRANSITION — so it comes frontmost WITHOUT adding
+    // a dock icon and WITHOUT the `Regular → Accessory` vanish. We do NOT touch
+    // the activation policy here: it follows the `showInDock` SETTING (applied on
+    // boot/settings-change), so the dock icon persists across open/close. AppKit
+    // must run on the main thread.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.run_on_main_thread(|| {
+            crate::platform::macos::activate_ignoring_other_apps();
+        });
+    }
+    // Win/Linux: reflect the taskbar entry for the shown state per `showInDock`.
+    // macOS dock is NOT touched here (governed by the activation policy).
+    crate::platform::dock::refresh_taskbar(app, true);
     // Tell the frontend to rehydrate now that the window is visible again.
     let _ = app.emit(events::WINDOW_FOCUS, ());
 }
 
-/// Hide the main window and drop the dock/taskbar entry (spec 03 §14): macOS
-/// returns to `Accessory` (tray-only), Win/Linux hide the taskbar entry.
+/// Hide the main window to the tray (spec 03 §14).
+///
+/// BUG 1: `window.hide()` ONLY — the macOS activation policy is deliberately
+/// left untouched so the dock icon persists while hidden iff `showInDock` is on
+/// (touching it here is exactly what removed the icon on close before). On
+/// Windows/Linux a hidden window has no taskbar entry regardless, so there is
+/// nothing to drop.
 pub fn hide_window(app: &AppHandle) {
-    tracing::info!("hiding main window to tray (activation → Accessory)");
+    tracing::info!("hiding main window to tray");
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.hide();
     }
-    // Window hidden → macOS `Accessory` (no dock icon), Win/Linux taskbar dropped.
-    crate::platform::dock::refresh(app, false);
 }
 
 /// Single-instance re-show: a second launch focuses the existing window (spec
