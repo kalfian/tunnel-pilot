@@ -21,16 +21,21 @@ Manage your SSH tunnels (`ssh -L`) with ease — toggle connections on/off direc
 > **Tunnel Pilot 2.0 is a full rewrite in Rust + Tauri v2.** The app now idles in roughly **15–30 MB of RAM** (down from ~100–200 MB on the Flutter v1 build), starts faster, and adds a ⌘K command palette, groups/tags, a resizable/responsive window, OS-keychain credential storage, and a **cryptographically signed self-updater**. See [Upgrading from v1](#upgrading-from-v1) — **your saved tunnels are preserved automatically.**
 
 <p align="center">
-  <img src="docs/Screenshot/connections.png" alt="Connections" width="30%">
-  <img src="docs/Screenshot/settings.png" alt="Settings" width="30%">
-  <img src="docs/Screenshot/new-tunnel.png" alt="New Tunnel" width="30%">
+  <img src="docs/screenshots/connections.png" alt="Connections — grouped tunnels" width="30%">
+  <img src="docs/screenshots/settings.png" alt="Settings" width="30%">
+  <img src="docs/screenshots/add-tunnel.png" alt="Add tunnel" width="30%">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/tray-menu.png" alt="Native tray menu" width="24%">
+  <img src="docs/screenshots/command-palette.png" alt="Command palette (⌘K)" width="46%">
 </p>
 
 ## Features
 
 - **System Tray / Menu Bar** — Lives entirely in the menu bar (macOS) or system tray (Windows/Linux); dynamic tray icon shows the active connection count.
 - **Quick Toggle** — Turn SSH tunnels on/off from the tray menu or the window with colored status indicators (connected / connecting / error / disconnected).
-- **Full CRUD** — Add / edit / duplicate / delete tunnel configurations; drag to reorder; double-click to edit.
+- **Full CRUD** — Add / edit / duplicate / delete tunnel configurations; drag to reorder or drag a tunnel between groups; edit from each row's actions.
 - **Command Palette (⌘K)** — Fuzzy-search every action: connect/disconnect, jump to a view, toggle theme, check for updates, and more.
 - **Groups & Tags** — Organize tunnels into collapsible groups and filter by tag; start/stop a whole group at once.
 - **Password & Identity File Auth** — SSH password or identity file. Passwords are stored in your **OS keychain** (Keychain / Windows Credential Manager / Secret Service), with an encrypted local fallback when no keychain is available.
