@@ -8,6 +8,29 @@ import { settings } from "../stores/settings";
 import { importMode } from "../stores/backup";
 import { updateStatus, updateProgress } from "../stores/updater";
 import { activeView } from "../ui/view";
+
+// Control the effective theme so the OLED toggle can be enabled (it is disabled
+// in light mode). `vi.mock` is hoisted above imports, so the store is built in a
+// `vi.hoisted` block (a minimal Svelte-store contract — no outer refs allowed).
+const themeMock = vi.hoisted(() => {
+  let value: "light" | "dark" = "dark";
+  const subs = new Set<(v: "light" | "dark") => void>();
+  return {
+    effectiveTheme: {
+      subscribe(fn: (v: "light" | "dark") => void): () => void {
+        subs.add(fn);
+        fn(value);
+        return () => subs.delete(fn);
+      },
+      set(v: "light" | "dark"): void {
+        value = v;
+        subs.forEach((f) => f(value));
+      },
+    },
+  };
+});
+vi.mock("../ui/theme", () => ({ effectiveTheme: themeMock.effectiveTheme }));
+
 import SettingsView from "./SettingsView.svelte";
 
 vi.mock("../ipc", () => ({
@@ -32,7 +55,13 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn(() => Promise.resolve("/backups/tp.json")),
 }));
 
-import { importBackup, checkUpdate, installUpdate, skipUpdate } from "../ipc";
+import {
+  importBackup,
+  checkUpdate,
+  installUpdate,
+  skipUpdate,
+  updateSettings,
+} from "../ipc";
 
 const SETTINGS: AppSettings = {
   launchAtLogin: false,
@@ -44,6 +73,7 @@ const SETTINGS: AppSettings = {
   showInDock: true,
   autoCheckUpdates: true,
   lastSkippedVersion: null,
+  oledMode: false,
 };
 
 describe("SettingsView — backup import mode", () => {
@@ -74,6 +104,31 @@ describe("SettingsView — backup import mode", () => {
     });
     await fireEvent.click(confirm);
     expect(importBackup).toHaveBeenCalledWith("/backups/tp.json", "replace");
+  });
+});
+
+describe("SettingsView — OLED black toggle (Appearance)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    settings.set(SETTINGS);
+    importMode.set("merge");
+    themeMock.effectiveTheme.set("dark");
+  });
+
+  it("toggling OLED dispatches an updateSettings patch with oledMode", async () => {
+    render(SettingsView);
+    const toggle = screen.getByRole("switch", { name: /oled black/i });
+    expect(toggle).not.toBeDisabled();
+    await fireEvent.click(toggle);
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ oledMode: true }),
+    );
+  });
+
+  it("is disabled in light mode (no effect when not dark)", () => {
+    themeMock.effectiveTheme.set("light");
+    render(SettingsView);
+    expect(screen.getByRole("switch", { name: /oled black/i })).toBeDisabled();
   });
 });
 

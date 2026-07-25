@@ -247,3 +247,27 @@
   --shadow-2: 0 6px 16px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.6), 0 4px 10px rgba(0, 0, 0, 0.45);
 }
+
+/*
+ * OLED / true-black — dark mode only. `system` is already resolved to a concrete
+ * data-theme in JS (theme.ts), so system-dark carries data-theme="dark" too and
+ * needs no media-query variant here. This is a TOKEN OVERRIDE, not a redesign:
+ * only backgrounds/surfaces + the borders that must stay visible on pure black
+ * are touched. Text, accent, and status colors deliberately inherit the dark
+ * block so contrast + brand stay intact. Elevated surfaces stay near-black (not
+ * #000) so cards, menus, and inputs remain distinguishable from the canvas.
+ * Same tokens feed the main window and the transparent tray popover.
+ */
+[data-theme="dark"][data-oled="true"] {
+  --bg: #000000;
+  --surface: #0a0a0a;
+  --surface-2: #141414;
+  --surface-3: #1e1e1e;
+  --surface-overlay: #121212;
+
+  /* Borders bumped slightly vs the dark block (#2e333d/#3a404b/#22262f) so
+     hairlines and dividers stay readable against pure-black surfaces. */
+  --border: #33343a;
+  --border-strong: #45464d;
+  --divider: #202024;
+}

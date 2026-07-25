@@ -44,6 +44,7 @@ const SETTINGS: AppSettings = {
   launchAtLogin: false,
   showNotifications: true,
   themeMode: "system",
+  oledMode: false,
   autoReconnect: true,
   autoReconnectDelaySec: 5,
   autoReconnectMaxRetries: 3,

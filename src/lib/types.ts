@@ -54,6 +54,8 @@ export interface AppSettings {
   launchAtLogin: boolean;
   showNotifications: boolean;
   themeMode: ThemeMode;
+  /** Pure-black backgrounds in dark mode (OLED). Only affects dark surfaces. */
+  oledMode: boolean;
   autoReconnect: boolean;
   autoReconnectDelaySec: number;
   autoReconnectMaxRetries: number;

@@ -181,6 +181,10 @@ pub struct AppSettings {
     pub show_notifications: bool,
     #[serde(default = "default_theme_mode")]
     pub theme_mode: ThemeMode,
+    /// Pure-black (`#000000`) backgrounds in dark mode for OLED displays. Off by
+    /// default; only affects dark-mode surfaces (spec 05, Appearance).
+    #[serde(default)]
+    pub oled_mode: bool,
     #[serde(default = "default_true")]
     pub auto_reconnect: bool,
     #[serde(default = "default_reconnect_delay_sec")]
@@ -214,6 +218,7 @@ impl Default for AppSettings {
             launch_at_login: default_true(),
             show_notifications: default_true(),
             theme_mode: default_theme_mode(),
+            oled_mode: false,
             auto_reconnect: default_true(),
             auto_reconnect_delay_sec: default_reconnect_delay_sec(),
             auto_reconnect_max_retries: default_reconnect_max_retries(),
@@ -332,6 +337,23 @@ mod tests {
         );
         assert_eq!(parsed.auto_check_updates, defaults.auto_check_updates);
         assert_eq!(parsed.last_skipped_version, defaults.last_skipped_version);
+        // A missing `oledMode` (older config) must default to false, not reset
+        // its siblings above.
+        assert!(!parsed.oled_mode);
+        assert_eq!(parsed.oled_mode, defaults.oled_mode);
+    }
+
+    #[test]
+    fn app_settings_oled_mode_roundtrips_and_preserves_siblings() {
+        // A config that only flips `oledMode` on keeps every other field at its
+        // documented default (per-field `#[serde(default)]` merge).
+        let json = r#"{ "oledMode": true }"#;
+        let parsed: AppSettings = serde_json::from_str(json).expect("parse oled-only settings");
+        let defaults = AppSettings::default();
+        assert!(parsed.oled_mode);
+        assert_eq!(parsed.theme_mode, defaults.theme_mode);
+        assert_eq!(parsed.launch_at_login, defaults.launch_at_login);
+        assert_eq!(parsed.auto_reconnect, defaults.auto_reconnect);
     }
 
     #[test]

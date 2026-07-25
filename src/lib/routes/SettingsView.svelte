@@ -10,6 +10,7 @@
   } from "../stores/updater";
   import { importMode } from "../stores/backup";
   import { activeView } from "../ui/view";
+  import { effectiveTheme } from "../ui/theme";
   import {
     updateSettings,
     exportBackup,
@@ -467,6 +468,20 @@
                   { value: "dark", label: "Dark", icon: "moon" },
                 ]}
                 onchange={(v) => void patch({ themeMode: v as ThemeMode })}
+              />
+            </div>
+            <div class="setting">
+              <div class="s-text">
+                <span class="s-label">OLED black</span>
+                <span class="s-sub">
+                  Pure-black backgrounds in dark mode — easier on OLED displays.
+                </span>
+              </div>
+              <Toggle
+                checked={s.oledMode}
+                disabled={$effectiveTheme !== "dark"}
+                ariaLabel="OLED black"
+                onchange={(v) => void patch({ oledMode: v })}
               />
             </div>
           </div>
