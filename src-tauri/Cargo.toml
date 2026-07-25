@@ -27,6 +27,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util"
 tokio-util = "0.7"                  # CancellationToken (two-level token hierarchy, M1)
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Bridges the `log` crate into `tracing`. russh 0.45 / russh-keys 0.45 emit via
+# `log` (NOT tracing), so this is required to capture their KEX/algorithm
+# negotiation in the dev log for the "Unknown algorithm" diagnostic.
+tracing-log = "0.2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["clock"] }
 

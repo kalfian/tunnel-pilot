@@ -115,8 +115,30 @@ impl<S: tracing::Subscriber> Layer<S> for LogBufferLayer {
 
 /// Initialize the global tracing subscriber. Idempotent-safe: uses `try_init`
 /// so a second call (e.g. in tests) is a no-op rather than a panic.
+///
+/// # `log` → tracing bridge (russh diagnostics)
+///
+/// russh 0.45 and russh-keys 0.45 emit through the `log` crate, NOT `tracing`,
+/// so without a bridge their handshake/KEX/algorithm-negotiation records never
+/// reach this subscriber. [`tracing_log::LogTracer`] captures every `log` record
+/// and forwards it into `tracing`, where the [`EnvFilter`] below decides what is
+/// actually shown. LogTracer leaves the `log` max level at `Trace`, so `RUST_LOG`
+/// alone controls verbosity — nothing is filtered out before it reaches us.
+///
+/// # Filter
+///
+/// `RUST_LOG` is honored when set; otherwise a quiet default of
+/// `tunnel_pilot_lib=info` keeps third-party crates (tao/wry/russh) silent so the
+/// dev log is not spammed. To capture the "Unknown algorithm" negotiation, run
+/// with `RUST_LOG=tunnel_pilot_lib=debug,russh=debug,russh_keys=debug`.
 pub fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // Bridge `log` → tracing so russh's negotiation logs are capturable. `.ok()`
+    // (via `let _`) makes a repeat call, or a pre-existing `log` logger, a no-op
+    // instead of an error.
+    let _ = tracing_log::LogTracer::init();
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("tunnel_pilot_lib=info"));
 
     let _ = tracing_subscriber::registry()
         .with(filter)
