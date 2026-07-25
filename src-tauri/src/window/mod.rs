@@ -3,8 +3,14 @@
 //!
 //! The app lives in the tray: closing the window HIDES it (the process keeps
 //! running); only `quit_app` actually exits, after tearing down every tunnel.
-//! Dock/taskbar visibility is applied here via `platform::dock` — show follows
-//! the `showInDock` setting, hide is always dock-less.
+//!
+//! Activation model (runtime BUG A fix): the dock/taskbar policy follows WINDOW
+//! VISIBILITY, not the `showInDock` setting. Window shown ⇒ macOS `Regular`
+//! (dock icon + frontmost window); window hidden ⇒ macOS `Accessory` (tray-only,
+//! no dock). On macOS a `Regular → Accessory` flip while a window is open orders
+//! it out, so we never switch to `Accessory` while the window is visible — that
+//! is exactly what made the window vanish before. `showInDock` still drives the
+//! Windows/Linux taskbar entry. Applied here via `platform::dock`.
 
 use std::sync::Arc;
 
@@ -19,19 +25,20 @@ pub const MAIN_WINDOW: &str = "main";
 /// Show + focus the main window, apply dock visibility per `showInDock`, and
 /// notify the frontend so it rehydrates (AGENTS §5 "app_hydrate on show/boot").
 ///
-/// This is the single show path for every trigger (tray "Open", the
+/// This is the single show path for every trigger (tray "Settings", the
 /// `show_window` IPC command, single-instance re-launch), so emitting
 /// `WINDOW_FOCUS` here guarantees the frontend re-hydrates on every show — the
 /// webview may have been torn down while hidden.
 pub fn show_window(app: &AppHandle) {
-    // macOS foreground fix (runtime F4): the app runs as an `.accessory` agent
-    // (no dock icon), and an accessory app cannot reliably steal focus from the
-    // frontmost app — `window.set_focus()` alone shows the window but leaves the
-    // previous app (e.g. iTerm) on top. Flip the activation policy to `Regular`
-    // BEFORE showing so the process can become active and the window actually
-    // comes to the front. The FINAL dock policy is reconciled by
-    // `dock::refresh(app, true)` below (back to `Accessory` when
-    // `showInDock == false`); the window stays frontmost across that switch.
+    tracing::info!("showing main window (activation → Regular)");
+    // macOS foreground fix (runtime F4 + BUG A): the app sits in the tray as an
+    // `.accessory` agent (no dock icon) while hidden, and an accessory app cannot
+    // reliably steal focus — `window.set_focus()` alone shows the window but
+    // leaves the previously-frontmost app (e.g. iTerm) on top. Flip to `Regular`
+    // BEFORE showing so the process becomes active and the window comes frontmost.
+    // Crucially we STAY `Regular` while shown: `dock::refresh(app, true)` below
+    // now keeps `Regular` (it no longer flips back to `Accessory` for
+    // `showInDock == false`, which used to order the just-shown window out).
     #[cfg(target_os = "macos")]
     {
         if let Err(e) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
@@ -45,20 +52,21 @@ pub fn show_window(app: &AppHandle) {
     } else {
         tracing::warn!("main window not found; cannot show");
     }
-    // Window is now shown → dock visible iff the setting says so. On macOS this
-    // may switch the activation policy back to `Accessory`; the just-activated
-    // window remains frontmost.
+    // Window is shown → macOS stays `Regular` (dock icon present); Win/Linux
+    // taskbar follows `showInDock`.
     crate::platform::dock::refresh(app, true);
     // Tell the frontend to rehydrate now that the window is visible again.
     let _ = app.emit(events::WINDOW_FOCUS, ());
 }
 
-/// Hide the main window and always drop the dock/taskbar entry (spec 03 §14).
+/// Hide the main window and drop the dock/taskbar entry (spec 03 §14): macOS
+/// returns to `Accessory` (tray-only), Win/Linux hide the taskbar entry.
 pub fn hide_window(app: &AppHandle) {
+    tracing::info!("hiding main window to tray (activation → Accessory)");
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.hide();
     }
-    // Window hidden → never in the dock, regardless of `showInDock`.
+    // Window hidden → macOS `Accessory` (no dock icon), Win/Linux taskbar dropped.
     crate::platform::dock::refresh(app, false);
 }
 

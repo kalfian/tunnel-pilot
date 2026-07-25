@@ -211,9 +211,12 @@ pub fn run() {
             // here — it auto-starts on the first connect.
             crate::ssh::wake::spawn_wake_watchdog(state.clone());
 
-            // macOS: sit in the tray as an agent app. The window boots hidden, so
-            // the dock stays hidden regardless of `showInDock` (spec 03 §13) —
-            // `window::show_window` flips to Regular later iff the setting is on.
+            // macOS: sit in the tray as an agent app (no dock icon) while the
+            // window boots hidden (`visible: false`). The activation policy now
+            // follows WINDOW VISIBILITY (BUG A): `Accessory` while hidden here,
+            // and `window::show_window` flips to `Regular` when it shows the
+            // window below (a normal launch) — never back to `Accessory` while
+            // shown, which used to order the window out.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
