@@ -42,10 +42,12 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": "all",
+    "targets": ["app", "dmg", "nsis", "appimage", "deb", "rpm"],
     "category": "DeveloperTool",
+    "publisher": "Kalfian",
+    "copyright": "Copyright © 2026 Kalfian. MIT License.",
     "shortDescription": "SSH local port forwarding manager",
-    "longDescription": "Tunnel Pilot manages SSH local port forwards from the system tray.",
+    "longDescription": "Tunnel Pilot manages SSH local port forwards from the system tray — configure once, toggle from the menu bar / tray. Cross-platform (macOS, Windows, Linux).",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -54,7 +56,13 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "entitlements": "entitlements.plist"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
     },
     "linux": {
       "deb": {
