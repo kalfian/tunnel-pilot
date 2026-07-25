@@ -99,6 +99,12 @@ export interface UpdateStatus {
   version: string | null;
   notes: string | null;
   skipped: boolean;
+  // Human-readable failure from a user-initiated check (Rust
+  // `UpdateStatus.error: Option<String>`). `check_update` and the tray "Check
+  // for Updates" now RETURN Ok(status) with the failure here + emit it via
+  // `update://status` instead of throwing. Null/absent for silent startup
+  // checks and successful checks, so the banner stays idle for benign cases.
+  error?: string | null;
 }
 
 // --- App snapshot (spec 04 §8) ---

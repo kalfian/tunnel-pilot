@@ -127,6 +127,37 @@ describe("SettingsView — update banner (spec §8)", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders the error banner from a status.error event as a readable string", () => {
+    // check_update now RETURNS Ok(status) with the failure in status.error and
+    // emits it on update://status — the banner derives its error from the store.
+    updateStatus.set({
+      available: false,
+      version: null,
+      notes: null,
+      skipped: false,
+      error: "Could not reach the release server",
+    });
+    render(SettingsView);
+    const alert = screen.getByRole("alert");
+    expect(
+      within(alert).getByText(/could not reach the release server/i),
+    ).toBeInTheDocument();
+    expect(alert.textContent).not.toContain("[object Object]");
+  });
+
+  it("stays idle when a status event carries no error", () => {
+    updateStatus.set({
+      available: false,
+      version: null,
+      notes: null,
+      skipped: false,
+      error: null,
+    });
+    render(SettingsView);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/update failed/i)).not.toBeInTheDocument();
+  });
+
   it("'Install & restart' dispatches installUpdate()", async () => {
     updateStatus.set(AVAILABLE);
     render(SettingsView);

@@ -14,7 +14,12 @@ export const updateStatus = writable<UpdateStatus | null>(null);
 /** Download progress: [downloaded, total|null] or null when idle. */
 export const updateProgress = writable<[number, number | null] | null>(null);
 
-/** Replace update availability (from `update://status` or hydrate). */
+/**
+ * Replace update availability (from `update://status` or hydrate). Carries the
+ * whole status, including `error` — a user-initiated check failure now arrives
+ * as `status.error` on this event (the backend no longer throws for checks), so
+ * the Settings banner derives its error state from the store, not a rejection.
+ */
 export function applyUpdateStatus(next: UpdateStatus): void {
   updateStatus.set(next);
 }

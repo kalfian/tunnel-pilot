@@ -58,12 +58,17 @@
   //
   // State is derived from live store signals plus two ephemeral local flags:
   //   - `checking`     — a `check_update()` call is in flight
-  //   - `updateError`  — a readable message from the last USER-INITIATED
-  //                      check/install rejection, or null. Silent startup checks
-  //                      never populate it, so a benign fresh-launch "no release
-  //                      yet" never surfaces a scary red banner. Always a string
-  //                      (coerced via `toUpdateErrorMessage`), never an object,
-  //                      so "[object Object]" can't reach the UI.
+  //   - `updateError`  — install-action fallback: `install_update` may still
+  //                      THROW, so its rejection is coerced (via
+  //                      `toUpdateErrorMessage`, never an object) into a readable
+  //                      string here. Check failures no longer throw.
+  //
+  // The primary error source is `$updateStatus.error`: `check_update` (and the
+  // tray "Check for Updates") now RETURN Ok(status) with any failure in
+  // `status.error` (a clean human-readable string) and emit it on
+  // `update://status`. Silent startup checks leave it null, so a benign
+  // fresh-launch "no release yet" never raises a scary red banner. Either source
+  // is a string — "[object Object]" can never reach the UI.
   // The backend never re-emits `update://status` on skip (it only persists
   // `lastSkippedVersion` + emits `settings://changed`), so `available` also
   // reconciles against `settings.lastSkippedVersion` — skipping a version hides
@@ -82,11 +87,23 @@
     | "ready"
     | "error";
 
+  // Readable error message, event first (`status.error`) then install fallback.
+  // Both are already plain strings; a blank one is treated as "no error".
+  const errorMessage = $derived<string | null>(
+    (() => {
+      const fromStatus = $updateStatus?.error;
+      if (typeof fromStatus === "string" && fromStatus.trim() !== "") {
+        return fromStatus;
+      }
+      return updateError;
+    })(),
+  );
+
   const updateState = $derived<UpdateState>(
     (() => {
-      // Only a genuine, message-bearing error goes to the `error` state; an
-      // empty/absent message stays idle rather than showing "Update failed".
-      if (updateError) return "error";
+      // An in-flight check wins over a stale `status.error` from the previous
+      // attempt, so Retry/Check now shows "Checking…" rather than the old error.
+      if (checking) return "checking";
       const prog = $updateProgress;
       if (prog) {
         const [downloaded, total] = prog;
@@ -94,7 +111,9 @@
         if (total > 0 && downloaded >= total) return "ready";
         return "downloading";
       }
-      if (checking) return "checking";
+      // Only a genuine, message-bearing error goes to the `error` state; an
+      // empty/absent message stays idle rather than showing "Update failed".
+      if (errorMessage) return "error";
       const st = $updateStatus;
       const skippedVersion = $settings?.lastSkippedVersion ?? null;
       if (
@@ -123,12 +142,15 @@
     checking = true;
     try {
       const st = await checkUpdate();
-      // `update://status` drives the banner; only the up-to-date case needs a
-      // toast (there is no banner state for "no update found").
-      if (!st.available) {
+      // `update://status` drives the banner; only a clean up-to-date result
+      // needs a toast (there is no banner state for "no update found"). A failed
+      // check now returns Ok(status) with `status.error` set → the banner shows
+      // the error, so suppress the "latest version" toast in that case.
+      if (!st.available && !st.error) {
         pushToast("You're on the latest version", { tone: "info" });
       }
     } catch (err) {
+      // Fallback only: check_update no longer throws, but stay defensive.
       updateError = toUpdateErrorMessage(err) || null;
     } finally {
       checking = false;
@@ -290,8 +312,8 @@
           {:else if updateState === "error"}
             <div class="banner-main">
               <p class="banner-title">Update failed</p>
-              {#if updateError}
-                <p class="banner-notes">{updateError}</p>
+              {#if errorMessage}
+                <p class="banner-notes">{errorMessage}</p>
               {/if}
             </div>
             <div class="banner-actions">
