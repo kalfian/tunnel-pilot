@@ -281,8 +281,8 @@ pub fn connected_count(tunnels: &[TunnelState]) -> usize {
 }
 
 /// Whether any tunnel is in a transitional state (connecting or disconnecting)
-/// — drives the tray's connecting-pulse indicator, which takes precedence over
-/// the connected-count badge so the user always sees activity.
+/// — drives the tray's connecting loading-dots indicator, which takes precedence
+/// over the connected-count badge so the user always sees activity.
 pub fn has_transitional(tunnels: &[TunnelState]) -> bool {
     tunnels.iter().any(|t| {
         matches!(
@@ -661,9 +661,9 @@ fn gather_update_notice(app: &AppHandle) -> Option<UpdateNotice> {
 /// Rebuild the tray icon + menu from current state, on the main thread.
 ///
 /// Icon precedence: any transitional tunnel (connecting/disconnecting) → the
-/// amber connecting-pulse (owned by `animator`, so the static icon is *not*
-/// repainted here); else the connected-count badge / idle. Starting/stopping
-/// the pulse is idempotent, so this can be called on every status change.
+/// connecting loading-dots ticker (owned by `animator`, so the static icon is
+/// *not* repainted here); else the connected-count badge / idle. Starting/
+/// stopping the ticker is idempotent, so this can be called on every change.
 pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>, animator: &ConnectingAnimator) {
     let tunnels = gather_tunnel_states(state);
     let groups = state.groups_snapshot();
@@ -672,9 +672,9 @@ pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>, animator: &Connecting
     let update_notice = gather_update_notice(app);
     let model = build_menu_model(&tunnels, &groups, update_notice);
 
-    // Drive the connecting-pulse before dispatching the (menu-only when
+    // Drive the connecting ticker before dispatching the (menu-only when
     // connecting) main-thread paint. When settling, `stop()` first so the guard
-    // in `paint_frame` drops any late in-flight amber frame.
+    // in `paint_frame` drops any late in-flight frame.
     if transitional {
         animator.start(app.clone());
     } else {
@@ -683,7 +683,7 @@ pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>, animator: &Connecting
 
     let app_main = app.clone();
     let dispatch = app.run_on_main_thread(move || {
-        // While connecting the pulse task owns the icon; only settle the static
+        // While connecting the ticker task owns the icon; only settle the static
         // count/idle icon when nothing is transitional.
         if !transitional {
             super::icon::update_tray_icon(&app_main, super::TRAY_ID, count);
@@ -711,7 +711,7 @@ pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>, animator: &Connecting
 pub fn spawn_tray_sync(app: AppHandle, state: Arc<AppState>) {
     let notify = Arc::new(Notify::new());
     // Single shared animator: the debounce loop and the initial paint drive the
-    // same guarded pulse task, so it can never double-run.
+    // same guarded ticker task, so it can never double-run.
     let animator = ConnectingAnimator::new();
 
     // Any tunnel status transition marks the tray dirty.

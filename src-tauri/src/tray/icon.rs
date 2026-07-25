@@ -32,8 +32,9 @@ pub enum TrayIcon {
     /// (1..=9, clamped).
     Badge(u8),
     /// At least one tunnel is in a transitional state (connecting /
-    /// disconnecting). Rendered as the amber pulse animation; this variant maps
-    /// to the first (fully-opaque) frame when a single still is needed.
+    /// disconnecting). Rendered as the monochrome "loading dots under the logo"
+    /// animation; this variant maps to the first frame when a single still is
+    /// needed.
     Connecting,
 }
 
@@ -59,8 +60,8 @@ pub fn tray_icon_for_state(transitional: bool, connected: usize) -> TrayIcon {
     }
 }
 
-/// Number of frames in the amber connecting-pulse animation.
-pub const CONNECTING_FRAMES: usize = 4;
+/// Number of frames in the connecting "loading dots" animation (`.` `..` `...`).
+pub const CONNECTING_FRAMES: usize = 3;
 
 const IDLE_PNG: &[u8] = include_bytes!("../../../assets/icons/tray_icon_idle.png");
 
@@ -77,14 +78,13 @@ const BADGE_PNG: [&[u8]; MAX_BADGE] = [
     include_bytes!("../../../assets/icons/tray_icon_9.png"),
 ];
 
-/// Amber connecting-pulse frames (index = frame). Non-template: amber is an
-/// intentional status color that must survive the light/dark menu-bar tint,
-/// mirroring the amber "connecting" dot in the menu.
+/// Connecting "loading dots" frames (index = frame): the app glyph up top with a
+/// progressing row of 1 → 2 → 3 dots below. Monochrome black+alpha **template**
+/// images (like idle/badge) so they stay crisp and adapt to light/dark menu bars.
 const CONNECTING_PNG: [&[u8]; CONNECTING_FRAMES] = [
     include_bytes!("../../../assets/icons/tray_icon_connecting_0.png"),
     include_bytes!("../../../assets/icons/tray_icon_connecting_1.png"),
     include_bytes!("../../../assets/icons/tray_icon_connecting_2.png"),
-    include_bytes!("../../../assets/icons/tray_icon_connecting_3.png"),
 ];
 
 /// The embedded PNG bytes backing a [`TrayIcon`].
@@ -103,7 +103,7 @@ fn png_bytes(icon: TrayIcon) -> &'static [u8] {
     }
 }
 
-/// The embedded PNG bytes for connecting-pulse `frame` (wraps defensively).
+/// The embedded PNG bytes for connecting `frame` (wraps defensively).
 fn connecting_bytes(frame: usize) -> &'static [u8] {
     CONNECTING_PNG[frame % CONNECTING_FRAMES]
 }
@@ -114,7 +114,7 @@ pub fn load_image(icon: TrayIcon) -> tauri::Result<Image<'static>> {
     Image::from_bytes(png_bytes(icon))
 }
 
-/// Decode the connecting-pulse `frame` PNG into a Tauri [`Image`].
+/// Decode the connecting `frame` PNG into a Tauri [`Image`].
 pub fn load_connecting_frame(frame: usize) -> tauri::Result<Image<'static>> {
     Image::from_bytes(connecting_bytes(frame))
 }
@@ -190,9 +190,9 @@ pub fn update_tray_icon(app: &tauri::AppHandle, tray_id: &str, count: usize) {
     }
 }
 
-/// Paint one amber connecting-pulse `frame` on the tray. The frame is drawn
-/// **non-template** (`set_icon_as_template(false)` on macOS) so the amber status
-/// color survives the menu-bar tint. Must run on the main thread (AppKit) —
+/// Paint one connecting "loading dots" `frame` on the tray. Drawn as a **template
+/// image** on macOS (like idle/badge) so the monochrome glyph+dots stay crisp and
+/// adapt to the light/dark menu bar. Must run on the main thread (AppKit) —
 /// callers dispatch via `AppHandle::run_on_main_thread`. Failures are logged,
 /// never fatal.
 pub fn set_connecting_frame(app: &tauri::AppHandle, tray_id: &str, frame: usize) {
@@ -205,10 +205,10 @@ pub fn set_connecting_frame(app: &tauri::AppHandle, tray_id: &str, frame: usize)
             if let Err(e) = tray.set_icon(Some(img)) {
                 tracing::error!(error = %e, "failed to set connecting tray icon");
             }
-            // Amber is a status color: draw it as-is, not tinted by the menu bar.
+            // Monochrome template: auto-tint for light/dark menu bars.
             #[cfg(target_os = "macos")]
-            if let Err(e) = tray.set_icon_as_template(false) {
-                tracing::error!(error = %e, "failed to clear template for connecting icon");
+            if let Err(e) = tray.set_icon_as_template(true) {
+                tracing::error!(error = %e, "failed to set connecting icon as template");
             }
         }
         Err(e) => tracing::error!(error = %e, frame, "failed to decode connecting frame PNG"),
