@@ -32,9 +32,9 @@ pub enum TrayIcon {
     /// (1..=9, clamped).
     Badge(u8),
     /// At least one tunnel is in a transitional state (connecting /
-    /// disconnecting). Rendered as the base glyph with **ticking dots in the
-    /// count-badge pill** (`·`/`··`/`···`); this variant maps to the first frame
-    /// when a single still is needed.
+    /// disconnecting). Rendered as the base glyph with **bare ticking dots in
+    /// the bottom-right corner** (`·`/`··`/`···`, no badge disc); this variant
+    /// maps to the first frame when a single still is needed.
     Connecting,
 }
 
@@ -60,8 +60,7 @@ pub fn tray_icon_for_state(transitional: bool, connected: usize) -> TrayIcon {
     }
 }
 
-/// Number of frames in the connecting ticking-dots badge animation
-/// (`·` → `··` → `···`).
+/// Number of frames in the connecting corner-dots animation (`·` → `··` → `···`).
 pub const CONNECTING_FRAMES: usize = 3;
 
 const IDLE_PNG: &[u8] = include_bytes!("../../../assets/icons/tray_icon_idle.png");
@@ -79,10 +78,10 @@ const BADGE_PNG: [&[u8]; MAX_BADGE] = [
     include_bytes!("../../../assets/icons/tray_icon_9.png"),
 ];
 
-/// Connecting ticking-dots frames (index = frame): the base glyph with the
-/// count-badge pill showing 1 → 2 → 3 dots (as alpha cutouts, exactly like the
-/// count digit). Monochrome black+alpha **template** images matching the count
-/// badge, so they stay crisp and adapt to light/dark menu bars.
+/// Connecting ticking-dots frames (index = frame): the base glyph with 1 → 2 → 3
+/// bare dots in the bottom-right corner (no badge disc), growing left→right.
+/// Monochrome black+alpha **template** images (like idle/count), so they stay
+/// crisp and adapt to light/dark menu bars.
 const CONNECTING_PNG: [&[u8]; CONNECTING_FRAMES] = [
     include_bytes!("../../../assets/icons/tray_icon_connecting_0.png"),
     include_bytes!("../../../assets/icons/tray_icon_connecting_1.png"),
@@ -192,8 +191,8 @@ pub fn update_tray_icon(app: &tauri::AppHandle, tray_id: &str, count: usize) {
     }
 }
 
-/// Paint one connecting ticking-dots `frame` on the tray. Drawn as a **template
-/// image** on macOS (like idle/badge) so the monochrome glyph + dot-badge stay
+/// Paint one connecting corner-dots `frame` on the tray. Drawn as a **template
+/// image** on macOS (like idle/count) so the monochrome glyph + corner dots stay
 /// crisp and adapt to the light/dark menu bar. Must run on the main thread
 /// (AppKit) —
 /// callers dispatch via `AppHandle::run_on_main_thread`. Failures are logged,

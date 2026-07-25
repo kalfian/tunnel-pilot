@@ -1,9 +1,9 @@
 //! The connecting animation for the menu-bar icon (spec 03 §10, connecting
-//! indicator): the badge shows ticking dots in the SAME pill/position as the
-//! connected count badge — `·` → `··` → `···` → `·` … — instead of a number.
-//! While any tunnel is in a transitional state (connecting/disconnecting) the
-//! badge dots tick continuously; when nothing is transitional anymore the ticker
-//! goes idle and [`super::menu::rebuild_now`] settles the static count/idle icon.
+//! indicator): bare ticking dots in the bottom-right corner of the logo glyph
+//! (no badge disc) — `·` → `··` → `···` → `·` … growing left→right. While any
+//! tunnel is in a transitional state (connecting/disconnecting) the corner dots
+//! tick continuously; when nothing is transitional anymore the ticker goes idle
+//! and [`super::menu::rebuild_now`] settles the static count/idle icon.
 //!
 //! ## Continuous-ticking guarantee (the "stuck" fix)
 //! A **single** tokio task is spawned once ([`ConnectingAnimator::spawn`]) and
@@ -28,9 +28,9 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tokio::sync::Notify;
 
-/// Interval per tick — a steady ~450 ms so the dots advance in a regular,
-/// mechanical tick-tick-tick cadence for the full connecting duration.
-const FRAME_INTERVAL: Duration = Duration::from_millis(450);
+/// Interval per tick — a snappy ~220 ms so the corner dots advance in a brisk
+/// but still-discrete tick-tick-tick cadence for the full connecting duration.
+const FRAME_INTERVAL: Duration = Duration::from_millis(220);
 
 /// Controls the single connecting-ticker task. Cheap to clone (shared state).
 #[derive(Clone)]

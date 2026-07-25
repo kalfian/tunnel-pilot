@@ -281,7 +281,7 @@ pub fn connected_count(tunnels: &[TunnelState]) -> usize {
 }
 
 /// Whether any tunnel is in a transitional state (connecting or disconnecting)
-/// — drives the tray's connecting loading-dots indicator, which takes precedence
+/// — drives the tray's connecting corner-dots indicator, which takes precedence
 /// over the connected-count badge so the user always sees activity.
 pub fn has_transitional(tunnels: &[TunnelState]) -> bool {
     tunnels.iter().any(|t| {
@@ -661,7 +661,7 @@ fn gather_update_notice(app: &AppHandle) -> Option<UpdateNotice> {
 /// Rebuild the tray icon + menu from current state, on the main thread.
 ///
 /// Icon precedence: any transitional tunnel (connecting/disconnecting) → the
-/// connecting ticking-dots badge (owned by `animator`, so the static icon is
+/// connecting corner-dots animation (owned by `animator`, so the static icon is
 /// *not* repainted here); else the connected-count badge / idle. Toggling the
 /// ticker is idempotent, so this can be called on every status change.
 pub fn rebuild_now(app: &AppHandle, state: &Arc<AppState>, animator: &ConnectingAnimator) {
