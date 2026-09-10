@@ -10,7 +10,6 @@
 //! ids — so both a human and an agent can read it, and `--json` prints the
 //! response payload verbatim.
 
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -218,6 +217,10 @@ fn send(
     request: &CliRequest,
     read_timeout: Duration,
 ) -> Result<CliResponse, ClientError> {
+    // Scoped to this fn: the `#[cfg(not(unix))]` `send` below uses none of
+    // these, and a file-level import would be an unused-import error there
+    // under `clippy -D warnings` (which is what the Windows CI job runs).
+    use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
 
     let stream = UnixStream::connect(path).map_err(|e| match e.kind() {
