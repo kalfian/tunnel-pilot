@@ -197,6 +197,12 @@ pub struct AppSettings {
     pub auto_check_updates: bool,
     #[serde(default)]
     pub last_skipped_version: Option<String>,
+    /// Put the `tunnel-pilot` CLI on `$PATH` automatically at startup when a
+    /// candidate directory is writable without elevation (spec 03 §20). On by
+    /// default; an install that would need an admin prompt is never done
+    /// silently — that stays a Settings button.
+    #[serde(default = "default_true")]
+    pub auto_install_cli: bool,
 }
 
 fn default_true() -> bool {
@@ -225,6 +231,7 @@ impl Default for AppSettings {
             show_in_dock: false,
             auto_check_updates: default_true(),
             last_skipped_version: None,
+            auto_install_cli: default_true(),
         }
     }
 }

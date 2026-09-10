@@ -232,6 +232,18 @@ pub fn run() {
                 tauri::async_runtime::spawn(crate::cli::server::serve(state.clone(), socket_path));
             }
 
+            // CLI on PATH (spec 03 §20). A .dmg install cannot run an install
+            // script, so first run is the only chance to symlink the binary
+            // into a bin dir. Only ever done when a candidate is writable
+            // WITHOUT elevation — an unprompted admin password dialog at launch
+            // would be hostile, so that case waits for the Settings button.
+            // Blocking filesystem work, so it runs off the async runtime; any
+            // failure is logged inside and never blocks startup.
+            #[cfg(unix)]
+            if state.settings_snapshot().auto_install_cli {
+                tauri::async_runtime::spawn_blocking(crate::cli::shim::auto_install_on_startup);
+            }
+
             // Full dynamic tray (spec 03 §§10,11): count icon 1–9, per-tunnel rows
             // with Retry-on-error, conditional bulk Start/Stop All, update-notice
             // slot; rebuilt (debounced) on `tunnel://status` changes.

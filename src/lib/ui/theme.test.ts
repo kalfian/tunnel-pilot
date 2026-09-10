@@ -32,6 +32,7 @@ const BASE: AppSettings = {
   showInDock: true,
   autoCheckUpdates: true,
   lastSkippedVersion: null,
+  autoInstallCli: true,
 };
 
 const root = document.documentElement;

@@ -47,6 +47,7 @@ const SETTINGS: AppSettings = {
   showInDock: false,
   autoCheckUpdates: true,
   lastSkippedVersion: null,
+  autoInstallCli: true,
 };
 
 const GROUPS: TunnelGroup[] = [

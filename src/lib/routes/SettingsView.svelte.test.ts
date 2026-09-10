@@ -73,6 +73,7 @@ const SETTINGS: AppSettings = {
   showInDock: true,
   autoCheckUpdates: true,
   lastSkippedVersion: null,
+  autoInstallCli: true,
   oledMode: false,
 };
 

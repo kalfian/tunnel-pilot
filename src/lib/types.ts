@@ -62,6 +62,8 @@ export interface AppSettings {
   showInDock: boolean;
   autoCheckUpdates: boolean;
   lastSkippedVersion: string | null;
+  /** Install the `tunnel-pilot` CLI on PATH at startup when no admin prompt is needed. */
+  autoInstallCli: boolean;
 }
 
 // --- Status & stats (spec 04 §§4,5) ---
