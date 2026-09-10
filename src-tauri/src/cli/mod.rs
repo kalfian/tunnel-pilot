@@ -18,6 +18,7 @@ pub mod protocol;
 #[cfg(unix)]
 pub mod server;
 pub mod service;
+pub mod shim;
 
 /// In-process control-socket integration tests (spec 03 §20 acceptance).
 #[cfg(all(test, unix))]
