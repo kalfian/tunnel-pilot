@@ -120,7 +120,11 @@ pub fn install_close_handler(app: &AppHandle) {
 /// Quit the app for real (tray "Quit" / palette): tear down every live tunnel
 /// so no port stays bound, then exit (spec 03 §14 acceptance). The teardown runs
 /// on the async runtime; the process exits once it completes.
+///
+/// The CLI control socket is unlinked first (best effort) so the next launch
+/// binds a clean path instead of probing a dead one (spec 03 §20).
 pub fn quit_app(app: &AppHandle) {
+    remove_control_socket(app);
     let handle = app.clone();
     let state = match app.try_state::<Arc<AppState>>() {
         Some(s) => s.inner().clone(),
@@ -139,4 +143,21 @@ pub fn quit_app(app: &AppHandle) {
         tracing::info!("all tunnels torn down; exiting");
         handle.exit(0);
     });
+}
+
+/// Best-effort unlink of the CLI control socket on quit (spec 03 §20). A
+/// missing socket, an unresolvable config dir, or a non-unix build are all
+/// no-ops — quitting must never be blocked by socket cleanup.
+fn remove_control_socket(app: &AppHandle) {
+    #[cfg(unix)]
+    {
+        let Ok(config_dir) = app.path().app_config_dir() else {
+            return;
+        };
+        crate::cli::server::remove_socket(&crate::cli::resolved_socket_path(&config_dir));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = app;
+    }
 }

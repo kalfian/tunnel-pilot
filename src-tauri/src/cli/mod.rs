@@ -14,7 +14,13 @@
 
 pub mod args;
 pub mod protocol;
+#[cfg(unix)]
+pub mod server;
 pub mod service;
+
+/// In-process control-socket integration tests (spec 03 §20 acceptance).
+#[cfg(all(test, unix))]
+mod it_tests;
 
 use std::path::{Path, PathBuf};
 

@@ -220,6 +220,18 @@ pub fn run() {
                 state.settings_snapshot().launch_at_login,
             );
 
+            // CLI control socket (spec 02 §9 / 03 §20). A second DRIVER of the
+            // same service fns — it takes `Arc<AppState>` and nothing else, so
+            // it can be integration-tested headless. Unix-only for now (a
+            // Windows named pipe would slot in behind the same `serve` shape).
+            // Spawned detached and failure-tolerant: if the socket cannot be
+            // bound, `serve` logs and returns — the app must still start.
+            #[cfg(unix)]
+            {
+                let socket_path = crate::cli::resolved_socket_path(&config_dir);
+                tauri::async_runtime::spawn(crate::cli::server::serve(state.clone(), socket_path));
+            }
+
             // Full dynamic tray (spec 03 §§10,11): count icon 1–9, per-tunnel rows
             // with Retry-on-error, conditional bulk Start/Stop All, update-notice
             // slot; rebuilt (debounced) on `tunnel://status` changes.
