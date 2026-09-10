@@ -145,6 +145,10 @@ A task is done when:
   add App Sandbox without a spec change.
 - Tauri v2 capabilities/ACL: expose only the commands in [02 §6](02-ARCHITECTURE.md) to the
   window; scope fs/dialog narrowly.
+- **The CLI control socket carries no secrets** ([02 §9](02-ARCHITECTURE.md), [03 §20](03-TECH-SPEC.md#cli)):
+  `ForwardView` exposes `hasStoredPassword` only, and set/clear password are deliberately
+  not exposed over the socket — keychain writes stay a GUI action. Its security is
+  filesystem permissions (0700 dir / 0600 socket); do not add a token file instead.
 
 ## 9. When something in the spec is wrong or ambiguous
 

@@ -1182,3 +1182,95 @@ Clear action. `LogEntry`: level(info/warning/error), tunnelName, message, timest
   monospace fallback stack in CSS — owned by design agent, see [05-UI-UX-SPEC.md](05-UI-UX-SPEC.md).
 - **File picker**: `tauri-plugin-dialog` for identity file + backup path selection; scope
   in capabilities.
+
+---
+
+<a id="cli"></a>
+## 20. CLI control socket (`cli/`)
+
+### Behavior
+
+A terminal user or an LLM agent controls the **running** app from a shell. The socket is a
+remote control, not a second tunnel engine: with the app closed there is nothing to talk to
+(exit `3` + `open -a "Tunnel Pilot"`), and the CLI never auto-launches the GUI.
+
+The GUI binary is the CLI. `main.rs` inspects `argv[1]` before any Tauri code: a known
+subcommand runs the client and `exit()`s; anything else (including `--minimized`) launches
+the app as before. No sidecar, no `bundle.externalBin`, no second `[[bin]]`.
+
+```
+tunnel-pilot list                      [--json]
+tunnel-pilot status <id|name>          [--json]
+tunnel-pilot connect <id|name>         [--json] [--timeout <secs>] [--no-wait]
+tunnel-pilot disconnect <id|name>      [--json]
+tunnel-pilot connect-all               [--json] [--timeout <secs>] [--no-wait]
+tunnel-pilot disconnect-all            [--json]
+tunnel-pilot version | help
+global: [--socket <path>]   env: TUNNEL_PILOT_SOCKET
+```
+
+Human output is fixed-width columns, **no ANSI colour, full uuids** (an agent must be able
+to copy an unambiguous target). `--json` prints the response `data` verbatim; on failure the
+serialized `AppError` goes to stderr.
+
+### Rust approach
+
+- **Transport**: tokio `UnixListener` at `<appConfigDir>/cli/cli.sock`, NDJSON framing,
+  one task per connection (64 KiB read cap, 30s idle-read timeout). `#[cfg(unix)]`; the
+  crate still builds elsewhere (the client returns an explanatory error).
+- **`serve(state: Arc<AppState>, path)`** takes state and nothing else — no `AppHandle`.
+  That is what makes the headless integration test possible, and it keeps the socket out of
+  the Tauri lifecycle. Spawned detached from `.setup()`; a bind failure is logged and
+  swallowed so the app always starts.
+- **Client is blocking** `std::os::unix::net::UnixStream` with `set_read_timeout` — a CLI
+  invocation must not pay for a tokio runtime. Args are parsed by a hand-rolled pure fn
+  (`cli/args.rs`); no `clap` for a fixed eight-subcommand surface.
+- **`wait_for_terminal(state, id, deadline) -> WaitOutcome`** gives `connect` its
+  synchronous contract. `engine::connect_forward` returns as soon as the supervisor is
+  spawned (status still `disconnected`/`connecting`), so the waiter subscribes to the
+  tunnel's existing status `watch` channel via the new
+  `TunnelRegistry::subscribe_status`, and returns `Terminal(connected|error)`, `TimedOut`,
+  or `Vanished`. The only polling is a ≤1s/50ms grace loop for the handle to appear —
+  `connect_forward` legally returns `Ok(())` when it loses the F33 start race.
+  `disconnect` needs no waiter: `disconnect_forward` already awaits the supervisor join.
+- **Timeout**: default 30s, clamped server-side to 1–300s so a client cannot pin a task
+  open. `connect-all` shares ONE deadline across the sweep.
+- **Reuse, not duplication**: bulk goes through `run_start_all`/`run_stop_all` (the exact
+  tray/palette path) and `ForwardView` reuses `commands::forwards::runtime_or_default`.
+
+### Socket path & the `sun_path` limit
+
+`sockaddr_un.sun_path` is 104 bytes on macOS / 108 on Linux. The default path is ~75 bytes
+for a typical `$HOME`, but a long username overflows it. Paths over **100 bytes** are
+refused up front with an error naming `TUNNEL_PILOT_SOCKET` (honored by both sides) instead
+of an opaque `EINVAL` from `bind(2)`.
+
+**Stale socket**: if the path exists, probe-connect. Something answers ⇒ another instance
+owns it ⇒ log and skip binding (the app still runs). Nothing answers ⇒ unlink and bind.
+`window::quit_app` unlinks best-effort so the next launch starts clean.
+
+### Threat model — why there is no token
+
+Filesystem permissions only: dir `0700`, socket `0600`. The socket exposes capabilities the
+same local user already holds — they own the GUI, the config file and the keychain entries.
+A shared token would live in a file with identical permissions: no added protection, more
+failure modes. Root is out of scope (root wins regardless) and a UDS is not
+network-reachable. **No secret crosses the socket**: `ForwardView` carries
+`hasStoredPassword` only, and set/clear password are deliberately not exposed (keychain
+writes stay a GUI action).
+
+### Acceptance criteria
+- [ ] Socket binds at `<appConfigDir>/cli/cli.sock` with mode `0600` inside a `0700` dir.
+- [ ] A bind failure (path too long, another instance) is logged and the app still starts.
+- [ ] A stale socket file left by a crash is unlinked and replaced; a LIVE socket is not.
+- [ ] `list`/`status` reflect live registry status; a non-live forward reads `disconnected`.
+- [ ] Target resolution: exact id, then case-insensitive exact name; ambiguous → `invalidInput`,
+      missing → `notFound`. No fuzzy matching.
+- [ ] `connect` waits for `connected`/`error` and exits `0`/`5`; `--no-wait` returns
+      immediately; a blown budget exits `6`.
+- [ ] `v` other than `1` and malformed lines are answered with `invalidInput`, and the
+      listener keeps serving.
+- [ ] `--json` output is exactly the response `data` object.
+- [ ] No response field carries a password (asserted in a unit test).
+- [ ] `--minimized` and a bare launch still start the GUI unchanged.
+

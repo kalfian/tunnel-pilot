@@ -120,6 +120,13 @@ src-tauri/
       dock.rs                # macOS activation-policy; Win/Linux skipTaskbar
       autostart.rs           # tauri-plugin-autostart sync
       notify.rs              # tauri-plugin-notification wrapper; permission timing
+    cli/                     # local control socket + CLI client (§9); NOT an IPC command
+      mod.rs                 # socket path, TUNNEL_PILOT_SOCKET override, sun_path length guard
+      protocol.rs            # NDJSON CliRequest/CliResponse (v1), CliData, ForwardView
+      args.rs                # hand-rolled subcommand/flag parser + HELP_TEXT
+      server.rs              # #[cfg(unix)] UnixListener: 0700 dir, 0600 socket, accept loop
+      service.rs             # request -> AppState/engine handlers; resolve_target; wait_for_terminal
+      client.rs              # blocking UnixStream client, renderers, exit codes
     commands/
       mod.rs                 # re-export + invoke_handler list
       forwards.rs            # CRUD, reorder, duplicate, connect/disconnect, retry, copy-ssh-command
@@ -344,3 +351,63 @@ Names are constants in `events.rs`. Payloads are serde structs. Frontend subscri
   only parsed at verify time, so empty is fine at init). M6 replaces the pubkey with the real
   minisign public key. (There is no `active` field in the v2 plugin config — that was v1.)
 - Capabilities (v2 ACL): expose only the commands above to the main window; restrict fs/dialog scopes.
+
+## 9. Local control socket (CLI)
+
+A terminal user or an LLM agent drives the running app from a shell:
+
+```bash
+"/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" list
+```
+
+**This is a second DRIVER, not a second state owner.** The socket handler resolves a
+target and then calls the *same* service functions the tray and the webview use
+(`ssh::engine::connect_forward`/`disconnect_forward`, `commands::forwards::run_start_all`/
+`run_stop_all`). Status writes still go through the guarded `set_status`, `tunnel://status`
+is still emitted, and the frontend still rehydrates via `app_hydrate()` — so a CLI-driven
+connect updates the tray and the window with no extra plumbing.
+
+**§6 and §7 above are UNCHANGED by this feature** — the CLI adds no `#[tauri::command]`
+and no event. Do not go looking for one.
+
+| Aspect | Decision |
+|---|---|
+| Transport | Unix domain socket, `#[cfg(unix)]` (Windows named pipe would slot in behind the same `serve` shape) |
+| Path | `<appConfigDir>/cli/cli.sock`; `TUNNEL_PILOT_SOCKET` overrides on BOTH sides; client also takes `--socket` |
+| Permissions | dir `0700`, socket `0600` after bind; no token (see [03 §20](03-TECH-SPEC.md)) |
+| Framing | NDJSON — one JSON object per line, each way |
+| Binary | The GUI binary itself; `main.rs` dispatches on `argv[1]` before any Tauri code |
+| Startup | Spawned detached in `.setup()`; a bind failure is logged and the app still starts |
+
+Request / response (all `camelCase`, protocol `v: 1`):
+
+```jsonc
+{ "v": 1, "cmd": "connect", "target": "prod-db", "timeoutMs": 30000, "wait": true }
+{ "v": 1, "ok": true,  "data": { "forward": { … }, "waited": true, "timedOut": false } }
+{ "v": 1, "ok": false, "error": { "kind": "notFound", "message": "no forward matches 'x'" } }
+```
+
+`error` is `AppError` serialized verbatim — the same vocabulary the frontend sees. A `v`
+other than `1` is rejected with `invalidInput`.
+
+| Command | Target | Response `data` |
+|---|---|---|
+| `list` | — | `{ forwards: ForwardView[] }` |
+| `status` | id\|name | `{ forward, stats }` |
+| `connect` | id\|name | `{ forward, waited, timedOut }` |
+| `disconnect` | id\|name | `{ forward, waited, timedOut }` |
+| `connect-all` | — | `{ results, succeeded, failed }` |
+| `disconnect-all` | — | `{ results, succeeded, failed }` |
+| `version` | — | `{ appVersion, protocol }` |
+
+`ForwardView` = config + live runtime, flattened. It carries `hasStoredPassword` (a
+boolean) and **never a secret**; there is no password command on the socket (AGENTS §8).
+
+**Target resolution** (server-side, single source of truth): exact `id` first, then
+case-insensitive exact `name`. Zero matches → `notFound`; more than one → `invalidInput`
+naming the ambiguity. No fuzzy or prefix matching — an agent must never connect the wrong
+tunnel.
+
+Exit codes: `0` ok · `1` internal/IO · `2` usage · `3` app not running · `4` not found or
+ambiguous · `5` operation ended in `error` · `6` timed out. `status` exits `0` whenever the
+query succeeded; the tunnel state is in the payload.

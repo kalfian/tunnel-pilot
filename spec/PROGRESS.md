@@ -28,6 +28,7 @@
 | M5 | UX improvements | ✅ done | Rust `44ef253`,`ffc4f69` · FE `5c95728..1812a43` |
 | M6 | Signed updater + notifications | ✅ done | 6c5970d..637d7fb (7 commits) |
 | M7 | Packaging + cutover | 🟨 prep done — release/cutover pending (manual/CI/device) | 3598b85..(this session) |
+| M8 | CLI control socket | ✅ done (code) — bundled-binary check pending a desktop session | `f36ec46`..`604589a` + docs |
 
 ## M0 item checklist (commit per item)
 - [x] Toolchain: add Tauri CLI (`pnpm add -D @tauri-apps/cli`), confirm rustup + node/pnpm.
@@ -448,6 +449,52 @@ tag, push, or move Flutter — those are the manual/CI cutover steps (see `CUTOV
   F46 is already the M5 "require ≥1 auth method" fix (commit `a9e1876`). Host-key verification
   is the un-numbered M1/M3 backlog item. Recorded correctly in CUTOVER.md + here.
 
+## M8 item checklist (commit per item)
+Branch `feat/cli-control-socket`. Design: [02 §9](02-ARCHITECTURE.md), [03 §20](03-TECH-SPEC.md#cli),
+roadmap M8. Working plan: `docs/plans/cli-control-socket.md` (gitignored).
+- [x] **Phase 1 — protocol + pure layer** (`f36ec46`): `cli/mod.rs` (socket path,
+      `TUNNEL_PILOT_SOCKET` on both sides, 100-byte `sun_path` guard), `cli/protocol.rs`
+      (NDJSON v1 request/response, `CliData`, `ForwardView`), `cli/args.rs` (hand-rolled
+      parser, no clap). `AppError` gained `Deserialize`+`PartialEq` so the client reads the
+      app's own error vocabulary off the wire.
+- [x] **Phase 2 — service layer** (`cb0ccd1`): `resolve_target` (exact id → case-insensitive
+      exact name, ambiguous → `invalidInput`, no fuzzy), list/status/disconnect/bulk through
+      the SAME `ssh::engine::*` + `run_start_all`/`run_stop_all` paths, `wait_for_terminal`
+      on the status `watch` channel, new `TunnelRegistry::subscribe_status`,
+      `commands::forwards::runtime_or_default` → `pub(crate)`.
+- [x] **Phase 3 — server** (`9b64038`): `UnixListener` (0700 dir, 0600 socket, stale-socket
+      probe), detached spawn in `.setup()` that logs-and-swallows bind failures, best-effort
+      unlink in `window::quit_app`, headless integration tests over a real socket.
+- [x] **Phase 4 — client + dispatch** (`604589a`): blocking `std::os::unix::net::UnixStream`
+      (no tokio in CLI mode), `main.rs` argv branch before any Tauri code, ASCII fixed-width
+      renderers, exit codes 0/1/2/3/4/5/6.
+- [x] **Phase 5 — docs**: spec 02 §9 (+ `cli/` in the §3 module tree, explicit "§6/§7
+      unchanged"), spec 03 §20, roadmap M8, this checklist, AGENTS §8, CLAUDE.md, README
+      "CLI / automation".
+- [x] Gates green after every phase: `cargo fmt`, `cargo build`, `cargo test` (206 passed,
+      1 ignored), `cargo clippy --all-targets -D warnings`.
+
+### M8 findings / deviations (AGENTS §9)
+- **Socket unlink lives in `window::quit_app`, not `commands::app::quit_app`** (the plan said
+  the latter). The command is a thin delegate to `window::quit_app`, which is ALSO the tray
+  Quit path — putting it there covers both. No spec change needed.
+- **`version` is a server round-trip**, so it exits `3` when the app is not running (like
+  every other subcommand). The human output prints the local `cli` version alongside the
+  server's `app` version, which is what makes a stale symlink visible.
+- **`AppError` now derives `Deserialize`/`PartialEq`.** The alternative (a mirrored
+  client-side error struct) would fork the error vocabulary; the derive keeps `error.rs` the
+  single source of truth.
+- **Protocol-version mismatch maps to exit `4`** (`invalidInput` → "not found/ambiguous"),
+  per the plan's error-kind table. Slightly loose, but a single documented mapping beats a
+  special case.
+
+### Needs a real desktop session to verify (M8)
+Invoking the CLI against the app from a real bundle:
+`pnpm tauri build` → `"/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" list`
+(and `status`/`connect`/`disconnect` against a real SSH host), plus the tray reflecting a
+CLI-driven connect. The headless integration tests cover the transport, framing, permissions
+and dispatch, but not a real SSH dial or the bundled binary path.
+
 ## Next action
 **Release/cutover of v2.0.0** — execute `CUTOVER.md` (CI secrets → RAM/device verifications →
 v1 bridge → move Flutter to `legacy/flutter/` → merge → tag `v2.0.0`). All gated on manual/CI/
@@ -517,6 +564,11 @@ device steps; the executable prep (bundling config + docs + checklist) is done o
 - `a7a8fcd` docs(m7): rewrite README for v2 (Rust+Tauri) with install workarounds + v1 upgrade path
 - `f68517e` docs(m7): update landing page for v2 (downloads, unsigned workarounds, v1 upgrade)
 - `f1cc7b2` docs(m7): add CUTOVER.md — remaining steps to ship v2.0.0 (DONE vs PENDING)
+
+- `f36ec46` feat(cli): protocol, arg parser and socket path resolution (M8 phase 1)
+- `cb0ccd1` feat(cli): service layer driving the engine from the control socket (M8 phase 2)
+- `9b64038` feat(cli): unix control socket listener wired into app startup (M8 phase 3)
+- `604589a` feat(cli): blocking client, renderers and subcommand dispatch (M8 phase 4)
 
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).

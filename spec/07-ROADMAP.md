@@ -290,6 +290,43 @@ this milestone ships unsigned installers with documented workarounds.
 
 ---
 
+## M8 — CLI control socket (terminal + agent control)
+
+**Goal**: drive the **running** app from a shell — `tunnel-pilot list|status|connect|
+disconnect|connect-all|disconnect-all` — so a terminal user or an LLM agent can branch on
+`connected` vs `error: auth failed` without touching the GUI. Full design in
+[02 §9](02-ARCHITECTURE.md) + [03 §20](03-TECH-SPEC.md#cli).
+
+**Non-goals**: no CRUD, no credentials, no settings over the socket; no Windows named pipe
+yet (`#[cfg(unix)]`); no "Install CLI" button (the `install-cli` subcommand name is
+reserved, the symlink is documented in the README).
+
+**Phases**
+1. Protocol + pure layer: `cli/mod.rs` (paths, `TUNNEL_PILOT_SOCKET`, `sun_path` guard),
+   `cli/protocol.rs`, `cli/args.rs`.
+2. Service layer: `resolve_target`, list/status/disconnect/bulk, `wait_for_terminal` +
+   `TunnelRegistry::subscribe_status`.
+3. Server: `UnixListener` (0700 dir / 0600 socket, stale-socket probe), `.setup()` wiring,
+   unlink on quit, headless integration tests.
+4. Client + dispatch: blocking `UnixStream`, renderers, exit codes, `main.rs` argv branch.
+5. Docs: spec 02 §9, 03 §20, this milestone, PROGRESS, AGENTS, CLAUDE.md, README.
+
+**Acceptance**
+- [ ] Socket at `<appConfigDir>/cli/cli.sock`, mode 0600 in a 0700 dir; a bind failure never
+      stops the app from starting.
+- [ ] `list`/`status` reflect live registry status; resolution is id-then-name with no fuzzy
+      matching (ambiguous → `invalidInput`).
+- [ ] `connect` waits for `connected`/`error` (default 30s, clamped 1–300s) and exits
+      `0`/`5`/`6`; `--no-wait` returns immediately.
+- [ ] CLI-driven changes update the tray and the (open) window — same service fns, same
+      events; §6/§7 of [02](02-ARCHITECTURE.md) unchanged.
+- [ ] No secret on the wire; no password command exists.
+- [ ] `--minimized` and a bare launch still start the GUI unchanged.
+
+**Applies**: [02 §9](02-ARCHITECTURE.md); [03 §20](03-TECH-SPEC.md#cli); AGENTS §8.
+
+---
+
 ## Parity checklist (v1 feature → milestone)
 
 | v1 feature (from [01 §3.1](01-PRD.md)) | Milestone |

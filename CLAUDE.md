@@ -39,6 +39,14 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt
 ```
 
+### CLI (macOS/Linux — talks to the RUNNING app over its control socket)
+
+```bash
+"/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" list
+sudo ln -sf "/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" /usr/local/bin/tunnel-pilot
+tunnel-pilot connect prod-db --json    # exits 0 connected / 5 error / 6 timeout / 3 app not running
+```
+
 ## Project Structure
 
 ```
@@ -76,6 +84,7 @@ src-tauri/                            # Rust + Tauri v2 core (owns tray, tokio, 
     platform/                         # dock/activation policy, autostart, notifications
     updater/                          # tauri-plugin-updater wiring; check/download/install
     commands/                         # thin #[tauri::command] handlers: forwards, groups, settings, logs, backup, updater, app
+    cli/                              # local control socket + CLI client (subcommand dispatch from main.rs)
 
 assets/icons/                         # tray icons (idle grey + numbered 1-9), app + menu icons (embedded via include_bytes!)
 docs/                                 # landing page (GitHub Pages) + screenshots + install scripts
@@ -110,6 +119,11 @@ The full rules live in `spec/AGENTS.md`; do not duplicate them here. The essenti
   store-writes/events out) and never call `invoke()` directly. Visual details (tokens,
   spacing, states) are owned by the design spec (`spec/05-UI-UX-SPEC.md` +
   `spec/design-tokens.md`).
+- **CLI control socket**: `cli/` serves NDJSON over a Unix socket at `<appConfigDir>/cli/cli.sock`
+  (0700 dir / 0600 socket, `#[cfg(unix)]`). It is a second *driver* of the same service fns
+  (`ssh::engine::*`, `run_start_all`/`run_stop_all`) — not a second state owner, and it adds
+  no `#[tauri::command]` and no event. No secret crosses it (`hasStoredPassword` flag only).
+  See `spec/02-ARCHITECTURE.md` §9 + `spec/03-TECH-SPEC.md` §20.
 - **Tray/window**: native tray menu rebuilt on state change; dynamic icon (idle grey / blue
   badge with connection count, clamp 9). macOS uses `LSUIElement=true` with runtime
   activation-policy switching — window shown ⇒ Regular policy (Dock visible), hidden ⇒
