@@ -128,12 +128,16 @@ impl CliResponse {
 /// field set is disjoint, which keeps the untagged deserialization
 /// unambiguous — keep it that way when adding variants.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", untagged)]
+#[serde(untagged)]
 pub enum CliData {
+    // NOTE: `rename_all` on an enum only renames the *variants*; the fields of
+    // each struct variant need their own attribute to reach the wire as camelCase.
+    #[serde(rename_all = "camelCase")]
     Status {
         forward: ForwardView,
         stats: TunnelStats,
     },
+    #[serde(rename_all = "camelCase")]
     Action {
         forward: ForwardView,
         /// Whether the server awaited a terminal status.
@@ -141,18 +145,16 @@ pub enum CliData {
         /// Whether the wait budget elapsed first (status is non-terminal).
         timed_out: bool,
     },
+    #[serde(rename_all = "camelCase")]
     Bulk {
         results: Vec<BulkResult>,
         succeeded: usize,
         failed: usize,
     },
-    List {
-        forwards: Vec<ForwardView>,
-    },
-    Version {
-        app_version: String,
-        protocol: u32,
-    },
+    #[serde(rename_all = "camelCase")]
+    List { forwards: Vec<ForwardView> },
+    #[serde(rename_all = "camelCase")]
+    Version { app_version: String, protocol: u32 },
 }
 
 /// A forward as the CLI sees it: config + live runtime, flattened. Contains no
@@ -255,6 +257,27 @@ pub(crate) fn sample_config(id: &str, name: &str) -> ForwardConfig {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn data_variant_fields_are_camel_case_on_the_wire() {
+        let cfg = sample_config("id-1", "prod-db");
+        let view = ForwardView::from_parts(&cfg, &runtime(ForwardStatus::Connected));
+        let action = serde_json::to_string(&CliData::Action {
+            forward: view,
+            waited: true,
+            timed_out: false,
+        })
+        .expect("serialize");
+        assert!(action.contains("\"timedOut\""), "{action}");
+        assert!(!action.contains("timed_out"), "{action}");
+        let version = serde_json::to_string(&CliData::Version {
+            app_version: "2.0.0".into(),
+            protocol: 1,
+        })
+        .expect("serialize");
+        assert!(version.contains("\"appVersion\""), "{version}");
+        assert!(!version.contains("app_version"), "{version}");
+    }
+
     use super::*;
 
     fn runtime(status: ForwardStatus) -> ForwardRuntime {
