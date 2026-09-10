@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/svelte";
 import { get } from "svelte/store";
-import type { AppSettings, UpdateStatus } from "../types";
+import type { AppSettings, CliShimStatus, UpdateStatus } from "../types";
 import { settings } from "../stores/settings";
 import { importMode } from "../stores/backup";
 import { updateStatus, updateProgress } from "../stores/updater";
@@ -31,6 +31,26 @@ const themeMock = vi.hoisted(() => {
 });
 vi.mock("../ui/theme", () => ({ effectiveTheme: themeMock.effectiveTheme }));
 
+// `vi.mock` factories are hoisted, so the default shim status must be too.
+const { UNSUPPORTED_SHIM } = vi.hoisted(() => ({
+  UNSUPPORTED_SHIM: {
+    supported: false,
+    installed: false,
+    path: null,
+    target: null,
+    linksToCurrent: false,
+    linkedPath: null,
+    linkedElsewhere: false,
+    conflict: false,
+    installTarget: null,
+    installPath: null,
+    needsElevation: false,
+    currentExe: null,
+    devBuild: false,
+    entries: [],
+  } as CliShimStatus,
+}));
+
 import SettingsView from "./SettingsView.svelte";
 
 vi.mock("../ipc", () => ({
@@ -49,10 +69,18 @@ vi.mock("../ipc", () => ({
   ),
   installUpdate: vi.fn(() => Promise.resolve()),
   skipUpdate: vi.fn(() => Promise.resolve()),
+  // Default: unsupported (Windows) so the CLI group stays out of every other
+  // suite; the CLI tests set an explicit status per case.
+  cliShimStatus: vi.fn(() => Promise.resolve(UNSUPPORTED_SHIM)),
+  installCliShim: vi.fn(() => Promise.resolve(UNSUPPORTED_SHIM)),
+  uninstallCliShim: vi.fn(() => Promise.resolve(UNSUPPORTED_SHIM)),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(() => Promise.resolve("/backups/tp.json")),
   save: vi.fn(() => Promise.resolve("/backups/tp.json")),
+}));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  writeText: vi.fn(() => Promise.resolve()),
 }));
 
 import {
@@ -61,6 +89,9 @@ import {
   installUpdate,
   skipUpdate,
   updateSettings,
+  cliShimStatus,
+  installCliShim,
+  uninstallCliShim,
 } from "../ipc";
 
 const SETTINGS: AppSettings = {
@@ -344,5 +375,212 @@ describe("SettingsView — update banner (spec §8)", () => {
       within(alert).getByRole("button", { name: /view log/i }),
     );
     expect(get(activeView)).toBe("activity");
+  });
+});
+
+// --- Command line (CLI shim on PATH) ---
+
+function shim(over: Partial<CliShimStatus> = {}): CliShimStatus {
+  return { ...UNSUPPORTED_SHIM, supported: true, ...over };
+}
+
+const HEALTHY = shim({
+  installed: true,
+  path: "/Users/dev/.local/bin/tunnel-pilot",
+  target: "userLocal",
+  linksToCurrent: true,
+  linkedPath: "/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot",
+  installTarget: "userLocal",
+  installPath: "/Users/dev/.local/bin/tunnel-pilot",
+});
+
+const INSTALLABLE = shim({
+  installTarget: "userLocal",
+  installPath: "/Users/dev/.local/bin/tunnel-pilot",
+});
+
+describe("SettingsView — command line (CLI shim)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    settings.set(SETTINGS);
+    updateStatus.set(null);
+    updateProgress.set(null);
+  });
+
+  it("renders nothing on a platform without shim support", async () => {
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(UNSUPPORTED_SHIM);
+    render(SettingsView);
+    // Let the on-mount status resolve before asserting the absence.
+    await screen.findByText(/backup & restore/i);
+    expect(screen.queryByText(/command line/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^install$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the installed path and an example command, with Remove", async () => {
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(HEALTHY);
+    render(SettingsView);
+    expect(
+      await screen.findByText("/Users/dev/.local/bin/tunnel-pilot"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("tunnel-pilot list")).toBeInTheDocument();
+    // The check glyph is decorative — the state must read as words too.
+    expect(screen.getByText(/installed at/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remove/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /install$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("install calls the ipc wrapper and re-renders from the response", async () => {
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(INSTALLABLE);
+    vi.mocked(installCliShim).mockResolvedValueOnce(HEALTHY);
+    render(SettingsView);
+    const install = await screen.findByRole("button", { name: /^install$/i });
+    await fireEvent.click(install);
+    expect(installCliShim).toHaveBeenCalledOnce();
+    // The row reflects the returned status, not an optimistic guess.
+    expect(
+      await screen.findByText("/Users/dev/.local/bin/tunnel-pilot"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remove/i })).toBeInTheDocument();
+  });
+
+  it("remove calls uninstall and falls back to the install affordance", async () => {
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(HEALTHY);
+    vi.mocked(uninstallCliShim).mockResolvedValueOnce(INSTALLABLE);
+    render(SettingsView);
+    await fireEvent.click(
+      await screen.findByRole("button", { name: /remove/i }),
+    );
+    expect(uninstallCliShim).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByRole("button", { name: /^install$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("warns about the password prompt only when elevation is needed", async () => {
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(INSTALLABLE);
+    const plain = render(SettingsView);
+    await screen.findByRole("button", { name: /^install$/i });
+    expect(screen.queryByText(/administrator rights/i)).not.toBeInTheDocument();
+    plain.unmount();
+
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(
+      shim({
+        installTarget: "usrLocal",
+        installPath: "/usr/local/bin/tunnel-pilot",
+        needsElevation: true,
+      }),
+    );
+    render(SettingsView);
+    // The ellipsis is the macOS "this opens a prompt" convention…
+    const elevated = await screen.findByRole("button", { name: /install…/i });
+    // …and the row says so in words, before anything is clicked.
+    expect(
+      screen.getByText(/needs administrator rights.*asked for your password/i),
+    ).toBeInTheDocument();
+    expect(elevated).toHaveAttribute(
+      "title",
+      expect.stringMatching(/administrator password/i),
+    );
+  });
+
+  it("offers Repair when the shim points at another copy", async () => {
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(
+      shim({
+        installed: true,
+        path: "/usr/local/bin/tunnel-pilot",
+        target: "usrLocal",
+        linkedElsewhere: true,
+        linkedPath: "/Volumes/old/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot",
+        installTarget: "usrLocal",
+        installPath: "/usr/local/bin/tunnel-pilot",
+      }),
+    );
+    vi.mocked(installCliShim).mockResolvedValueOnce(HEALTHY);
+    render(SettingsView);
+    const repair = await screen.findByRole("button", { name: /^repair$/i });
+    expect(
+      screen.getByText(/points at a different copy of the app/i),
+    ).toBeInTheDocument();
+    await fireEvent.click(repair);
+    expect(installCliShim).toHaveBeenCalledOnce();
+  });
+
+  it("explains a file conflict and offers no install button", async () => {
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(
+      shim({
+        installed: true,
+        conflict: true,
+        path: "/usr/local/bin/tunnel-pilot",
+        target: "usrLocal",
+      }),
+    );
+    render(SettingsView);
+    expect(
+      await screen.findByText(/another file already uses this name/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /install|repair|remove/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("disables the button on a dev build and says why", async () => {
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(
+      shim({
+        devBuild: true,
+        installTarget: "userLocal",
+        installPath: "/Users/dev/.local/bin/tunnel-pilot",
+      }),
+    );
+    render(SettingsView);
+    const install = await screen.findByRole("button", { name: /^install$/i });
+    expect(install).toBeDisabled();
+    expect(screen.getByText(/development build/i)).toBeInTheDocument();
+  });
+
+  it("toggling auto-install patches autoInstallCli", async () => {
+    vi.mocked(cliShimStatus).mockResolvedValueOnce(INSTALLABLE);
+    render(SettingsView);
+    const toggle = await screen.findByRole("switch", {
+      name: /install the terminal command automatically/i,
+    });
+    await fireEvent.click(toggle);
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ autoInstallCli: false }),
+    );
+  });
+
+  it("treats a cancelled password prompt as benign and re-reads the status", async () => {
+    vi.mocked(cliShimStatus)
+      .mockResolvedValueOnce(
+        shim({
+          installTarget: "usrLocal",
+          installPath: "/usr/local/bin/tunnel-pilot",
+          needsElevation: true,
+        }),
+      )
+      .mockResolvedValueOnce(
+        shim({
+          installTarget: "usrLocal",
+          installPath: "/usr/local/bin/tunnel-pilot",
+          needsElevation: true,
+        }),
+      );
+    vi.mocked(installCliShim).mockRejectedValueOnce({
+      kind: "invalidInput",
+      message: "administrator authorization was cancelled",
+    });
+    render(SettingsView);
+    await fireEvent.click(
+      await screen.findByRole("button", { name: /install…/i }),
+    );
+    expect(cliShimStatus).toHaveBeenCalledTimes(2);
+    // Still offering the install; no scary failure copy in the row.
+    expect(
+      await screen.findByRole("button", { name: /install…/i }),
+    ).toBeInTheDocument();
   });
 });

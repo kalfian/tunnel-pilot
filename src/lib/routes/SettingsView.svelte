@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { save, open } from "@tauri-apps/plugin-dialog";
-  import type { AppSettings, ThemeMode } from "../types";
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import type { AppSettings, CliShimStatus, ThemeMode } from "../types";
   import { settings } from "../stores/settings";
   import {
     updateStatus,
@@ -18,6 +20,9 @@
     checkUpdate,
     installUpdate,
     skipUpdate,
+    cliShimStatus,
+    installCliShim,
+    uninstallCliShim,
   } from "../ipc";
   import { pushToast } from "../ui/toast";
   import Toggle from "../components/ui/Toggle.svelte";
@@ -183,6 +188,143 @@
       pushToast(`Couldn't skip this version: ${String(err)}`, {
         tone: "error",
       });
+    }
+  }
+
+  // --- Command line (CLI shim on PATH, spec 05 §6 / 03 §20) ---
+  //
+  // `cli_shim_status` is the only truth about what sits on PATH: every action
+  // re-renders from the `CliShimStatus` the backend hands back, so the row can
+  // never claim an install that didn't happen. A null status (still loading, or
+  // the probe failed) hides the whole group — `supported` is false on Windows
+  // and the group must never appear there, so a placeholder row would be a lie
+  // on one OS and a flash on the other.
+  let cliStatus = $state<CliShimStatus | null>(null);
+  let cliBusy = $state(false);
+
+  /** Shown under a healthy install: the smallest command that proves it works. */
+  const CLI_EXAMPLE = "tunnel-pilot list";
+  const CLI_ELEVATION_HINT = "You'll be asked for an administrator password";
+
+  type CliState =
+    | "healthy" // the shim resolves to this app
+    | "stale" // the shim points at another copy
+    | "conflict" // a real file already owns the name
+    | "dev" // dev build — the backend refuses to install it
+    | "blocked" // nowhere writable to install
+    | "installable";
+
+  // `null` = render nothing (unsupported platform or status not loaded).
+  const cliState = $derived<CliState | null>(
+    (() => {
+      const st = cliStatus;
+      if (!st || !st.supported) return null;
+      if (st.conflict) return "conflict";
+      if (st.installed && st.linksToCurrent) return "healthy";
+      if (st.linkedElsewhere) return "stale";
+      if (st.devBuild) return "dev";
+      if (!st.installTarget) return "blocked";
+      return "installable";
+    })(),
+  );
+
+  // One path per row: where the shim is, or where it would go.
+  const cliPath = $derived<string | null>(
+    cliState === "installable"
+      ? (cliStatus?.installPath ?? null)
+      : (cliStatus?.path ?? cliStatus?.installPath ?? null),
+  );
+
+  // Healthy needs no sentence — the path and the example say it.
+  const cliSub = $derived<string | null>(
+    (() => {
+      switch (cliState) {
+        case "stale":
+          return "This points at a different copy of the app.";
+        case "conflict":
+          return "Another file already uses this name, and the app won't delete it. Remove it yourself, then install.";
+        case "dev":
+          return "Development build — a rebuild would leave a dead command on your PATH.";
+        case "blocked":
+          return "No writable location on PATH (~/.local/bin, /usr/local/bin).";
+        case "installable":
+          return cliStatus?.needsElevation
+            ? "Run tunnel-pilot from any shell. This location needs administrator rights, so you'll be asked for your password."
+            : "Run tunnel-pilot from any shell.";
+        default:
+          return null;
+      }
+    })(),
+  );
+
+  // Trailing "…" is the macOS convention for "this opens a prompt" — here, the
+  // admin password dialog. The row subtitle spells it out in words as well.
+  const cliActionLabel = $derived(
+    (cliState === "stale" ? "Repair" : "Install") +
+      (cliStatus?.needsElevation ? "…" : ""),
+  );
+
+  async function refreshCliStatus(): Promise<void> {
+    try {
+      cliStatus = await cliShimStatus();
+    } catch {
+      // Nothing honest to render if we can't even read PATH — stay hidden.
+      cliStatus = null;
+    }
+  }
+
+  onMount(() => {
+    void refreshCliStatus();
+  });
+
+  async function runCliAction(
+    action: () => Promise<CliShimStatus>,
+    okMessage: string,
+    failPrefix: string,
+  ): Promise<void> {
+    cliBusy = true;
+    try {
+      cliStatus = await action();
+      pushToast(okMessage, { tone: "success" });
+    } catch (err) {
+      // Same shape-safe coercion the updater uses: an AppError crosses IPC as
+      // `{ kind, message }` and must never render as "[object Object]".
+      const message = toUpdateErrorMessage(err);
+      if (message.toLowerCase().includes("authorization was cancelled")) {
+        // A dismissed password prompt is a decision, not a failure.
+        pushToast("Left unchanged", { tone: "info" });
+      } else {
+        pushToast(message ? `${failPrefix}: ${message}` : failPrefix, {
+          tone: "error",
+        });
+      }
+      // Never keep a guess after a failure — ask the backend what is true now.
+      await refreshCliStatus();
+    } finally {
+      cliBusy = false;
+    }
+  }
+
+  const installCli = (): Promise<void> =>
+    runCliAction(
+      () => installCliShim(),
+      "tunnel-pilot is on your PATH",
+      "Couldn't install tunnel-pilot",
+    );
+
+  const removeCli = (): Promise<void> =>
+    runCliAction(
+      () => uninstallCliShim(),
+      "tunnel-pilot removed from your PATH",
+      "Couldn't remove tunnel-pilot",
+    );
+
+  async function copyCliExample(): Promise<void> {
+    try {
+      await writeText(CLI_EXAMPLE);
+      pushToast("Command copied", { tone: "success" });
+    } catch (err) {
+      pushToast(`Copy failed: ${String(err)}`, { tone: "error" });
     }
   }
 
@@ -450,6 +592,93 @@
           </div>
         </section>
 
+        <!-- COMMAND LINE (CLI shim on PATH) -->
+        {#if cliState}
+          <section class="group">
+            <h2 class="overline">Command line</h2>
+            <div class="rows">
+              <div class="setting">
+                <div class="s-text">
+                  <span class="s-label">Terminal command</span>
+                  {#if cliSub}
+                    <span class="s-sub">{cliSub}</span>
+                  {/if}
+                  {#if cliPath}
+                    <span class="s-path mono">
+                      {#if cliState === "healthy"}
+                        <span class="cue ok"
+                          ><Icon name="check" size={12} /></span
+                        >
+                        <span class="sr-only">Installed at</span>
+                      {:else if cliState === "stale" || cliState === "conflict"}
+                        <span class="cue warn">
+                          <Icon name="alert-triangle" size={12} />
+                        </span>
+                      {/if}
+                      {cliPath}
+                    </span>
+                  {/if}
+                  {#if cliState === "healthy"}
+                    <span class="cli-example">
+                      <code class="cmd mono">{CLI_EXAMPLE}</code>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        iconOnly="copy"
+                        ariaLabel="Copy example command"
+                        onclick={() => void copyCliExample()}
+                      />
+                    </span>
+                  {/if}
+                </div>
+                {#if cliState === "healthy"}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    loading={cliBusy}
+                    onclick={() => void removeCli()}
+                  >
+                    Remove
+                  </Button>
+                {:else if cliState === "stale" || cliState === "installable"}
+                  <Button
+                    size="sm"
+                    loading={cliBusy}
+                    title={cliStatus?.needsElevation
+                      ? CLI_ELEVATION_HINT
+                      : undefined}
+                    onclick={() => void installCli()}
+                  >
+                    {cliActionLabel}
+                  </Button>
+                {:else if cliState === "dev"}
+                  <Button
+                    size="sm"
+                    disabled
+                    title="Development builds are never put on PATH"
+                  >
+                    Install
+                  </Button>
+                {/if}
+              </div>
+              <div class="setting">
+                <div class="s-text">
+                  <span class="s-label">Install automatically</span>
+                  <span class="s-sub">
+                    On launch, but only when no administrator password is
+                    needed.
+                  </span>
+                </div>
+                <Toggle
+                  checked={s.autoInstallCli}
+                  ariaLabel="Install the terminal command automatically"
+                  onchange={(v) => void patch({ autoInstallCli: v })}
+                />
+              </div>
+            </div>
+          </section>
+        {/if}
+
         <!-- APPEARANCE -->
         <section class="group">
           <h2 class="overline">Appearance</h2>
@@ -670,6 +899,60 @@
     display: flex;
     align-items: center;
     gap: var(--sp-3);
+  }
+
+  /* Command line: the shim path and the example command are technical values
+     — mono per §16, and break-any so a long $HOME can't push the row wide. */
+  .s-path {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--fs-mono-sm);
+    line-height: var(--lh-mono-sm);
+    color: var(--text-2);
+    word-break: break-all;
+  }
+  .cue {
+    display: inline-flex;
+    flex: none;
+  }
+  /* The check/warning glyph is decorative; the state still has to reach a
+     screen reader as words. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .cue.ok {
+    color: var(--status-connected-fg);
+  }
+  .cue.warn {
+    color: var(--status-pending-fg);
+  }
+  .cli-example {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-top: var(--sp-2);
+    min-width: 0;
+  }
+  .cmd {
+    min-width: 0;
+    padding: var(--sp-1) var(--sp-3);
+    border-radius: var(--radius-xs);
+    border: var(--border-w) solid var(--border);
+    background: var(--surface-2);
+    font-size: var(--fs-mono-sm);
+    line-height: var(--lh-mono-sm);
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow-x: auto;
   }
 
   .clickable {
