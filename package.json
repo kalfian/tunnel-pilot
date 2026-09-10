@@ -1,6 +1,6 @@
 {
   "name": "tunnel-pilot",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Cross-platform SSH local port forwarding manager (Tauri v2 + Svelte)",
   "type": "module",
   "private": true,

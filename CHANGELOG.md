@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-09-10
+
+### Added
+- **Terminal / CLI control (macOS, Linux)** — Drive the running app from a shell or an LLM agent: `tunnel-pilot list | status | connect | disconnect | connect-all | disconnect-all | version`, all with `--json`. Talks to the app over a local Unix socket (`<appConfigDir>/cli/cli.sock`, 0700 dir / 0600 socket). Symlink the bundled binary onto your PATH: `sudo ln -sf "/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" /usr/local/bin/tunnel-pilot`.
+- **Agent-friendly exit codes** — 0 ok · 2 usage · 3 app not running · 4 target not found/ambiguous · 5 connect ended in error · 6 timeout. `connect` waits for a terminal status (default 30s, `--timeout`, `--no-wait`) and is idempotent on an already-connected tunnel; `--force` re-dials.
+
+### Security
+- No secret ever crosses the control socket or appears in CLI output; forwards expose only a `hasStoredPassword` flag and there is no password command over the socket.
+
 ## [1.4.2] - 2026-06-22
 
 ### Fixed
