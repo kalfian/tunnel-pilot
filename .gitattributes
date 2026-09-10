@@ -1,0 +1,26 @@
+# Normalize line endings so a Windows checkout matches Linux/macOS.
+#
+# Without this, the Windows CI runner checks out CRLF while prettier's default
+# `endOfLine: "lf"` expects LF, so `pnpm lint` flagged every text file in the
+# repo (78 of them) on windows-latest while passing on the other two runners.
+# Everything is stored LF in git; `text=auto` keeps git's binary detection, so
+# icons, images and bundles are left alone.
+* text=auto eol=lf
+
+# Belt and braces for the files where a CRLF would actually break something.
+*.sh   text eol=lf
+*.rs   text eol=lf
+*.ts   text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.svelte text eol=lf
+*.css  text eol=lf
+*.yml  text eol=lf
+*.toml text eol=lf
+
+# Explicitly binary — never touch these.
+*.png  binary
+*.ico  binary
+*.icns binary
+*.dmg  binary
+*.tar.gz binary
