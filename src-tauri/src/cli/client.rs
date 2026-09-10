@@ -17,6 +17,7 @@ use crate::cli::args::{self, Command, Invocation};
 use crate::cli::protocol::{
     status_label, BulkResult, CliCommand, CliData, CliRequest, CliResponse, ForwardView,
 };
+use crate::cli::shim::{self, CliShimStatus, ShimState};
 use crate::cli::SOCKET_ENV;
 use crate::error::AppError;
 use crate::state::models::{ForwardStatus, TunnelStats};
@@ -88,6 +89,14 @@ pub fn run(args: &[String]) -> i32 {
         return EXIT_OK;
     }
 
+    // `install-cli`/`uninstall-cli` are LOCAL: they operate on the filesystem,
+    // so they must work with the app closed (no socket, never exit 3).
+    match &invocation.command {
+        Command::InstallCli { target } => return run_shim(&invocation, shim::install(*target)),
+        Command::UninstallCli => return run_shim(&invocation, shim::uninstall()),
+        _ => {}
+    }
+
     let Some(path) = socket_path(&invocation) else {
         eprintln!("error: could not resolve the control socket path; set {SOCKET_ENV}");
         return EXIT_INTERNAL;
@@ -141,7 +150,11 @@ fn socket_path(invocation: &Invocation) -> Option<PathBuf> {
 
 fn build_request(command: &Command) -> CliRequest {
     match command {
-        Command::Help => CliRequest::new(CliCommand::Version), // unreachable (handled above)
+        // Handled before we ever build a request (help prints, the shim
+        // subcommands run locally) — no socket round-trip exists for them.
+        Command::Help | Command::InstallCli { .. } | Command::UninstallCli => {
+            CliRequest::new(CliCommand::Version)
+        }
         Command::List => CliRequest::new(CliCommand::List),
         Command::Version => CliRequest::new(CliCommand::Version),
         Command::Status { target } => CliRequest {
@@ -533,6 +546,111 @@ pub fn exit_code_for_error(error: &AppError) -> i32 {
 /// The message half of an `AppError` (its `Display` already prefixes a kind).
 fn error_message(error: &AppError) -> String {
     error.to_string()
+}
+
+/// Print the outcome of a local shim command and pick its exit code.
+///
+/// No new exit code: a filesystem/permission failure is an I/O error (1) and a
+/// refusal — dev build, or something that is not our symlink in the way — is a
+/// usage error (2). Exit 3 can never happen here; the app need not be running.
+fn run_shim(invocation: &Invocation, result: Result<CliShimStatus, AppError>) -> i32 {
+    match result {
+        Ok(status) => {
+            if invocation.json {
+                match serde_json::to_string(&status) {
+                    Ok(json) => println!("{json}"),
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        return EXIT_INTERNAL;
+                    }
+                }
+            } else {
+                print!("{}", render_shim_status(&status));
+            }
+            EXIT_OK
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            exit_code_for_shim_error(&e)
+        }
+    }
+}
+
+/// A refusal we decided on (`InvalidInput`) is a usage error; anything else is
+/// an I/O/internal failure.
+pub fn exit_code_for_shim_error(error: &AppError) -> i32 {
+    match error {
+        AppError::InvalidInput(_) => EXIT_USAGE,
+        _ => EXIT_INTERNAL,
+    }
+}
+
+/// Field-per-line, same shape as `status` — an agent can grep it and a human
+/// can read where the shim went.
+pub fn render_shim_status(status: &CliShimStatus) -> String {
+    let mut out = String::new();
+    let mut field = |label: &str, value: String| {
+        out.push_str(&format!("{}{}\n", pad(label, 12), value));
+    };
+    if !status.supported {
+        field("supported", "no (macOS and Linux only)".into());
+        return out;
+    }
+    field(
+        "installed",
+        match (status.installed, status.links_to_current) {
+            (false, _) => "no".into(),
+            (true, true) => "yes".into(),
+            (true, false) => "yes (needs attention)".into(),
+        },
+    );
+    if let Some(path) = &status.path {
+        field("path", path.clone());
+    }
+    if let Some(linked) = &status.linked_path {
+        field("links to", linked.clone());
+    }
+    if let Some(exe) = &status.current_exe {
+        field("this app", exe.clone());
+    }
+    if status.conflict {
+        field(
+            "warning",
+            "a real file is in the way; remove it yourself".into(),
+        );
+    } else if status.linked_elsewhere {
+        field(
+            "warning",
+            "the shim points at another binary; re-run install-cli".into(),
+        );
+    }
+    for entry in &status.entries {
+        if Some(entry.path.as_str()) == status.path.as_deref() {
+            continue; // already reported above
+        }
+        if entry.state != ShimState::Absent {
+            field("also at", format!("{} ({:?})", entry.path, entry.state));
+        }
+    }
+    if !status.installed {
+        if let Some(install_path) = &status.install_path {
+            field(
+                "would use",
+                format!(
+                    "{install_path}{}",
+                    if status.needs_elevation {
+                        " (needs administrator rights)"
+                    } else {
+                        ""
+                    }
+                ),
+            );
+        }
+    }
+    if status.dev_build {
+        field("note", "development build — install is refused".into());
+    }
+    out
 }
 
 fn pad(value: &str, width: usize) -> String {
@@ -1054,5 +1172,83 @@ mod tests {
         assert_eq!(format_bytes(512), "512 B");
         assert_eq!(format_bytes(2048), "2.0 KB");
         assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MB");
+    }
+
+    fn shim_status_fixture() -> CliShimStatus {
+        CliShimStatus {
+            supported: true,
+            installed: true,
+            path: Some("/Users/me/.local/bin/tunnel-pilot".into()),
+            target: Some(crate::cli::shim::ShimTarget::UserLocal),
+            links_to_current: true,
+            linked_path: Some("/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot".into()),
+            linked_elsewhere: false,
+            conflict: false,
+            install_target: Some(crate::cli::shim::ShimTarget::UserLocal),
+            install_path: Some("/Users/me/.local/bin/tunnel-pilot".into()),
+            needs_elevation: false,
+            current_exe: Some("/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot".into()),
+            dev_build: false,
+            entries: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn shim_rendering_states_the_path_and_the_problem() {
+        let out = render_shim_status(&shim_status_fixture());
+        assert!(out.contains("installed   yes"), "{out}");
+        assert!(out.contains("/Users/me/.local/bin/tunnel-pilot"), "{out}");
+        assert!(
+            !out.contains("warning"),
+            "a healthy shim has no warning: {out}"
+        );
+
+        let stale = CliShimStatus {
+            links_to_current: false,
+            linked_elsewhere: true,
+            ..shim_status_fixture()
+        };
+        let out = render_shim_status(&stale);
+        assert!(out.contains("needs attention"), "{out}");
+        assert!(out.contains("re-run install-cli"), "{out}");
+
+        let absent = CliShimStatus {
+            installed: false,
+            links_to_current: false,
+            path: None,
+            linked_path: None,
+            target: None,
+            needs_elevation: true,
+            install_path: Some("/usr/local/bin/tunnel-pilot".into()),
+            ..shim_status_fixture()
+        };
+        let out = render_shim_status(&absent);
+        assert!(out.contains("installed   no"), "{out}");
+        assert!(out.contains("administrator rights"), "{out}");
+
+        let unsupported = render_shim_status(&CliShimStatus::unsupported());
+        assert!(
+            unsupported.contains("macOS and Linux only"),
+            "{unsupported}"
+        );
+    }
+
+    /// The local shim commands reuse the documented codes: a refusal is a usage
+    /// error, everything else is an I/O failure. Exit 3 is impossible — they do
+    /// not need the app to be running.
+    #[test]
+    fn shim_errors_map_onto_the_existing_exit_codes() {
+        assert_eq!(
+            exit_code_for_shim_error(&AppError::InvalidInput("dev build".into())),
+            EXIT_USAGE
+        );
+        assert_eq!(
+            exit_code_for_shim_error(&AppError::Io("permission denied".into())),
+            EXIT_INTERNAL
+        );
+        assert_eq!(
+            exit_code_for_shim_error(&AppError::Internal("boom".into())),
+            EXIT_INTERNAL
+        );
     }
 }

@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 
 use crate::cli::protocol::{MAX_TIMEOUT_MS, MIN_TIMEOUT_MS};
+use crate::cli::shim::ShimTarget;
 
 /// Lower/upper bounds for `--timeout`, in seconds (mirrors the server clamp).
 pub const MIN_TIMEOUT_SECS: u64 = MIN_TIMEOUT_MS / 1_000;
@@ -53,6 +54,15 @@ pub enum Command {
         wait: bool,
     },
     DisconnectAll,
+    /// Symlink this binary onto `$PATH`. Runs entirely locally — no socket, so
+    /// it works whether or not the app is running.
+    InstallCli {
+        /// `--user` / `--system`; `None` lets the shim layer pick the first
+        /// writable directory.
+        target: Option<ShimTarget>,
+    },
+    /// Remove the PATH shim. Local, like `install-cli`.
+    UninstallCli,
     Version,
 }
 
@@ -88,6 +98,8 @@ pub fn is_cli_subcommand(word: &str) -> bool {
             | "disconnect"
             | "connect-all"
             | "disconnect-all"
+            | "install-cli"
+            | "uninstall-cli"
             | "version"
             | "help"
             | "--help"
@@ -109,6 +121,8 @@ COMMANDS:
     disconnect <id|name>       Disconnect a forward (waits for teardown)
     connect-all                Connect every forward (tray 'Start All')
     disconnect-all             Disconnect every live forward (tray 'Stop All')
+    install-cli                Symlink this binary onto PATH as 'tunnel-pilot'
+    uninstall-cli              Remove that symlink
     version                    App version + protocol version
     help                       Show this help
 
@@ -118,6 +132,8 @@ OPTIONS:
     --timeout <secs>           Wait budget for connect/connect-all (1-300, default 30)
     --no-wait                  Return as soon as the connect is dispatched
     --force                    connect only: bounce an already-connected tunnel
+    --user | --system          install-cli only: force ~/.local/bin or /usr/local/bin
+                               (/usr/local/bin usually prompts for admin rights)
 
 TARGETS:
     A target is a forward id (exact) or name (case-insensitive, exact).
@@ -128,9 +144,13 @@ EXIT CODES:
     4 target not found or ambiguous   5 operation ended in error   6 timed out
     A protocol-version mismatch (stale binary vs running app) also exits 4, with
     an 'unsupported protocol version' message.
+    install-cli / uninstall-cli run locally (no socket, no exit 3): 0 ok,
+    1 filesystem/permission failure, 2 refused (dev build, or something that is
+    not our symlink is in the way).
 
 ENVIRONMENT:
     TUNNEL_PILOT_SOCKET        Socket path override (both app and CLI)
+    TUNNEL_PILOT_ALLOW_DEV_SHIM=1  Let install-cli link a development build
 ";
 
 /// Parse the argv tail (everything after the program name).
@@ -144,6 +164,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
     let mut timeout_secs: Option<u64> = None;
     let mut wait = true;
     let mut force = false;
+    let mut user = false;
+    let mut system = false;
     let mut positionals: Vec<&str> = Vec::new();
 
     let mut rest = args[1..].iter().map(|s| s.as_str()).peekable();
@@ -152,6 +174,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             "--json" => json = true,
             "--no-wait" => wait = false,
             "--force" => force = true,
+            "--user" => user = true,
+            "--system" => system = true,
             "--help" | "-h" => {
                 return Ok(Invocation {
                     command: Command::Help,
@@ -179,6 +203,16 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
         return Err(UsageError::new(format!(
             "--force only applies to 'connect', not '{subcommand}'"
         )));
+    }
+    if (user || system) && subcommand != "install-cli" {
+        return Err(UsageError::new(format!(
+            "--user/--system only apply to 'install-cli', not '{subcommand}'"
+        )));
+    }
+    if user && system {
+        return Err(UsageError::new(
+            "--user and --system are mutually exclusive",
+        ));
     }
     let command = match subcommand.as_str() {
         "help" | "--help" | "-h" => Command::Help,
@@ -209,6 +243,19 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
         "disconnect-all" => {
             no_positionals("disconnect-all", &positionals)?;
             Command::DisconnectAll
+        }
+        "install-cli" => {
+            no_positionals("install-cli", &positionals)?;
+            let target = match (user, system) {
+                (true, _) => Some(ShimTarget::UserLocal),
+                (_, true) => Some(ShimTarget::UsrLocal),
+                _ => None,
+            };
+            Command::InstallCli { target }
+        }
+        "uninstall-cli" => {
+            no_positionals("uninstall-cli", &positionals)?;
+            Command::UninstallCli
         }
         other => {
             return Err(UsageError::new(format!("unknown command '{other}'")));
@@ -293,6 +340,8 @@ mod tests {
             "disconnect",
             "connect-all",
             "disconnect-all",
+            "install-cli",
+            "uninstall-cli",
             "version",
             "help",
             "--help",
@@ -468,6 +517,64 @@ mod tests {
         assert!(parse_str(&["version", "extra"]).is_err());
     }
 
+    /// The shim subcommands are local: they must parse without a target and
+    /// pick their directory through the two exclusive flags.
+    #[test]
+    fn shim_subcommands_parse_with_an_optional_target() {
+        assert_eq!(
+            parse_str(&["install-cli"]).expect("parse").command,
+            Command::InstallCli { target: None }
+        );
+        assert_eq!(
+            parse_str(&["install-cli", "--user"])
+                .expect("parse")
+                .command,
+            Command::InstallCli {
+                target: Some(ShimTarget::UserLocal)
+            }
+        );
+        assert_eq!(
+            parse_str(&["install-cli", "--system"])
+                .expect("parse")
+                .command,
+            Command::InstallCli {
+                target: Some(ShimTarget::UsrLocal)
+            }
+        );
+        assert_eq!(
+            parse_str(&["uninstall-cli"]).expect("parse").command,
+            Command::UninstallCli
+        );
+        assert!(parse_str(&["install-cli", "--json"]).expect("parse").json);
+    }
+
+    #[test]
+    fn shim_flags_are_exclusive_and_install_cli_only() {
+        let err =
+            parse_str(&["install-cli", "--user", "--system"]).expect_err("mutually exclusive");
+        assert!(
+            err.message.contains("mutually exclusive"),
+            "{}",
+            err.message
+        );
+        for args in [
+            vec!["list", "--user"],
+            vec!["uninstall-cli", "--system"],
+            vec!["connect", "x", "--user"],
+        ] {
+            let err = parse_str(&args).expect_err("--user/--system are install-cli only");
+            assert!(err.message.contains("install-cli"), "{}", err.message);
+        }
+        assert!(
+            parse_str(&["install-cli", "extra"]).is_err(),
+            "install-cli takes no positionals"
+        );
+        assert!(
+            parse_str(&["uninstall-cli", "extra"]).is_err(),
+            "uninstall-cli takes no positionals"
+        );
+    }
+
     #[test]
     fn help_forms_all_resolve_to_help() {
         for args in [
@@ -498,6 +605,8 @@ mod tests {
             "disconnect",
             "connect-all",
             "disconnect-all",
+            "install-cli",
+            "uninstall-cli",
             "version",
             "--json",
             "--socket",
