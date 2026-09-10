@@ -7,13 +7,16 @@
 //!
 //! `anyhow` is used only at binary edges (setup/main), never here.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The single error type surfaced across IPC.
 ///
 /// Serialized as an internally-tagged object, e.g. a `Ssh` variant becomes
-/// `{ "kind": "ssh", "message": "connection refused" }`.
-#[derive(Debug, Clone, thiserror::Error, Serialize)]
+/// `{ "kind": "ssh", "message": "connection refused" }`. `Deserialize` is
+/// derived too so the CLI client can read an error back off the control socket
+/// and map its `kind` to an exit code (spec 03 §20) — the wire vocabulary stays
+/// single-sourced here rather than mirrored in a second struct.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "message", rename_all = "camelCase")]
 pub enum AppError {
     /// SSH transport / protocol failure (russh).

@@ -13,6 +13,7 @@
 // this once the engine/commands wire the modules up (M1/M4).
 #![allow(dead_code)]
 
+pub mod cli;
 pub mod commands;
 pub mod credentials;
 pub mod error;
