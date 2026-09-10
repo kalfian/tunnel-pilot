@@ -588,8 +588,10 @@ device steps; the executable prep (bundling config + docs + checklist) is done o
 - [x] Docs: 02 §6.8/§9, 03 §20 (PATH shim + acceptance), README, CLAUDE.md.
 - [ ] **Pending a desktop session**: verify first-run auto-install from the packaged
       `/Applications` build, and the elevated `/usr/local/bin` path (password prompt).
-- Settings UI for the new commands is owned by the UI agent (this milestone is backend +
-  contract only).
+- [x] Settings "Command line" group (05 §6): every `CliShimStatus` state — healthy (path +
+      example + copy), installable, elevation-warned, stale→Repair, file conflict (no
+      destructive button), dev build (disabled + reason), no writable location — plus the
+      `autoInstallCli` toggle. Hidden entirely when `supported` is false. 10 component tests.
 
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).

@@ -345,6 +345,13 @@ UPDATES
   Automatically check for updates                            ◯──●
       └ Last checked 2h ago · [Check now]
 
+COMMAND LINE
+  Terminal command                                        [ Remove ]
+      ✓ /Users/dev/.local/bin/tunnel-pilot     ← mono-sm, --text-2
+      [ tunnel-pilot list ] ⧉                  ← example + copy
+  Install automatically                                      ◯──●
+      └ On launch, but only when no administrator password is needed.
+
 APPEARANCE
   Theme      [ ☾ System ][ ☀ Light ][ ☾ Dark ]   ← segmented, 3 icons
 
@@ -364,6 +371,29 @@ Tunnel Pilot v2.0.0 · check for updates
   Lucide.
 - Auto-reconnect / auto-update sub-options **animate open** (`--dur-fast` height +
   fade) when their parent toggle is on; collapsed and non-focusable when off.
+- **Command line** (macOS/Linux only — the group is *not rendered at all* when
+  `cliShimStatus().supported` is false, and stays hidden until the on-mount status
+  resolves, so nothing flashes on Windows). One row, driven entirely by
+  `CliShimStatus`: it re-renders from the status the backend returns, never from an
+  optimistic guess.
+
+| State | Row reads | Action |
+|---|---|---|
+| healthy (`linksToCurrent`) | ✓ + shim path (`mono-sm`) + a `tunnel-pilot list` chip with copy | `Remove` (ghost — this deletes no data) |
+| installable | "Run tunnel-pilot from any shell." + install path | `Install` |
+| installable + `needsElevation` | …plus "This location needs administrator rights, so you'll be asked for your password." | `Install…` (macOS ellipsis = opens a prompt; `title` repeats it) |
+| `linkedElsewhere` | ⚠ "This points at a different copy of the app." | `Repair` / `Repair…` |
+| `conflict` (`notASymlink`) | ⚠ "Another file already uses this name, and the app won't delete it. Remove it yourself, then install." | none — never offer a destructive fix |
+| `devBuild` | "Development build — a rebuild would leave a dead command on your PATH." | `Install` disabled + `title` reason |
+| no writable candidate | "No writable location on PATH (~/.local/bin, /usr/local/bin)." | none |
+
+  Action buttons carry `loading` while the call is in flight; results land in the
+  toast queue, and a cancelled admin prompt ("administrator authorization was
+  cancelled") is an **info** toast, not an error. The ✓ / ⚠ glyphs are decorative
+  (`--status-connected-fg` / `--status-pending-fg`) — the healthy row carries
+  "Installed at" as `sr-only` text so the state reaches a screen reader as words.
+  Paths and the example command use `--font-mono` per §16. The auto-install toggle
+  writes `AppSettings.autoInstallCli`; its subtitle states the silent-only rule.
 - **Backup rows are full-width clickable** (a v1.4.2 fix — keep them clickable, not
   just the trailing button). Export → native save dialog; Import ← native open
   dialog, then a confirm dialog summarizing "N tunnels will be imported / M will be
