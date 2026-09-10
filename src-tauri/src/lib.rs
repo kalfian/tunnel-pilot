@@ -122,6 +122,10 @@ pub fn run() {
             crate::commands::app::show_window,
             crate::commands::app::hide_window,
             crate::commands::app::quit_app,
+            // CLI on PATH (§6.8)
+            crate::commands::cli_shim::cli_shim_status,
+            crate::commands::cli_shim::install_cli_shim,
+            crate::commands::cli_shim::uninstall_cli_shim,
         ])
         .setup(|app| {
             // The log ring buffer must exist BEFORE tracing init so the layer

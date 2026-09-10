@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppSettings,
   AppSnapshot,
+  CliShimStatus,
   ForwardConfig,
   ForwardInput,
   ForwardRuntime,
@@ -20,6 +21,7 @@ import type {
   ImportMode,
   ImportResult,
   LogEntry,
+  ShimTarget,
   TunnelGroup,
   UpdateStatus,
 } from "./types";
@@ -152,3 +154,19 @@ export const hideWindow = (): Promise<void> => invoke("hide_window");
 export const hideTrayPopover = (): Promise<void> => invoke("hide_tray_popover");
 
 export const quitApp = (): Promise<void> => invoke("quit_app");
+
+// --- CLI on PATH (spec 02 §6.8) ---
+
+export const cliShimStatus = (): Promise<CliShimStatus> =>
+  invoke("cli_shim_status");
+
+/**
+ * Install the `tunnel-pilot` shim on PATH. `target` forces a directory; omit it
+ * to let the backend pick the first writable one (`~/.local/bin`, then
+ * `/usr/local/bin`, which prompts for administrator rights).
+ */
+export const installCliShim = (target?: ShimTarget): Promise<CliShimStatus> =>
+  invoke("install_cli_shim", { target: target ?? null });
+
+export const uninstallCliShim = (): Promise<CliShimStatus> =>
+  invoke("uninstall_cli_shim");

@@ -139,3 +139,53 @@ export interface ImportResult {
   skipped: number;
   replaced: boolean;
 }
+
+// --- CLI on PATH (spec 02 §6.8 / 03 §20) ---
+
+/** Where the `tunnel-pilot` shim can live. Mirrors Rust `ShimTarget`. */
+export type ShimTarget = "userLocal" | "usrLocal";
+
+/** What occupies a candidate shim path. Mirrors Rust `ShimState`. */
+export type ShimState =
+  "absent" | "linkedToCurrent" | "linkedElsewhere" | "notASymlink";
+
+/** One candidate directory's inspection result. */
+export interface ShimEntry {
+  target: ShimTarget;
+  /** Absolute path of the shim (`<dir>/tunnel-pilot`). */
+  path: string;
+  state: ShimState;
+  /** Where the symlink points; `null` unless `state` is a link. */
+  linkedPath: string | null;
+  /** The directory exists (or can be created) and is writable without elevation. */
+  writable: boolean;
+  dirExists: boolean;
+}
+
+/** Result of `cli_shim_status` / `install_cli_shim` / `uninstall_cli_shim`. */
+export interface CliShimStatus {
+  /** False on platforms without a symlink shim story (Windows). */
+  supported: boolean;
+  /** A shim exists at one of the candidate paths. */
+  installed: boolean;
+  /** Path of the reported shim (first non-absent candidate). */
+  path: string | null;
+  target: ShimTarget | null;
+  /** The reported shim resolves to the running app binary. */
+  linksToCurrent: boolean;
+  linkedPath: string | null;
+  /** The reported shim points somewhere else — stale. */
+  linkedElsewhere: boolean;
+  /** A real file occupies the reported path; install/uninstall refuse it. */
+  conflict: boolean;
+  /** Where `installCliShim(undefined)` would install. */
+  installTarget: ShimTarget | null;
+  installPath: string | null;
+  /** Installing at `installTarget` needs an administrator prompt. */
+  needsElevation: boolean;
+  currentExe: string | null;
+  /** The running binary is a dev build under `target/` — install is refused. */
+  devBuild: boolean;
+  /** Every candidate, in preference order. */
+  entries: ShimEntry[];
+}

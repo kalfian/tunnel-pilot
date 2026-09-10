@@ -9,6 +9,7 @@
 
 pub mod app;
 pub mod backup;
+pub mod cli_shim;
 pub mod forwards;
 pub mod groups;
 pub mod logs;
