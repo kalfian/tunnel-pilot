@@ -160,9 +160,7 @@ describe("SettingsView — update banner (spec §8)", () => {
     render(SettingsView);
     expect(screen.getByText(/version 2\.1\.0 available/i)).toBeInTheDocument();
     // Notes are behind a disclosure, not dumped inline.
-    expect(
-      screen.getByText("Fixes and improvements"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Fixes and improvements")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /install & restart/i }),
     ).toBeInTheDocument();

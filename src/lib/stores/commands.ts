@@ -12,8 +12,7 @@ import type { ForwardConfig } from "../types";
 import { activeView } from "../ui/view";
 
 export type FormRequest =
-  | { mode: "add" }
-  | { mode: "edit"; forward: ForwardConfig };
+  { mode: "add" } | { mode: "edit"; forward: ForwardConfig };
 
 /** Pending request to open the ForwardForm (add or edit). Null = none. */
 export const pendingForm = writable<FormRequest | null>(null);

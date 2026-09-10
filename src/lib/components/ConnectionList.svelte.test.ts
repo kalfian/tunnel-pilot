@@ -33,7 +33,12 @@ import {
   assignForwardGroup,
 } from "../ipc";
 
-function mk(id: string, name: string, groupId: string | null, tags: string[] = []): ForwardConfig {
+function mk(
+  id: string,
+  name: string,
+  groupId: string | null,
+  tags: string[] = [],
+): ForwardConfig {
   return {
     id,
     name,
@@ -179,7 +184,9 @@ describe("ConnectionList — group management (Feature A)", () => {
     await fireEvent.click(
       screen.getByRole("button", { name: /production group actions/i }),
     );
-    await fireEvent.click(screen.getByRole("menuitem", { name: /edit group/i }));
+    await fireEvent.click(
+      screen.getByRole("menuitem", { name: /edit group/i }),
+    );
     expect(onEditGroup).toHaveBeenCalledWith(GROUPS[0]);
   });
 

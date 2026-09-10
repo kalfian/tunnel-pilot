@@ -344,7 +344,9 @@
             {/each}
           </datalist>
         </div>
-        <p class="hint">Press Enter or comma to add. Free-form (e.g. db, api).</p>
+        <p class="hint">
+          Press Enter or comma to add. Free-form (e.g. db, api).
+        </p>
       </div>
 
       <p class="overline group-head">SSH server</p>

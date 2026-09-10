@@ -125,7 +125,10 @@
   $effect(() => {
     const req = $pendingForm;
     if (req) {
-      form = req.mode === "add" ? { mode: "add" } : { mode: "edit", forward: req.forward };
+      form =
+        req.mode === "add"
+          ? { mode: "add" }
+          : { mode: "edit", forward: req.forward };
       pendingForm.set(null);
     }
   });
@@ -320,72 +323,72 @@
 
   <div class="scroll">
     <div class="col">
-    {#if !hydrated && showSkeleton}
-      <div class="skeletons">
-        <Skeleton variant="card" />
-        <Skeleton variant="card" />
-        <Skeleton variant="card" />
-      </div>
-    {:else if total === 0}
-      <EmptyState
-        icon="plug-zap"
-        title="No tunnels yet"
-        body="Create your first SSH port forward to start tunneling traffic through a bastion."
-      >
-        {#snippet action()}
-          <Button
-            variant="primary"
-            iconLeft="plus"
-            onclick={() => (form = { mode: "add" })}
-          >
-            Add your first tunnel
-          </Button>
-          <button
-            type="button"
-            class="link"
-            onclick={() => activeView.set("settings")}
-          >
-            Import from backup
-          </button>
-        {/snippet}
-      </EmptyState>
-    {:else if filterActive && visibleCount === 0}
-      <EmptyState
-        icon="search"
-        title="No matches"
-        body={$activeTag !== null && q === ""
-          ? `No tunnels tagged “${$activeTag}”.`
-          : `No tunnels match “${filter.trim()}”.`}
-      >
-        {#snippet action()}
-          <Button
-            onclick={() => {
-              filter = "";
-              activeTag.set(null);
-            }}
-          >
-            Clear filter
-          </Button>
-        {/snippet}
-      </EmptyState>
-    {:else}
-      <ConnectionList
-        forwards={$forwards}
-        groups={$groups}
-        statusById={$statusById}
-        statsById={$statsById}
-        lastErrorById={$lastErrorById}
-        {selectedId}
-        filterQuery={filter}
-        activeTag={$activeTag}
-        onSelect={(id) => (selectedId = id)}
-        onEdit={(f) => (form = { mode: "edit", forward: f })}
-        onDelete={(f) => (confirmTarget = f)}
-        onViewLog={() => activeView.set("activity")}
-        onEditGroup={(g) => (groupForm = { mode: "edit", group: g })}
-        onDeleteGroup={(g) => (groupDeleteTarget = g)}
-      />
-    {/if}
+      {#if !hydrated && showSkeleton}
+        <div class="skeletons">
+          <Skeleton variant="card" />
+          <Skeleton variant="card" />
+          <Skeleton variant="card" />
+        </div>
+      {:else if total === 0}
+        <EmptyState
+          icon="plug-zap"
+          title="No tunnels yet"
+          body="Create your first SSH port forward to start tunneling traffic through a bastion."
+        >
+          {#snippet action()}
+            <Button
+              variant="primary"
+              iconLeft="plus"
+              onclick={() => (form = { mode: "add" })}
+            >
+              Add your first tunnel
+            </Button>
+            <button
+              type="button"
+              class="link"
+              onclick={() => activeView.set("settings")}
+            >
+              Import from backup
+            </button>
+          {/snippet}
+        </EmptyState>
+      {:else if filterActive && visibleCount === 0}
+        <EmptyState
+          icon="search"
+          title="No matches"
+          body={$activeTag !== null && q === ""
+            ? `No tunnels tagged “${$activeTag}”.`
+            : `No tunnels match “${filter.trim()}”.`}
+        >
+          {#snippet action()}
+            <Button
+              onclick={() => {
+                filter = "";
+                activeTag.set(null);
+              }}
+            >
+              Clear filter
+            </Button>
+          {/snippet}
+        </EmptyState>
+      {:else}
+        <ConnectionList
+          forwards={$forwards}
+          groups={$groups}
+          statusById={$statusById}
+          statsById={$statsById}
+          lastErrorById={$lastErrorById}
+          {selectedId}
+          filterQuery={filter}
+          activeTag={$activeTag}
+          onSelect={(id) => (selectedId = id)}
+          onEdit={(f) => (form = { mode: "edit", forward: f })}
+          onDelete={(f) => (confirmTarget = f)}
+          onViewLog={() => activeView.set("activity")}
+          onEditGroup={(g) => (groupForm = { mode: "edit", group: g })}
+          onDeleteGroup={(g) => (groupDeleteTarget = g)}
+        />
+      {/if}
     </div>
   </div>
 </section>
@@ -418,13 +421,17 @@
 {/if}
 
 {#if groupDeleteTarget}
-  <Dialog title="Delete group?" size="sm" onClose={() => (groupDeleteTarget = null)}>
+  <Dialog
+    title="Delete group?"
+    size="sm"
+    onClose={() => (groupDeleteTarget = null)}
+  >
     <p class="dlg-body">
       <strong>{groupDeleteTarget.name}</strong> will be removed.
       {#if groupMemberCount > 0}
         Its {groupMemberCount}
-        {groupMemberCount === 1 ? "tunnel" : "tunnels"} will move to Ungrouped —
-        nothing is deleted.
+        {groupMemberCount === 1 ? "tunnel" : "tunnels"} will move to Ungrouped — nothing
+        is deleted.
       {:else}
         This group is empty.
       {/if}

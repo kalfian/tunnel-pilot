@@ -19,7 +19,11 @@
     closePalette,
     recordPaletteUse,
   } from "../stores/palette";
-  import { requestAddForm, requestEditForm, requestDelete } from "../stores/commands";
+  import {
+    requestAddForm,
+    requestEditForm,
+    requestDelete,
+  } from "../stores/commands";
   import { activeView } from "../ui/view";
   import { pushToast } from "../ui/toast";
   import {
@@ -67,7 +71,11 @@
     closePalette();
   }
 
-  async function toast<T>(p: Promise<T>, ok: string, fail: string): Promise<void> {
+  async function toast<T>(
+    p: Promise<T>,
+    ok: string,
+    fail: string,
+  ): Promise<void> {
     try {
       await p;
       pushToast(ok, { tone: "success" });
@@ -119,8 +127,16 @@
         forward: f,
         run: () =>
           on
-            ? void toast(disconnectForward(f.id), `Disconnecting ${f.name}`, "Disconnect failed")
-            : void toast(connectForward(f.id), `Connecting ${f.name}`, "Connect failed"),
+            ? void toast(
+                disconnectForward(f.id),
+                `Disconnecting ${f.name}`,
+                "Disconnect failed",
+              )
+            : void toast(
+                connectForward(f.id),
+                `Connecting ${f.name}`,
+                "Connect failed",
+              ),
         runSecondary: () => requestEditForm(f),
       };
     }),
@@ -142,7 +158,8 @@
       icon: "play",
       hint: "⌘⇧⏎",
       haystack: "start all connect every tunnel",
-      run: () => void toast(startAll(), "Starting all tunnels", "Start all failed"),
+      run: () =>
+        void toast(startAll(), "Starting all tunnels", "Start all failed"),
     },
     {
       id: "action:stop-all",
@@ -150,10 +167,13 @@
       icon: "power",
       hint: "⌘⇧⌫",
       haystack: "stop all disconnect every tunnel",
-      run: () => void toast(stopAll(), "Stopping all tunnels", "Stop all failed"),
+      run: () =>
+        void toast(stopAll(), "Stopping all tunnels", "Stop all failed"),
     },
     ...$groups.flatMap((g): PaletteItem[] => {
-      const ids = new Set($forwards.filter((f) => f.groupId === g.id).map((f) => f.id));
+      const ids = new Set(
+        $forwards.filter((f) => f.groupId === g.id).map((f) => f.id),
+      );
       if (ids.size === 0) return [];
       return [
         {
@@ -162,7 +182,11 @@
           icon: "play",
           haystack: `start group ${g.name}`,
           run: () =>
-            void toast(startGroup(g.id), `Starting ${g.name}`, "Start group failed"),
+            void toast(
+              startGroup(g.id),
+              `Starting ${g.name}`,
+              "Start group failed",
+            ),
         },
         {
           id: `action:stop-group:${g.id}`,
@@ -170,7 +194,11 @@
           icon: "power",
           haystack: `stop group ${g.name}`,
           run: () =>
-            void toast(stopGroup(g.id), `Stopping ${g.name}`, "Stop group failed"),
+            void toast(
+              stopGroup(g.id),
+              `Stopping ${g.name}`,
+              "Stop group failed",
+            ),
         },
       ];
     }),
@@ -214,11 +242,17 @@
         void checkUpdate()
           .then((s) =>
             pushToast(
-              s.available ? `Version ${s.version} available` : "You're on the latest version",
+              s.available
+                ? `Version ${s.version} available`
+                : "You're on the latest version",
               { tone: "info" },
             ),
           )
-          .catch(() => pushToast("Update checks arrive in a later build", { tone: "info" })),
+          .catch(() =>
+            pushToast("Update checks arrive in a later build", {
+              tone: "info",
+            }),
+          ),
     },
     {
       id: "action:about",
@@ -240,7 +274,12 @@
         title: "Disconnect",
         icon: "power",
         haystack: "disconnect",
-        run: () => void toast(disconnectForward(f.id), `Disconnecting ${f.name}`, "Disconnect failed"),
+        run: () =>
+          void toast(
+            disconnectForward(f.id),
+            `Disconnecting ${f.name}`,
+            "Disconnect failed",
+          ),
       });
     } else {
       items.push({
@@ -248,7 +287,12 @@
         title: "Connect",
         icon: "play",
         haystack: "connect",
-        run: () => void toast(connectForward(f.id), `Connecting ${f.name}`, "Connect failed"),
+        run: () =>
+          void toast(
+            connectForward(f.id),
+            `Connecting ${f.name}`,
+            "Connect failed",
+          ),
       });
     }
     if (status === "error") {
@@ -257,7 +301,8 @@
         title: "Retry",
         icon: "rotate-cw",
         haystack: "retry",
-        run: () => void toast(retryForward(f.id), `Retrying ${f.name}`, "Retry failed"),
+        run: () =>
+          void toast(retryForward(f.id), `Retrying ${f.name}`, "Retry failed"),
       });
     }
     items.push(
@@ -273,7 +318,12 @@
         title: "Duplicate",
         icon: "files",
         haystack: "duplicate",
-        run: () => void toast(duplicateForward(f.id), "Tunnel duplicated", "Duplicate failed"),
+        run: () =>
+          void toast(
+            duplicateForward(f.id),
+            "Tunnel duplicated",
+            "Duplicate failed",
+          ),
       },
       {
         id: "sub:copy",
@@ -306,14 +356,20 @@
   }
 
   const rankedTunnels = $derived(
-    applyRecents(fuzzyRank(q, tunnelItems, (i) => i.haystack).map((r) => r.item)),
+    applyRecents(
+      fuzzyRank(q, tunnelItems, (i) => i.haystack).map((r) => r.item),
+    ),
   );
   const rankedActions = $derived(
-    applyRecents(fuzzyRank(q, actionItems, (i) => i.haystack).map((r) => r.item)),
+    applyRecents(
+      fuzzyRank(q, actionItems, (i) => i.haystack).map((r) => r.item),
+    ),
   );
   const rankedSub = $derived(
     submenuFor
-      ? fuzzyRank(q, submenuItems(submenuFor), (i) => i.haystack).map((r) => r.item)
+      ? fuzzyRank(q, submenuItems(submenuFor), (i) => i.haystack).map(
+          (r) => r.item,
+        )
       : [],
   );
 
@@ -414,7 +470,8 @@
         break;
       case "ArrowUp":
         e.preventDefault();
-        activeIndex = flat.length === 0 ? 0 : (activeIndex - 1 + flat.length) % flat.length;
+        activeIndex =
+          flat.length === 0 ? 0 : (activeIndex - 1 + flat.length) % flat.length;
         break;
       case "Tab":
         // Palette navigation is arrow-driven; trap Tab so focus stays on the
@@ -461,7 +518,12 @@
     if (e.target === e.currentTarget) close();
   }}
 >
-  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div
+    class="palette"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Command palette"
+  >
     <div class="search">
       <Icon name="search" size={16} />
       <input
@@ -473,7 +535,9 @@
         aria-controls="palette-listbox"
         aria-activedescendant={flat.length > 0 ? activeId : undefined}
         aria-autocomplete="list"
-        placeholder={submenuFor ? `Actions for ${submenuFor.name}…` : "Search tunnels and actions…"}
+        placeholder={submenuFor
+          ? `Actions for ${submenuFor.name}…`
+          : "Search tunnels and actions…"}
         autocomplete="off"
         spellcheck="false"
         bind:value={$paletteQuery}
@@ -518,10 +582,14 @@
                 {/if}
               </span>
               {#if item.hint}
-                <span class="opt-hint" class:kbd={item.hint.length <= 4}>{item.hint}</span>
+                <span class="opt-hint" class:kbd={item.hint.length <= 4}
+                  >{item.hint}</span
+                >
               {/if}
               {#if item.forward && !submenuFor}
-                <span class="chev" aria-hidden="true"><Icon name="chevron-right" size={14} /></span>
+                <span class="chev" aria-hidden="true"
+                  ><Icon name="chevron-right" size={14} /></span
+                >
               {/if}
             </button>
           </li>

@@ -266,11 +266,7 @@
               {/if}
             </div>
             <div class="banner-actions">
-              <Button
-                variant="ghost"
-                size="sm"
-                onclick={() => void doSkip()}
-              >
+              <Button variant="ghost" size="sm" onclick={() => void doSkip()}>
                 Skip this version
               </Button>
               <Button
@@ -325,7 +321,11 @@
               >
                 View log
               </button>
-              <Button variant="primary" size="sm" onclick={() => void checkNow()}>
+              <Button
+                variant="primary"
+                size="sm"
+                onclick={() => void checkNow()}
+              >
                 Retry
               </Button>
             </div>

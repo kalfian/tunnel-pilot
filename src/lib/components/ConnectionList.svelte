@@ -62,7 +62,9 @@
 
   const hasGroups = $derived(groups.length > 0);
   const groupIds = $derived(new Set(groups.map((g) => g.id)));
-  const filterActive = $derived(filterQuery.trim() !== "" || activeTag !== null);
+  const filterActive = $derived(
+    filterQuery.trim() !== "" || activeTag !== null,
+  );
   // Reorder is the one optimistic interaction; disabled while filtering because
   // the visible subset doesn't map to adjacent full-order slots (F43).
   const reorderable = $derived(!filterActive);
@@ -138,7 +140,10 @@
         (f) => effectiveGroup(f) === null,
       );
       const ungroupedVisible = ungrouped.filter(matches);
-      if (ungrouped.length > 0 && !(filterActive && ungroupedVisible.length === 0)) {
+      if (
+        ungrouped.length > 0 &&
+        !(filterActive && ungroupedVisible.length === 0)
+      ) {
         out.push({
           group: null,
           visible: ungroupedCollapsed ? [] : ungroupedVisible,
@@ -260,7 +265,9 @@
     }
     const f = byId.get(id);
     const gid = effectiveGroup(f);
-    const siblings = orderedIds.filter((x) => effectiveGroup(byId.get(x)) === gid);
+    const siblings = orderedIds.filter(
+      (x) => effectiveGroup(byId.get(x)) === gid,
+    );
     const pos = siblings.indexOf(id);
     const target = pos + dir;
     if (target < 0 || target >= siblings.length) return;
@@ -314,71 +321,71 @@
         void dropOnSection(gid);
       }}
     >
-    {#if hasGroups}
-      <GroupHeader
-        name={section.group?.name ?? "Ungrouped"}
-        activeCount={section.activeCount}
-        total={section.total}
-        collapsed={section.collapsed}
-        color={section.group?.color ?? null}
-        onToggle={() => toggleCollapse(section)}
-        onStartAll={() =>
-          section.group &&
-          void startGroup(section.group.id).catch((err) =>
-            pushToast(`Start all failed: ${String(err)}`, { tone: "error" }),
-          )}
-        onStopAll={() =>
-          section.group &&
-          void stopGroup(section.group.id).catch((err) =>
-            pushToast(`Stop all failed: ${String(err)}`, { tone: "error" }),
-          )}
-        showBulk={section.group !== null}
-        onEdit={section.group ? () => onEditGroup(section.group!) : undefined}
-        onDelete={section.group
-          ? () => onDeleteGroup(section.group!)
-          : undefined}
-      />
-    {/if}
+      {#if hasGroups}
+        <GroupHeader
+          name={section.group?.name ?? "Ungrouped"}
+          activeCount={section.activeCount}
+          total={section.total}
+          collapsed={section.collapsed}
+          color={section.group?.color ?? null}
+          onToggle={() => toggleCollapse(section)}
+          onStartAll={() =>
+            section.group &&
+            void startGroup(section.group.id).catch((err) =>
+              pushToast(`Start all failed: ${String(err)}`, { tone: "error" }),
+            )}
+          onStopAll={() =>
+            section.group &&
+            void stopGroup(section.group.id).catch((err) =>
+              pushToast(`Stop all failed: ${String(err)}`, { tone: "error" }),
+            )}
+          showBulk={section.group !== null}
+          onEdit={section.group ? () => onEditGroup(section.group!) : undefined}
+          onDelete={section.group
+            ? () => onDeleteGroup(section.group!)
+            : undefined}
+        />
+      {/if}
 
-    {#if section.visible.length > 0}
-      <ul class="list" aria-label={section.group?.name ?? "Tunnels"}>
-        {#each section.visible as forward (forward.id)}
-          <li
-            class="row"
-            class:dragging={draggingId === forward.id}
-            draggable={reorderable}
-            ondragstart={() => {
-              if (!reorderable) return;
-              draggingId = forward.id;
-              dragOverGroup = effectiveGroup(forward);
-              dragStartOrder = orderedIds.join(",");
-            }}
-            ondragend={() => void onDragEnd()}
-            ondragover={(e) => {
-              if (!reorderable || !draggingId) return;
-              e.preventDefault();
-              onRowDragOver(forward);
-            }}
-          >
-            <ConnectionRow
-              {forward}
-              {groups}
-              status={statusById[forward.id] ?? "disconnected"}
-              stats={statsById[forward.id] ?? EMPTY_STATS}
-              lastError={lastErrorById[forward.id] ?? null}
-              selected={selectedId === forward.id}
-              {reorderable}
-              onSelect={() => onSelect(forward.id)}
-              onEdit={() => onEdit(forward)}
-              onDelete={() => onDelete(forward)}
-              {onViewLog}
-              onNav={(dir) => navFrom(forward.id, dir)}
-              onReorder={(dir) => keyboardReorder(forward.id, dir)}
-            />
-          </li>
-        {/each}
-      </ul>
-    {/if}
+      {#if section.visible.length > 0}
+        <ul class="list" aria-label={section.group?.name ?? "Tunnels"}>
+          {#each section.visible as forward (forward.id)}
+            <li
+              class="row"
+              class:dragging={draggingId === forward.id}
+              draggable={reorderable}
+              ondragstart={() => {
+                if (!reorderable) return;
+                draggingId = forward.id;
+                dragOverGroup = effectiveGroup(forward);
+                dragStartOrder = orderedIds.join(",");
+              }}
+              ondragend={() => void onDragEnd()}
+              ondragover={(e) => {
+                if (!reorderable || !draggingId) return;
+                e.preventDefault();
+                onRowDragOver(forward);
+              }}
+            >
+              <ConnectionRow
+                {forward}
+                {groups}
+                status={statusById[forward.id] ?? "disconnected"}
+                stats={statsById[forward.id] ?? EMPTY_STATS}
+                lastError={lastErrorById[forward.id] ?? null}
+                selected={selectedId === forward.id}
+                {reorderable}
+                onSelect={() => onSelect(forward.id)}
+                onEdit={() => onEdit(forward)}
+                onDelete={() => onDelete(forward)}
+                {onViewLog}
+                onNav={(dir) => navFrom(forward.id, dir)}
+                onReorder={(dir) => keyboardReorder(forward.id, dir)}
+              />
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
   {/each}
 </div>

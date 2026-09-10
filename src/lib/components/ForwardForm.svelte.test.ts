@@ -107,9 +107,7 @@ describe("ForwardForm", () => {
 
     // The confirm intercepts the close: onClose is deferred until confirmed.
     expect(onClose).not.toHaveBeenCalled();
-    expect(
-      screen.getByText(/discard unsaved changes\?/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/discard unsaved changes\?/i)).toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
     expect(onClose).toHaveBeenCalledTimes(1);

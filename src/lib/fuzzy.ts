@@ -39,7 +39,9 @@ function isCamelBoundary(original: string, i: number): boolean {
   if (i <= 0) return false;
   const prev = original[i - 1];
   const cur = original[i];
-  return prev === prev.toLowerCase() && cur === cur.toUpperCase() && cur !== prev;
+  return (
+    prev === prev.toLowerCase() && cur === cur.toUpperCase() && cur !== prev
+  );
 }
 
 /** Position bonus for matching a target char at index j (independent of run). */

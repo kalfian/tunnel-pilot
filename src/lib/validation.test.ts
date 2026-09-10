@@ -95,7 +95,10 @@ describe("validateForwardForm", () => {
 
     it("allows identity only", () => {
       const errors = validateForwardForm(
-        validForm({ password: "", identityFilePath: "/home/u/.ssh/id_ed25519" }),
+        validForm({
+          password: "",
+          identityFilePath: "/home/u/.ssh/id_ed25519",
+        }),
       );
       expect(errors.auth).toBeUndefined();
     });

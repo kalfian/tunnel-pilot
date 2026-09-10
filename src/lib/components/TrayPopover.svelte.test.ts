@@ -3,11 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import type { ForwardConfig, ForwardStatus, TunnelGroup } from "../types";
-import {
-  forwards,
-  statusById,
-  lastErrorById,
-} from "../stores/forwards";
+import { forwards, statusById, lastErrorById } from "../stores/forwards";
 import { groups } from "../stores/groups";
 import { updateStatus } from "../stores/updater";
 import TrayPopover from "./TrayPopover.svelte";
@@ -114,7 +110,9 @@ describe("TrayPopover — row actions", () => {
   it("connects a disconnected tunnel on click", async () => {
     seed({ a: "disconnected", b: "connected", c: "disconnected" });
     render(TrayPopover);
-    await fireEvent.click(screen.getByRole("button", { name: /connect postgres/i }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /connect postgres/i }),
+    );
     expect(connectForward).toHaveBeenCalledWith("a");
   });
 
@@ -130,7 +128,9 @@ describe("TrayPopover — row actions", () => {
   it("retries a tunnel in error on click", async () => {
     seed({ a: "error", b: "connected", c: "disconnected" });
     render(TrayPopover);
-    await fireEvent.click(screen.getByRole("button", { name: /retry postgres/i }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /retry postgres/i }),
+    );
     expect(retryForward).toHaveBeenCalledWith("a");
   });
 });
@@ -186,7 +186,9 @@ describe("TrayPopover — update header", () => {
       skipped: false,
     });
     render(TrayPopover);
-    expect(screen.getByText(/update available · v2\.0\.1/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/update available · v2\.0\.1/i),
+    ).toBeInTheDocument();
   });
 
   it("stays hidden when the available update was skipped", () => {

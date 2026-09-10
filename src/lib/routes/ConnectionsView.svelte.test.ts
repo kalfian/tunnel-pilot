@@ -4,7 +4,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import { get } from "svelte/store";
 import type { AppSettings, ForwardConfig, TunnelGroup } from "../types";
-import { forwards, statusById, statsById, lastErrorById } from "../stores/forwards";
+import {
+  forwards,
+  statusById,
+  statsById,
+  lastErrorById,
+} from "../stores/forwards";
 import { settings } from "../stores/settings";
 import { groups, activeTag } from "../stores/groups";
 
@@ -68,7 +73,11 @@ function mk(id: string, name: string, groupId: string | null): ForwardConfig {
   };
 }
 
-const FORWARDS = [mk("a", "Alpha", "g1"), mk("b", "Bravo", "g1"), mk("c", "Charlie", null)];
+const FORWARDS = [
+  mk("a", "Alpha", "g1"),
+  mk("b", "Bravo", "g1"),
+  mk("c", "Charlie", null),
+];
 
 describe("ConnectionsView — delete group keeps its tunnels", () => {
   beforeEach(() => {

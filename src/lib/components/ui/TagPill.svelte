@@ -10,7 +10,12 @@
     onRemove?: () => void;
   }
 
-  const { label, removable = false, active = false, onRemove }: Props = $props();
+  const {
+    label,
+    removable = false,
+    active = false,
+    onRemove,
+  }: Props = $props();
 </script>
 
 {#if removable}

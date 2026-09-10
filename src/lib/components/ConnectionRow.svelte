@@ -138,13 +138,11 @@
       icon: (forward.groupId ?? null) === null ? "check" : undefined,
       run: () => void assignGroup(null),
     },
-    ...groups.map(
-      (g): MenuItem => ({
-        label: g.name,
-        icon: forward.groupId === g.id ? "check" : "folder",
-        run: () => void assignGroup(g.id),
-      }),
-    ),
+    ...groups.map((g): MenuItem => ({
+      label: g.name,
+      icon: forward.groupId === g.id ? "check" : "folder",
+      run: () => void assignGroup(g.id),
+    })),
   ]);
 
   const menuItems = $derived<MenuItem[]>([

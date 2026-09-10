@@ -40,7 +40,12 @@
 
 <div class="bar">
   {#if activeTag}
-    <TagPill label={activeTag} removable active onRemove={() => onSelect(null)} />
+    <TagPill
+      label={activeTag}
+      removable
+      active
+      onRemove={() => onSelect(null)}
+    />
   {/if}
   <div class="wrap" bind:this={wrapEl}>
     <button

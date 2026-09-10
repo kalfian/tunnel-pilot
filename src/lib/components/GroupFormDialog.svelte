@@ -85,11 +85,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<Dialog
-  title={mode === "add" ? "New group" : "Edit group"}
-  size="sm"
-  {onClose}
->
+<Dialog title={mode === "add" ? "New group" : "Edit group"} size="sm" {onClose}>
   <form
     class="form"
     onsubmit={(e) => {
@@ -109,11 +105,7 @@
 
     <div class="row">
       <span class="lbl" id="g-color-lbl">Color</span>
-      <div
-        class="swatches"
-        role="radiogroup"
-        aria-labelledby="g-color-lbl"
-      >
+      <div class="swatches" role="radiogroup" aria-labelledby="g-color-lbl">
         {#each swatches as sw, i (sw.label)}
           <button
             type="button"
@@ -124,8 +116,7 @@
             aria-checked={color === sw.key}
             aria-label={sw.label}
             title={sw.label}
-            tabindex={color === sw.key ||
-            (color === null && sw.key === null)
+            tabindex={color === sw.key || (color === null && sw.key === null)
               ? 0
               : -1}
             style={sw.key === null

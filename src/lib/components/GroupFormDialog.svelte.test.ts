@@ -63,7 +63,9 @@ describe("GroupFormDialog — edit", () => {
     const name = screen.getByLabelText("Name");
     expect(name).toHaveValue("Production");
     await fireEvent.input(name, { target: { value: "Prod" } });
-    await fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /save changes/i }),
+    );
 
     expect(updateGroup).toHaveBeenCalledWith("g1", {
       name: "Prod",
@@ -76,6 +78,8 @@ describe("GroupFormDialog — edit", () => {
     render(GroupFormDialog, {
       props: { mode: "edit", group: GROUP, onClose: vi.fn() },
     });
-    expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /save changes/i }),
+    ).toBeDisabled();
   });
 });
