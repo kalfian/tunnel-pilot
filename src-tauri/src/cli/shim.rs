@@ -156,7 +156,11 @@ pub struct CliShimStatus {
     /// Installing at `install_target` requires an admin prompt.
     pub needs_elevation: bool,
     pub current_exe: Option<String>,
-    /// `current_exe()` is under `target/` ⇒ install is refused.
+    /// Install would be refused for being a development build: `current_exe()`
+    /// is under `target/` AND [`ALLOW_DEV_SHIM_ENV`] is not set. This mirrors
+    /// [`install`]'s own guard on purpose — when the two disagreed, the startup
+    /// hook skipped while an explicit install of the same binary succeeded, and
+    /// the Settings button rendered disabled with a reason that no longer held.
     pub dev_build: bool,
     /// Every candidate, in preference order — lets the UI surface a stale shim
     /// in the *other* directory.
@@ -219,6 +223,14 @@ pub fn is_dev_build(exe: &Path) -> bool {
 /// The [`ALLOW_DEV_SHIM_ENV`] override.
 pub fn dev_shim_allowed() -> bool {
     std::env::var(ALLOW_DEV_SHIM_ENV).is_ok_and(|v| v == "1")
+}
+
+/// Whether install must be refused for being a development build. Pure in
+/// `allowed` so the reporting path ([`shim_status`]) and the acting path
+/// ([`install`]) share ONE predicate — they drifted apart once, and the startup
+/// hook then skipped a binary that an explicit install accepted.
+pub fn dev_build_blocks(exe: &Path, allowed: bool) -> bool {
+    is_dev_build(exe) && !allowed
 }
 
 /// Can we create a file in `dir` (creating `dir` itself if needed) without
@@ -349,7 +361,7 @@ pub fn status_from(entries: Vec<ShimEntry>, exe: Option<&Path>) -> CliShimStatus
         install_path: chosen.as_ref().map(|c| c.path.display().to_string()),
         needs_elevation: chosen.as_ref().is_some_and(|c| c.needs_elevation),
         current_exe: exe.map(|p| p.display().to_string()),
-        dev_build: exe.is_some_and(is_dev_build),
+        dev_build: exe.is_some_and(|e| dev_build_blocks(e, dev_shim_allowed())),
         entries,
     }
 }
@@ -493,7 +505,7 @@ fn link_in_place(exe: &Path, link: &Path) -> Result<(), AppError> {
 pub fn install(target: Option<ShimTarget>) -> Result<CliShimStatus, AppError> {
     let exe = current_exe()
         .ok_or_else(|| AppError::Internal("cannot resolve the running executable path".into()))?;
-    if is_dev_build(&exe) && !dev_shim_allowed() {
+    if dev_build_blocks(&exe, dev_shim_allowed()) {
         return Err(AppError::InvalidInput(format!(
             "refusing to install a development build ({}) on PATH — it is rebuilt and \
              deleted by cargo. Install the packaged app first, or set {ALLOW_DEV_SHIM_ENV}=1",
@@ -832,6 +844,22 @@ mod tests {
             Some(&exe)
         ));
         assert!(!is_removable_link(Path::new("/usr/bin/python3"), None));
+    }
+
+    /// The reported `dev_build` flag and `install`'s guard must agree, or the
+    /// startup hook skips a binary that an explicit install would accept (and
+    /// the Settings button renders disabled for a reason that no longer holds).
+    #[test]
+    fn the_override_flows_through_the_shared_dev_build_predicate() {
+        let dev = Path::new("/Users/me/dev/tunnel-pilot/src-tauri/target/debug/tunnel-pilot");
+        let shipped = Path::new("/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot");
+        assert!(dev_build_blocks(dev, false), "dev build blocks by default");
+        assert!(!dev_build_blocks(dev, true), "the override unblocks it");
+        assert!(
+            !dev_build_blocks(shipped, false),
+            "a shipped build never blocks"
+        );
+        assert!(!dev_build_blocks(shipped, true));
     }
 
     #[test]
