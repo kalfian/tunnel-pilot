@@ -7,7 +7,7 @@
 //! would dial a real SSH host. The engine's own behaviour is covered by
 //! `ssh/it_tests.rs` against an in-process russh server.
 
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -233,8 +233,18 @@ async fn a_stale_socket_file_is_replaced_on_bind() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = crate::cli::socket_path_in(dir.path());
     std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
-    // A leftover file from a crashed instance: nothing is listening on it.
-    std::fs::write(&path, b"stale").expect("write stale socket file");
+    // A REAL leftover socket from a crashed instance: bind it, then drop the
+    // listener without unlinking. Nothing answers, but the inode is a socket —
+    // which is the only thing `clear_stale_socket` is allowed to remove.
+    let dead = tokio::net::UnixListener::bind(&path).expect("bind a dead socket");
+    drop(dead);
+    assert!(
+        std::fs::symlink_metadata(&path)
+            .expect("stale socket must survive the drop")
+            .file_type()
+            .is_socket(),
+        "the fixture must be a real socket"
+    );
 
     let listener = server::bind(&path).await.expect("bind over a stale socket");
     let state = Arc::new(AppState::new_headless());
@@ -242,6 +252,54 @@ async fn a_stale_socket_file_is_replaced_on_bind() {
 
     let raw = send_raw_to(&path, r#"{"v":1,"cmd":"list"}"#).await;
     assert!(raw.contains(r#""ok":true"#), "{raw}");
+}
+
+/// `TUNNEL_PILOT_SOCKET` is user input: a typo pointing at a real file must
+/// fail loudly, never silently delete the file.
+#[tokio::test]
+async fn a_regular_file_at_the_socket_path_is_never_removed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("important.txt");
+    std::fs::write(&path, b"precious").expect("write regular file");
+
+    let err = server::bind(&path)
+        .await
+        .expect_err("binding over a regular file must fail");
+    assert!(
+        err.to_string().contains("important.txt"),
+        "the error must name the path: {err}"
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("file must still exist"),
+        b"precious",
+        "the file must be left untouched"
+    );
+
+    // Quit-time cleanup follows the same rule.
+    server::remove_socket(&path);
+    assert!(path.exists(), "quit must not unlink a non-socket path");
+}
+
+/// A user-chosen socket directory (e.g. `$TMPDIR`) keeps its own mode: chmodding
+/// it is either impossible (`/tmp` is root-owned 1777) or rude. Only a directory
+/// we create ourselves is forced to 0700.
+#[tokio::test]
+async fn an_existing_socket_directory_keeps_its_mode() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket_dir = dir.path().join("shared");
+    std::fs::create_dir(&socket_dir).expect("mkdir");
+    std::fs::set_permissions(&socket_dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let path = socket_dir.join("cli.sock");
+    let listener = server::bind(&path).await.expect("bind in an existing dir");
+    drop(listener);
+
+    let mode = std::fs::metadata(&socket_dir)
+        .expect("dir metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o755, "an existing directory must not be re-moded");
 }
 
 #[tokio::test]

@@ -68,7 +68,14 @@ async fn dispatch(state: &Arc<AppState>, req: CliRequest) -> Result<CliData, App
         }),
         CliCommand::Status => status(state, &require_target(req.target)?),
         CliCommand::Connect => {
-            connect(state, &require_target(req.target)?, req.wait, timeout_ms).await
+            connect(
+                state,
+                &require_target(req.target)?,
+                req.wait,
+                timeout_ms,
+                req.force,
+            )
+            .await
         }
         CliCommand::Disconnect => disconnect(state, &require_target(req.target)?).await,
         CliCommand::ConnectAll => connect_all(state, req.wait, timeout_ms).await,
@@ -130,30 +137,56 @@ fn status(state: &Arc<AppState>, target: &str) -> Result<CliData, AppError> {
     })
 }
 
+/// Connect one forward — **idempotent unless `force`**.
+///
+/// `engine::connect_forward` disconnects a live tunnel before re-dialing
+/// (`ssh/engine.rs`, "already-connected same id"), which would kill every TCP
+/// session through the local port. A defensive `tunnel-pilot connect prod-db`
+/// must not do that, so an already-`connected` tunnel is reported unchanged and
+/// a `connecting` one is only awaited — the engine is not touched at all. This
+/// matches `run_start_all` (which skips connected/connecting), so `connect` and
+/// `connect-all` agree. `--force` (`force: true`) restores the bounce.
 async fn connect(
     state: &Arc<AppState>,
     target: &str,
     wait: bool,
     timeout_ms: u64,
+    force: bool,
 ) -> Result<CliData, AppError> {
     let cfg = resolve_target(state, target)?;
-    engine::connect_forward(state, &cfg.id).await?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
-    let timed_out = if wait {
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        matches!(
+    if needs_dial(force, state.registry.current_status(&cfg.id)) {
+        engine::connect_forward(state, &cfg.id).await?;
+    }
+
+    // Safe for the no-dial paths too: an already-`connected` tunnel makes
+    // `wait_for_terminal` return immediately, and a `connecting` one is simply
+    // joined rather than restarted.
+    let timed_out = wait
+        && matches!(
             wait_for_terminal(state, &cfg.id, deadline).await,
             WaitOutcome::TimedOut
-        )
-    } else {
-        false
-    };
+        );
 
     Ok(CliData::Action {
         forward: view(state, &cfg),
         waited: wait,
         timed_out,
     })
+}
+
+/// Whether a `connect` request must go through `engine::connect_forward`.
+///
+/// Pure so the idempotency rule is testable without dialing anything. `true`
+/// means "the engine may tear down and re-dial"; the guard exists because
+/// `connect_forward` disconnects a live tunnel first.
+pub(crate) fn needs_dial(force: bool, current: Option<ForwardStatus>) -> bool {
+    force
+        || !matches!(
+            current,
+            Some(ForwardStatus::Connected) | Some(ForwardStatus::Connecting)
+        )
 }
 
 async fn disconnect(state: &Arc<AppState>, target: &str) -> Result<CliData, AppError> {
@@ -188,7 +221,7 @@ async fn connect_all(
             );
         results.push(bulk_result(state, &cfg, timed_out));
     }
-    Ok(summarize(results, ForwardStatus::Connected))
+    Ok(summarize(results, ForwardStatus::Connected, wait))
 }
 
 async fn disconnect_all(state: &Arc<AppState>) -> Result<CliData, AppError> {
@@ -198,7 +231,9 @@ async fn disconnect_all(state: &Arc<AppState>) -> Result<CliData, AppError> {
         .iter()
         .map(|cfg| bulk_result(state, cfg, false))
         .collect();
-    Ok(summarize(results, ForwardStatus::Disconnected))
+    // `run_stop_all` awaits every supervisor join, so the sweep is synchronous
+    // by construction — anything not `disconnected` afterwards is a failure.
+    Ok(summarize(results, ForwardStatus::Disconnected, true))
 }
 
 fn bulk_result(state: &Arc<AppState>, cfg: &ForwardConfig, timed_out: bool) -> BulkResult {
@@ -212,14 +247,21 @@ fn bulk_result(state: &Arc<AppState>, cfg: &ForwardConfig, timed_out: bool) -> B
     }
 }
 
-/// Count a bulk sweep: `succeeded` = reached `wanted`; `failed` = ended in
-/// `error` or ran out of budget. A tunnel still `connecting` under `--no-wait`
-/// is neither — the caller asked not to wait, so its outcome is unknown.
-fn summarize(results: Vec<BulkResult>, wanted: ForwardStatus) -> CliData {
+/// Count a bulk sweep: `succeeded` = reached `wanted`.
+///
+/// `failed` depends on whether the caller asked us to wait. **With** a wait, the
+/// sweep is over and anything short of `wanted` failed — including a member left
+/// `disconnected`, which otherwise slips through as neither succeeded nor failed
+/// and lets `connect-all` exit 0 having connected nothing. **Without** a wait
+/// (`--no-wait`), only `error`/`timedOut` count: a tunnel still `connecting` has
+/// an unknown outcome because the caller asked not to find out.
+fn summarize(results: Vec<BulkResult>, wanted: ForwardStatus, waited: bool) -> CliData {
     let succeeded = results.iter().filter(|r| r.status == wanted).count();
     let failed = results
         .iter()
-        .filter(|r| r.status == ForwardStatus::Error || r.timed_out)
+        .filter(|r| {
+            r.status == ForwardStatus::Error || r.timed_out || (waited && r.status != wanted)
+        })
         .count();
     CliData::Bulk {
         results,
@@ -300,6 +342,16 @@ mod tests {
 
     use crate::cli::protocol::sample_config;
     use crate::state::tunnel_registry::fake_handle;
+
+    fn bulk(id: &str, status: ForwardStatus) -> BulkResult {
+        BulkResult {
+            id: id.to_string(),
+            name: id.to_string(),
+            status,
+            last_error: None,
+            timed_out: false,
+        }
+    }
 
     fn state_with(names: &[(&str, &str)]) -> Arc<AppState> {
         let state = Arc::new(AppState::new_headless());
@@ -464,6 +516,113 @@ mod tests {
         );
     }
 
+    /// The idempotency rule (finding 1): a live tunnel is never bounced by a
+    /// plain `connect`; only `--force` (or a non-live status) reaches the
+    /// engine, which tears down and re-dials.
+    #[test]
+    fn only_force_or_a_non_live_status_reaches_the_engine() {
+        for status in [ForwardStatus::Connected, ForwardStatus::Connecting] {
+            assert!(
+                !needs_dial(false, Some(status)),
+                "{status:?} must not be re-dialed"
+            );
+            assert!(needs_dial(true, Some(status)), "--force must re-dial");
+        }
+        for status in [
+            ForwardStatus::Disconnected,
+            ForwardStatus::Disconnecting,
+            ForwardStatus::Error,
+        ] {
+            assert!(needs_dial(false, Some(status)), "{status:?} must dial");
+        }
+        assert!(needs_dial(false, None), "a non-live tunnel must dial");
+    }
+
+    #[tokio::test]
+    async fn connect_on_a_connected_tunnel_is_a_no_op_that_reports_connected() {
+        let state = state_with(&[("id-a", "prod-db")]);
+        state
+            .registry
+            .insert(fake_handle("id-a", ForwardStatus::Connected));
+
+        let data = connect(&state, "prod-db", true, 5_000, false)
+            .await
+            .expect("connect");
+        let CliData::Action {
+            forward,
+            waited,
+            timed_out,
+        } = data
+        else {
+            panic!("expected an action payload");
+        };
+        assert_eq!(forward.status, ForwardStatus::Connected);
+        assert!(waited && !timed_out);
+        // The live handle survived: no teardown, so no TCP session was killed.
+        assert!(
+            state.registry.contains("id-a"),
+            "a plain connect must not bounce a live tunnel"
+        );
+        assert_eq!(
+            state.registry.current_status("id-a"),
+            Some(ForwardStatus::Connected)
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_on_a_connecting_tunnel_joins_the_dial_in_flight() {
+        let state = state_with(&[("id-a", "prod-db")]);
+        state
+            .registry
+            .insert(fake_handle("id-a", ForwardStatus::Connecting));
+
+        let mover = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            mover
+                .registry
+                .set_status("id-a", ForwardStatus::Connected, None);
+        });
+
+        let data = connect(&state, "id-a", true, 5_000, false)
+            .await
+            .expect("connect");
+        let CliData::Action {
+            forward, timed_out, ..
+        } = data
+        else {
+            panic!("expected an action payload");
+        };
+        assert_eq!(forward.status, ForwardStatus::Connected);
+        assert!(!timed_out);
+        assert!(
+            state.registry.contains("id-a"),
+            "the dial was not restarted"
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_with_no_wait_on_a_connecting_tunnel_returns_immediately() {
+        let state = state_with(&[("id-a", "prod-db")]);
+        state
+            .registry
+            .insert(fake_handle("id-a", ForwardStatus::Connecting));
+
+        let data = connect(&state, "id-a", false, 5_000, false)
+            .await
+            .expect("connect");
+        let CliData::Action {
+            forward,
+            waited,
+            timed_out,
+        } = data
+        else {
+            panic!("expected an action payload");
+        };
+        assert_eq!(forward.status, ForwardStatus::Connecting);
+        assert!(!waited && !timed_out);
+    }
+
     #[tokio::test]
     async fn disconnect_removes_the_handle_and_reports_disconnected() {
         let state = state_with(&[("id-a", "prod-db")]);
@@ -504,6 +663,50 @@ mod tests {
         assert_eq!(succeeded, 2);
         assert_eq!(failed, 0);
         assert!(state.registry.all_ids().is_empty());
+    }
+
+    /// Finding 4b: with a wait requested, a member left `disconnected` is a
+    /// failure — otherwise `connect-all` reports "0 succeeded, 0 failed" and
+    /// the client exits 0 having connected nothing.
+    #[test]
+    fn a_waited_sweep_counts_a_disconnected_member_as_failed() {
+        let results = vec![
+            bulk("id-a", ForwardStatus::Connected),
+            bulk("id-b", ForwardStatus::Disconnected),
+        ];
+        let CliData::Bulk {
+            succeeded, failed, ..
+        } = summarize(results.clone(), ForwardStatus::Connected, true)
+        else {
+            panic!("expected a bulk payload");
+        };
+        assert_eq!((succeeded, failed), (1, 1));
+
+        // `--no-wait`: an unfinished member has an unknown outcome, not a failure.
+        let CliData::Bulk {
+            succeeded, failed, ..
+        } = summarize(
+            vec![bulk("id-a", ForwardStatus::Connecting)],
+            ForwardStatus::Connected,
+            false,
+        )
+        else {
+            panic!("expected a bulk payload");
+        };
+        assert_eq!((succeeded, failed), (0, 0));
+    }
+
+    #[test]
+    fn a_timed_out_member_is_counted_once() {
+        let mut results = vec![bulk("id-a", ForwardStatus::Connecting)];
+        results[0].timed_out = true;
+        let CliData::Bulk {
+            succeeded, failed, ..
+        } = summarize(results, ForwardStatus::Connected, true)
+        else {
+            panic!("expected a bulk payload");
+        };
+        assert_eq!((succeeded, failed), (0, 1));
     }
 
     #[tokio::test]

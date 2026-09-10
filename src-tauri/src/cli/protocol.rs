@@ -47,6 +47,11 @@ pub struct CliRequest {
     /// Whether to await a terminal status before responding (`--no-wait` → false).
     #[serde(default)]
     pub wait: bool,
+    /// `connect` only: tear down an already-live tunnel and re-dial it
+    /// (`--force`). Absent/false ⇒ `connect` is idempotent — a `connected`
+    /// tunnel is reported as-is and its TCP sessions are left alone.
+    #[serde(default)]
+    pub force: bool,
 }
 
 impl CliRequest {
@@ -58,6 +63,7 @@ impl CliRequest {
             target: None,
             timeout_ms: None,
             wait: false,
+            force: false,
         }
     }
 
@@ -267,6 +273,7 @@ mod tests {
             target: None,
             timeout_ms: Some(45_000),
             wait: true,
+            force: false,
         };
         let line = serde_json::to_string(&req).expect("serialize");
         assert!(
@@ -281,6 +288,10 @@ mod tests {
             !line.contains("target"),
             "absent target must be omitted: {line}"
         );
+        assert!(
+            line.contains("\"force\":false"),
+            "camelCase force flag: {line}"
+        );
         let back: CliRequest = serde_json::from_str(&line).expect("deserialize");
         assert_eq!(back, req);
     }
@@ -290,6 +301,10 @@ mod tests {
         let req: CliRequest = serde_json::from_str(r#"{"v":1,"cmd":"list"}"#).expect("parse");
         assert_eq!(req.cmd, CliCommand::List);
         assert!(!req.wait);
+        assert!(
+            !req.force,
+            "force must default to false (idempotent connect)"
+        );
         assert!(req.target.is_none());
         assert!(req.timeout_ms.is_none());
     }

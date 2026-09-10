@@ -40,6 +40,10 @@ pub enum Command {
         target: String,
         timeout_secs: u64,
         wait: bool,
+        /// `--force`: tear down an already-live tunnel and re-dial it. Without
+        /// it, `connect` on a `connected`/`connecting` tunnel is a no-op that
+        /// reports the current state (never bounces live TCP sessions).
+        force: bool,
     },
     Disconnect {
         target: String,
@@ -101,6 +105,7 @@ COMMANDS:
     list                       List every configured forward and its status
     status <id|name>           Show one forward's status, endpoints and stats
     connect <id|name>          Connect a forward and wait for a terminal status
+                               (already connected/connecting: reports it, no re-dial)
     disconnect <id|name>       Disconnect a forward (waits for teardown)
     connect-all                Connect every forward (tray 'Start All')
     disconnect-all             Disconnect every live forward (tray 'Stop All')
@@ -112,6 +117,7 @@ OPTIONS:
     --socket <path>            Control socket path (default: app config dir)
     --timeout <secs>           Wait budget for connect/connect-all (1-300, default 30)
     --no-wait                  Return as soon as the connect is dispatched
+    --force                    connect only: bounce an already-connected tunnel
 
 TARGETS:
     A target is a forward id (exact) or name (case-insensitive, exact).
@@ -120,6 +126,8 @@ TARGETS:
 EXIT CODES:
     0 ok   1 internal/IO   2 usage   3 app not running
     4 target not found or ambiguous   5 operation ended in error   6 timed out
+    A protocol-version mismatch (stale binary vs running app) also exits 4, with
+    an 'unsupported protocol version' message.
 
 ENVIRONMENT:
     TUNNEL_PILOT_SOCKET        Socket path override (both app and CLI)
@@ -135,6 +143,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
     let mut socket: Option<PathBuf> = None;
     let mut timeout_secs: Option<u64> = None;
     let mut wait = true;
+    let mut force = false;
     let mut positionals: Vec<&str> = Vec::new();
 
     let mut rest = args[1..].iter().map(|s| s.as_str()).peekable();
@@ -142,6 +151,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
         match arg {
             "--json" => json = true,
             "--no-wait" => wait = false,
+            "--force" => force = true,
             "--help" | "-h" => {
                 return Ok(Invocation {
                     command: Command::Help,
@@ -165,6 +175,11 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
     }
 
     let timeout_secs = timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS);
+    if force && subcommand != "connect" {
+        return Err(UsageError::new(format!(
+            "--force only applies to 'connect', not '{subcommand}'"
+        )));
+    }
     let command = match subcommand.as_str() {
         "help" | "--help" | "-h" => Command::Help,
         "list" => {
@@ -182,6 +197,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             target: one_target("connect", &positionals)?,
             timeout_secs,
             wait,
+            force,
         },
         "disconnect" => Command::Disconnect {
             target: one_target("disconnect", &positionals)?,
@@ -334,8 +350,34 @@ mod tests {
                 target: "prod-db".into(),
                 timeout_secs: DEFAULT_TIMEOUT_SECS,
                 wait: true,
+                force: false,
             }
         );
+    }
+
+    /// `--force` is the opt-in that restores the bounce-and-redial behaviour;
+    /// without it `connect` is idempotent (service-side guard).
+    #[test]
+    fn connect_force_is_opt_in_and_connect_only() {
+        let inv = parse_str(&["connect", "prod-db", "--force"]).expect("parse --force");
+        assert_eq!(
+            inv.command,
+            Command::Connect {
+                target: "prod-db".into(),
+                timeout_secs: DEFAULT_TIMEOUT_SECS,
+                wait: true,
+                force: true,
+            }
+        );
+
+        for args in [
+            vec!["connect-all", "--force"],
+            vec!["disconnect", "prod-db", "--force"],
+            vec!["list", "--force"],
+        ] {
+            let err = parse_str(&args).expect_err("--force is connect-only");
+            assert!(err.message.contains("--force"), "{}", err.message);
+        }
     }
 
     #[test]
@@ -347,6 +389,7 @@ mod tests {
                 target: "prod-db".into(),
                 timeout_secs: DEFAULT_TIMEOUT_SECS,
                 wait: false,
+                force: false,
             }
         );
 
@@ -361,6 +404,7 @@ mod tests {
                     target: "prod-db".into(),
                     timeout_secs: 120,
                     wait: true,
+                    force: false,
                 }
             );
         }
@@ -459,6 +503,7 @@ mod tests {
             "--socket",
             "--timeout",
             "--no-wait",
+            "--force",
             "TUNNEL_PILOT_SOCKET",
         ] {
             assert!(HELP_TEXT.contains(word), "help must mention {word}");

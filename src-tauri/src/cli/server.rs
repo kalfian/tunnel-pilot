@@ -13,7 +13,7 @@
 //! network-reachable.
 
 use std::fs::Permissions;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -61,12 +61,12 @@ pub async fn serve(state: Arc<AppState>, path: PathBuf) {
     }
 }
 
-/// Prepare the path (dir 0700, stale socket cleared), bind, and chmod 0600.
+/// Prepare the path (dir 0700 when we create it, stale socket cleared), bind,
+/// and chmod 0600.
 pub async fn bind(path: &Path) -> Result<UnixListener, AppError> {
     crate::cli::check_socket_path_len(path)?;
     if let Some(dir) = path.parent() {
-        tokio::fs::create_dir_all(dir).await?;
-        tokio::fs::set_permissions(dir, Permissions::from_mode(DIR_MODE)).await?;
+        ensure_socket_dir(dir).await?;
     }
     clear_stale_socket(path).await?;
     let listener = UnixListener::bind(path)?;
@@ -96,13 +96,47 @@ pub async fn serve_on(state: Arc<AppState>, listener: UnixListener) {
     }
 }
 
+/// Create the socket's parent directory owner-only — but only when WE create
+/// it.
+///
+/// An existing directory keeps its own mode: `TUNNEL_PILOT_SOCKET` may point at
+/// `$TMPDIR` or a user directory, and chmod'ing those is either impossible
+/// (`/tmp` is root-owned `1777` ⇒ EPERM ⇒ the documented escape hatch never
+/// binds) or rude (silently re-moding a directory the user chose). The socket
+/// itself is chmod'd 0600 right after bind, which is the access control that
+/// matters; the 0700 dir is defense in depth for the path we own.
+async fn ensure_socket_dir(dir: &Path) -> Result<(), AppError> {
+    if tokio::fs::symlink_metadata(dir).await.is_ok() {
+        return Ok(()); // pre-existing — not ours to re-mode
+    }
+    // `recursive` applies DIR_MODE to every component this creates, and is a
+    // no-op (not an error) if a concurrent launch won the race.
+    tokio::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(DIR_MODE)
+        .create(dir)
+        .await?;
+    Ok(())
+}
+
 /// A leftover socket file from a crashed instance would make `bind` fail with
 /// `EADDRINUSE`. Probe it: if something answers, another instance is live (the
 /// single-instance plugin should have prevented this) and we must NOT steal the
 /// path; if nothing answers, the file is stale and gets unlinked.
 async fn clear_stale_socket(path: &Path) -> Result<(), AppError> {
-    if !path.exists() {
-        return Ok(());
+    let meta = match tokio::fs::symlink_metadata(path).await {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    // Only ever unlink an actual socket. `TUNNEL_PILOT_SOCKET` is user input:
+    // a typo pointing at a real file must fail loudly, not delete it.
+    if !meta.file_type().is_socket() {
+        return Err(AppError::InvalidInput(format!(
+            "{} exists and is not a socket; refusing to remove it. Point {} somewhere else",
+            path.display(),
+            crate::cli::SOCKET_ENV
+        )));
     }
     match UnixStream::connect(path).await {
         Ok(_) => Err(AppError::Internal(format!(
@@ -118,8 +152,25 @@ async fn clear_stale_socket(path: &Path) -> Result<(), AppError> {
 }
 
 /// Best-effort unlink, used on quit so a fresh launch does not have to probe a
-/// dead socket. A missing file is not an error.
+/// dead socket. A missing file is not an error — and a path that is NOT a
+/// socket is left alone (same reasoning as [`clear_stale_socket`]: the path can
+/// come from a mistyped `TUNNEL_PILOT_SOCKET`).
 pub fn remove_socket(path: &Path) {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if !meta.file_type().is_socket() => {
+            tracing::warn!(
+                socket = %path.display(),
+                "control socket path is not a socket; leaving it untouched"
+            );
+            return;
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            tracing::warn!(socket = %path.display(), error = %e, "cannot stat the control socket");
+            return;
+        }
+    }
     match std::fs::remove_file(path) {
         Ok(()) => tracing::debug!(socket = %path.display(), "control socket removed"),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

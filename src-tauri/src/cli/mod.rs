@@ -112,7 +112,8 @@ pub fn check_socket_path_len(path: &Path) -> Result<(), AppError> {
     if len > MAX_SOCKET_PATH_BYTES {
         return Err(AppError::InvalidInput(format!(
             "control socket path is {len} bytes, over the {MAX_SOCKET_PATH_BYTES}-byte \
-             sun_path limit: {}. Set {SOCKET_ENV} to a shorter path (e.g. /tmp/tp.sock).",
+             sun_path limit: {}. Set {SOCKET_ENV} to a shorter path you own \
+             (e.g. $TMPDIR/tunnel-pilot.sock or ~/.tunnel-pilot.sock).",
             path.display()
         )));
     }
