@@ -106,12 +106,13 @@ sudo ln -sf "/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" /usr/lo
 |---|---|
 | `tunnel-pilot list` | Every configured forward with its live status |
 | `tunnel-pilot status <id\|name>` | One forward: endpoints, status, stats |
-| `tunnel-pilot connect <id\|name>` | Connect and **wait** for `connected` or `error` |
+| `tunnel-pilot connect <id\|name>` | Connect and **wait** for `connected` or `error`. Already connected (or connecting)? It reports that and leaves the tunnel alone — add `--force` to tear down and re-dial |
 | `tunnel-pilot disconnect <id\|name>` | Disconnect (waits for teardown) |
 | `tunnel-pilot connect-all` / `disconnect-all` | The tray's Start All / Stop All |
 | `tunnel-pilot version` / `help` | App + protocol version / usage |
 
-Flags: `--json`, `--timeout <secs>` (1–300, default 30), `--no-wait`, `--socket <path>`.
+Flags: `--json`, `--timeout <secs>` (1–300, default 30), `--no-wait`, `--force` (connect
+only), `--socket <path>`. Options go **after** the subcommand.
 A target is a forward **id** (exact) or **name** (case-insensitive, exact); an ambiguous
 name is rejected rather than guessed.
 
@@ -137,11 +138,16 @@ Exit codes — designed for scripts and agents:
 | 5 | the operation ended in `error` (e.g. auth failed) |
 | 6 | timed out waiting for a terminal status |
 
-`status` exits `0` whenever the query succeeded — read the status from the payload.
+`status` exits `0` whenever the query succeeded — read the status from the payload. A
+`connect` / `connect-all` that waited exits `5` unless it ends `connected`. A **protocol
+mismatch** (a stale `tunnel-pilot` symlink against a newer app) surfaces as exit `4` with an
+`unsupported protocol version` message — that text is what distinguishes it from a missing
+target.
 
 Notes: the CLI talks to a **running** app and never launches it for you. It cannot read or
 set passwords — credentials stay a GUI + keychain concern. Set `TUNNEL_PILOT_SOCKET` (both
-sides) if the default socket path is too long for your system's `sun_path` limit.
+sides, e.g. `$TMPDIR/tunnel-pilot.sock` or `~/.tunnel-pilot.sock`) if the default socket
+path is too long for your system's `sun_path` limit.
 
 ## Build from source
 

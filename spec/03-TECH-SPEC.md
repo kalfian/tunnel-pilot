@@ -1201,13 +1201,21 @@ the app as before. No sidecar, no `bundle.externalBin`, no second `[[bin]]`.
 ```
 tunnel-pilot list                      [--json]
 tunnel-pilot status <id|name>          [--json]
-tunnel-pilot connect <id|name>         [--json] [--timeout <secs>] [--no-wait]
+tunnel-pilot connect <id|name>         [--json] [--timeout <secs>] [--no-wait] [--force]
 tunnel-pilot disconnect <id|name>      [--json]
 tunnel-pilot connect-all               [--json] [--timeout <secs>] [--no-wait]
 tunnel-pilot disconnect-all            [--json]
 tunnel-pilot version | help
 global: [--socket <path>]   env: TUNNEL_PILOT_SOCKET
 ```
+
+**`connect` is idempotent.** `engine::connect_forward` disconnects a live tunnel before
+re-dialing, so a defensive `tunnel-pilot connect prod-db` would kill every TCP session
+through the local port. The CLI therefore guards on the current status: `connected` is
+reported unchanged (no engine call), `connecting` is joined (awaited, not restarted), and
+only `disconnected`/`disconnecting`/`error` dial. `--force` opts back into the
+tear-down-and-re-dial. This matches `run_start_all`, which already skips
+connected/connecting — `connect` and `connect-all` agree.
 
 Human output is fixed-width columns, **no ANSI colour, full uuids** (an agent must be able
 to copy an unambiguous target). `--json` prints the response `data` verbatim; on failure the
@@ -1223,7 +1231,9 @@ serialized `AppError` goes to stderr.
   the Tauri lifecycle. Spawned detached from `.setup()`; a bind failure is logged and
   swallowed so the app always starts.
 - **Client is blocking** `std::os::unix::net::UnixStream` with `set_read_timeout` — a CLI
-  invocation must not pay for a tokio runtime. Args are parsed by a hand-rolled pure fn
+  invocation must not pay for a tokio runtime. The read budget is the requested wait plus
+  slack (never a fixed 30s, which would cut off a 300s server-side wait), and a read timeout
+  maps to exit `6`, not `1`. Args are parsed by a hand-rolled pure fn
   (`cli/args.rs`); no `clap` for a fixed eight-subcommand surface.
 - **`wait_for_terminal(state, id, deadline) -> WaitOutcome`** gives `connect` its
   synchronous contract. `engine::connect_forward` returns as soon as the supervisor is
@@ -1243,11 +1253,20 @@ serialized `AppError` goes to stderr.
 `sockaddr_un.sun_path` is 104 bytes on macOS / 108 on Linux. The default path is ~75 bytes
 for a typical `$HOME`, but a long username overflows it. Paths over **100 bytes** are
 refused up front with an error naming `TUNNEL_PILOT_SOCKET` (honored by both sides) instead
-of an opaque `EINVAL` from `bind(2)`.
+of an opaque `EINVAL` from `bind(2)`. The suggested escape hatch is a path the user owns —
+`$TMPDIR/tunnel-pilot.sock` or `~/.tunnel-pilot.sock`.
 
-**Stale socket**: if the path exists, probe-connect. Something answers ⇒ another instance
-owns it ⇒ log and skip binding (the app still runs). Nothing answers ⇒ unlink and bind.
-`window::quit_app` unlinks best-effort so the next launch starts clean.
+**Directory mode**: the socket's parent is created with `DirBuilder::mode(0o700)`, and an
+**existing** directory keeps its own mode. Chmodding a directory the user chose is either
+impossible (`/tmp` is root-owned `1777` ⇒ EPERM ⇒ the escape hatch would never bind) or
+rude; the socket's own `0600` is the access control that matters.
+
+**Stale socket**: the path must be a socket — `symlink_metadata().file_type().is_socket()`
+is checked first, and anything else (a mistyped `TUNNEL_PILOT_SOCKET` pointing at a real
+file) is an `invalidInput` naming the path, never an unlink. For an actual socket:
+probe-connect. Something answers ⇒ another instance owns it ⇒ log and skip binding (the app
+still runs). Nothing answers ⇒ unlink and bind. `window::quit_app` unlinks best-effort under
+the same is-a-socket rule so the next launch starts clean.
 
 ### Threat model — why there is no token
 
@@ -1267,7 +1286,17 @@ writes stay a GUI action).
 - [ ] Target resolution: exact id, then case-insensitive exact name; ambiguous → `invalidInput`,
       missing → `notFound`. No fuzzy matching.
 - [ ] `connect` waits for `connected`/`error` and exits `0`/`5`; `--no-wait` returns
-      immediately; a blown budget exits `6`.
+      immediately; a blown budget exits `6`. With a wait requested, ANY final status other
+      than `connected` (including `disconnected` from a vanished handle) exits `5`.
+- [ ] `connect` on a `connected`/`connecting` tunnel does not touch the engine; `--force`
+      does.
+- [ ] A path that exists but is not a socket is never unlinked (bind fails naming it).
+- [ ] An existing socket directory keeps its mode; only a directory we create is `0700`.
+- [ ] A server that accepts but never answers exits `6`, not `1`.
+- [ ] A leading option before a subcommand (`tunnel-pilot --json list`) exits `2` instead of
+      launching the GUI.
+- [ ] A protocol-version mismatch surfaces as exit `4` with an "unsupported protocol
+      version" message — an agent can tell it apart from a missing target by the text.
 - [ ] `v` other than `1` and malformed lines are answered with `invalidInput`, and the
       listener keeps serving.
 - [ ] `--json` output is exactly the response `data` object.

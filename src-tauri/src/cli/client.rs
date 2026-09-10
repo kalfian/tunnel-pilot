@@ -48,14 +48,29 @@ const READ_TIMEOUT_SLACK: Duration = Duration::from_secs(10);
 /// Read timeout for commands that do not wait on a tunnel.
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Printed when a subcommand hides behind leading options — `tunnel-pilot
+/// --json list` would otherwise launch the GUI and silently ignore the command.
+pub const OPTIONS_AFTER_SUBCOMMAND_HINT: &str =
+    "options go after the subcommand (e.g. 'tunnel-pilot list --json')";
+
 /// Inspect argv; `Some(exit_code)` when this was a CLI invocation, `None` when
 /// the caller should start the GUI instead.
+///
+/// Subcommands are positional words, so a bare launch and GUI flags
+/// (`--minimized`, macOS's `-psn_*`) fall through untouched. A leading option
+/// FOLLOWED by a subcommand is neither: it is a mistyped CLI call, and starting
+/// a desktop app instead of running the command would be the worst answer.
 pub fn dispatch(argv: &[String]) -> Option<i32> {
     let first = argv.get(1)?;
-    if !args::is_cli_subcommand(first) {
-        return None;
+    if args::is_cli_subcommand(first) {
+        return Some(run(&argv[1..]));
     }
-    Some(run(&argv[1..]))
+    if first.starts_with('-') && argv[2..].iter().any(|a| args::is_cli_subcommand(a)) {
+        eprintln!("error: {OPTIONS_AFTER_SUBCOMMAND_HINT}");
+        eprintln!("run 'tunnel-pilot help' for usage");
+        return Some(EXIT_USAGE);
+    }
+    None
 }
 
 /// Run one CLI invocation (argv tail) and return its exit code.
@@ -80,23 +95,41 @@ pub fn run(args: &[String]) -> i32 {
     };
 
     let request = build_request(&invocation.command);
-    let response = match send(&path, &request, read_timeout(&invocation.command)) {
+    let budget = read_timeout(&invocation.command);
+    let response = match send(&path, &request, budget) {
         Ok(res) => res,
-        Err(ClientError::NotRunning) => {
-            eprintln!("{NOT_RUNNING_HINT}");
-            return EXIT_NOT_RUNNING;
-        }
-        Err(ClientError::Io(msg)) => {
-            eprintln!("error: control socket at {}: {msg}", path.display());
-            return EXIT_INTERNAL;
-        }
-        Err(ClientError::Protocol(msg)) => {
-            eprintln!("error: unexpected response from Tunnel Pilot: {msg}");
-            return EXIT_INTERNAL;
-        }
+        Err(e) => return report_client_error(&path, budget, e),
     };
 
     report(&invocation, response)
+}
+
+/// Print a transport failure and pick its exit code. A read timeout is a
+/// TIMEOUT (6), not an internal error: the app is running and answering the
+/// socket, it just did not finish in the budget the caller asked for.
+fn report_client_error(path: &Path, budget: Duration, error: ClientError) -> i32 {
+    match error {
+        ClientError::NotRunning => {
+            eprintln!("{NOT_RUNNING_HINT}");
+            EXIT_NOT_RUNNING
+        }
+        ClientError::TimedOut => {
+            eprintln!(
+                "error: Tunnel Pilot did not answer within {}s on {}",
+                budget.as_secs(),
+                path.display()
+            );
+            EXIT_TIMEOUT
+        }
+        ClientError::Io(msg) => {
+            eprintln!("error: control socket at {}: {msg}", path.display());
+            EXIT_INTERNAL
+        }
+        ClientError::Protocol(msg) => {
+            eprintln!("error: unexpected response from Tunnel Pilot: {msg}");
+            EXIT_INTERNAL
+        }
+    }
 }
 
 /// Explicit `--socket` beats `TUNNEL_PILOT_SOCKET`, which beats the default.
@@ -124,10 +157,12 @@ fn build_request(command: &Command) -> CliRequest {
             target,
             timeout_secs,
             wait,
+            force,
         } => CliRequest {
             target: Some(target.clone()),
             timeout_ms: Some(timeout_secs * 1_000),
             wait: *wait,
+            force: *force,
             ..CliRequest::new(CliCommand::Connect)
         },
         Command::ConnectAll { timeout_secs, wait } => CliRequest {
@@ -157,12 +192,24 @@ fn read_timeout(command: &Command) -> Duration {
 
 /// Transport-level failure (never an application error — those come back as a
 /// `CliResponse` with `ok: false`).
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum ClientError {
     /// No socket / nothing listening ⇒ the app is not running.
     NotRunning,
+    /// The read timeout elapsed before the response line arrived.
+    TimedOut,
     Io(String),
     Protocol(String),
+}
+
+/// Classify a socket READ failure. `set_read_timeout` surfaces as `WouldBlock`
+/// on Linux and `TimedOut` on macOS — both mean "the budget elapsed", never an
+/// internal fault.
+fn classify_read_error(error: &std::io::Error) -> ClientError {
+    match error.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => ClientError::TimedOut,
+        _ => ClientError::Io(error.to_string()),
+    }
 }
 
 #[cfg(unix)]
@@ -195,7 +242,7 @@ fn send(
     let mut response = String::new();
     BufReader::new(stream)
         .read_line(&mut response)
-        .map_err(|e| ClientError::Io(e.to_string()))?;
+        .map_err(|e| classify_read_error(&e))?;
     if response.trim().is_empty() {
         return Err(ClientError::Protocol("empty response".into()));
     }
@@ -247,7 +294,7 @@ fn report(invocation: &Invocation, response: CliResponse) -> i32 {
     } else {
         print!("{}", render(&data));
     }
-    exit_code_for_data(&data)
+    exit_code_for_data(&invocation.command, &data)
 }
 
 /// Human-readable rendering for each payload.
@@ -420,18 +467,33 @@ pub fn render_version(app_version: &str, protocol: u32) -> String {
     )
 }
 
-/// Exit code for a successful round-trip, derived from the payload: a connect
-/// that ended in `error` is a failed operation even though the query worked.
-/// `status`/`list`/`version` always exit 0 — the state lives in the payload.
-pub fn exit_code_for_data(data: &CliData) -> i32 {
+/// Exit code for a successful round-trip, derived from the payload AND the
+/// command that produced it: a connect that ended in `error` is a failed
+/// operation even though the query worked. `status`/`list`/`version` always exit
+/// 0 — the state lives in the payload.
+///
+/// The command matters because `CliData::Action` is shared by `connect` and
+/// `disconnect` (the payload is `untagged`, so a dedicated variant would risk
+/// mis-deserialization): `disconnected` is success for one and failure for the
+/// other. So when a WAIT was requested, any connect verb that did not end
+/// `connected` — including a `Vanished` wait, which reports `disconnected` —
+/// exits 5. Under `--no-wait`, `connecting` stays neutral: the caller asked not
+/// to find out.
+pub fn exit_code_for_data(command: &Command, data: &CliData) -> i32 {
+    let awaited_connect = matches!(
+        command,
+        Command::Connect { wait: true, .. } | Command::ConnectAll { wait: true, .. }
+    );
     match data {
         CliData::List { .. } | CliData::Status { .. } | CliData::Version { .. } => EXIT_OK,
         CliData::Action {
             forward, timed_out, ..
         } => {
+            let failed = forward.status == ForwardStatus::Error
+                || (awaited_connect && forward.status != ForwardStatus::Connected);
             if *timed_out {
                 EXIT_TIMEOUT
-            } else if forward.status == ForwardStatus::Error {
+            } else if failed {
                 EXIT_OPERATION_FAILED
             } else {
                 EXIT_OK
@@ -440,9 +502,12 @@ pub fn exit_code_for_data(data: &CliData) -> i32 {
         CliData::Bulk {
             results, failed, ..
         } => {
+            let any_failed = *failed > 0
+                || (awaited_connect
+                    && results.iter().any(|r| r.status != ForwardStatus::Connected));
             if results.iter().any(|r| r.timed_out) {
                 EXIT_TIMEOUT
-            } else if *failed > 0 {
+            } else if any_failed {
                 EXIT_OPERATION_FAILED
             } else {
                 EXIT_OK
@@ -515,10 +580,45 @@ mod tests {
         args.iter().map(|s| s.to_string()).collect()
     }
 
+    /// `connect <target>` with the default flags (waiting).
+    fn connect_cmd(wait: bool) -> Command {
+        Command::Connect {
+            target: "prod-db".into(),
+            timeout_secs: 30,
+            wait,
+            force: false,
+        }
+    }
+
     #[test]
     fn dispatch_ignores_gui_launches() {
         assert_eq!(dispatch(&strings(&["tunnel-pilot"])), None);
         assert_eq!(dispatch(&strings(&["tunnel-pilot", "--minimized"])), None);
+        // macOS hands a process-serial-number flag to a Finder launch.
+        assert_eq!(dispatch(&strings(&["tunnel-pilot", "-psn_0_1234"])), None);
+    }
+
+    /// A subcommand hidden behind leading options is a mistyped CLI call, not a
+    /// GUI launch — launching the app would silently ignore what was asked.
+    #[test]
+    fn dispatch_rejects_options_before_the_subcommand() {
+        for argv in [
+            vec!["tunnel-pilot", "--json", "list"],
+            vec![
+                "tunnel-pilot",
+                "--socket",
+                "/tmp/x.sock",
+                "status",
+                "prod-db",
+            ],
+            vec!["tunnel-pilot", "--no-wait", "connect-all"],
+        ] {
+            assert_eq!(
+                dispatch(&strings(&argv)),
+                Some(EXIT_USAGE),
+                "{argv:?} must not launch the GUI"
+            );
+        }
     }
 
     #[test]
@@ -714,33 +814,34 @@ mod tests {
 
     #[test]
     fn payload_outcomes_map_to_the_documented_exit_codes() {
+        let connect = connect_cmd(true);
         let ok = CliData::Action {
             forward: view("id", "n", ForwardStatus::Connected, None),
             waited: true,
             timed_out: false,
         };
-        assert_eq!(exit_code_for_data(&ok), EXIT_OK);
+        assert_eq!(exit_code_for_data(&connect, &ok), EXIT_OK);
 
         let failed = CliData::Action {
             forward: view("id", "n", ForwardStatus::Error, Some("auth failed")),
             waited: true,
             timed_out: false,
         };
-        assert_eq!(exit_code_for_data(&failed), EXIT_OPERATION_FAILED);
+        assert_eq!(exit_code_for_data(&connect, &failed), EXIT_OPERATION_FAILED);
 
         let timed_out = CliData::Action {
             forward: view("id", "n", ForwardStatus::Connecting, None),
             waited: true,
             timed_out: true,
         };
-        assert_eq!(exit_code_for_data(&timed_out), EXIT_TIMEOUT);
+        assert_eq!(exit_code_for_data(&connect, &timed_out), EXIT_TIMEOUT);
 
         // A `status` query succeeds even when the tunnel is in error.
         let status = CliData::Status {
             forward: view("id", "n", ForwardStatus::Error, Some("auth failed")),
             stats: TunnelStats::default(),
         };
-        assert_eq!(exit_code_for_data(&status), EXIT_OK);
+        assert_eq!(exit_code_for_data(&Command::List, &status), EXIT_OK);
 
         let bulk_failed = CliData::Bulk {
             results: vec![BulkResult {
@@ -753,7 +854,10 @@ mod tests {
             succeeded: 0,
             failed: 1,
         };
-        assert_eq!(exit_code_for_data(&bulk_failed), EXIT_OPERATION_FAILED);
+        assert_eq!(
+            exit_code_for_data(&Command::DisconnectAll, &bulk_failed),
+            EXIT_OPERATION_FAILED
+        );
 
         let bulk_timed_out = CliData::Bulk {
             results: vec![BulkResult {
@@ -766,7 +870,63 @@ mod tests {
             succeeded: 0,
             failed: 1,
         };
-        assert_eq!(exit_code_for_data(&bulk_timed_out), EXIT_TIMEOUT);
+        assert_eq!(
+            exit_code_for_data(&Command::DisconnectAll, &bulk_timed_out),
+            EXIT_TIMEOUT
+        );
+    }
+
+    /// Finding 4: a waited `connect` whose tunnel ended `disconnected` (the
+    /// `Vanished` wait outcome) must NOT look like success. The same payload
+    /// from `disconnect` is success — hence the branch on the command.
+    #[test]
+    fn a_waited_connect_that_did_not_connect_exits_five() {
+        let vanished = CliData::Action {
+            forward: view("id", "n", ForwardStatus::Disconnected, None),
+            waited: true,
+            timed_out: false,
+        };
+        assert_eq!(
+            exit_code_for_data(&connect_cmd(true), &vanished),
+            EXIT_OPERATION_FAILED
+        );
+        assert_eq!(
+            exit_code_for_data(
+                &Command::ConnectAll {
+                    timeout_secs: 30,
+                    wait: true
+                },
+                &CliData::Bulk {
+                    results: vec![BulkResult {
+                        id: "id".into(),
+                        name: "n".into(),
+                        status: ForwardStatus::Disconnected,
+                        last_error: None,
+                        timed_out: false,
+                    }],
+                    succeeded: 0,
+                    failed: 0,
+                }
+            ),
+            EXIT_OPERATION_FAILED
+        );
+
+        // `disconnect` producing the very same payload is a success.
+        assert_eq!(
+            exit_code_for_data(&Command::Disconnect { target: "n".into() }, &vanished),
+            EXIT_OK
+        );
+
+        // `--no-wait`: an unfinished connect stays neutral.
+        let dispatched = CliData::Action {
+            forward: view("id", "n", ForwardStatus::Connecting, None),
+            waited: false,
+            timed_out: false,
+        };
+        assert_eq!(
+            exit_code_for_data(&connect_cmd(false), &dispatched),
+            EXIT_OK
+        );
     }
 
     #[test]
@@ -775,11 +935,17 @@ mod tests {
             target: "prod-db".into(),
             timeout_secs: 45,
             wait: true,
+            force: true,
         });
         assert_eq!(req.cmd, CliCommand::Connect);
         assert_eq!(req.target.as_deref(), Some("prod-db"));
         assert_eq!(req.timeout_ms, Some(45_000));
         assert!(req.wait);
+        assert!(req.force, "--force must reach the server");
+        assert!(
+            !build_request(&connect_cmd(true)).force,
+            "connect is idempotent unless --force"
+        );
 
         let req = build_request(&Command::ConnectAll {
             timeout_secs: 30,
@@ -796,6 +962,7 @@ mod tests {
             target: "x".into(),
             timeout_secs: 300,
             wait: true,
+            force: false,
         });
         assert!(waiting > Duration::from_secs(300), "{waiting:?}");
 
@@ -803,8 +970,79 @@ mod tests {
             target: "x".into(),
             timeout_secs: 300,
             wait: false,
+            force: false,
         });
         assert_eq!(not_waiting, DEFAULT_READ_TIMEOUT);
+    }
+
+    /// A server that accepts but never answers must exit 6 (timed out), not 1:
+    /// the app IS running, it just did not finish inside the budget.
+    #[cfg(unix)]
+    #[test]
+    fn a_stalled_server_times_out_instead_of_looking_internal() {
+        use std::os::unix::net::UnixListener;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("stalled.sock");
+        let listener = UnixListener::bind(&path).expect("bind");
+        // Accept the connection, read nothing, answer nothing.
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept");
+            std::thread::sleep(Duration::from_millis(400));
+            drop(stream);
+        });
+
+        let error = send(
+            &path,
+            &CliRequest::new(CliCommand::List),
+            Duration::from_millis(100),
+        )
+        .expect_err("a stalled server must not answer");
+        assert_eq!(error, ClientError::TimedOut, "{error:?}");
+        assert_eq!(
+            report_client_error(&path, Duration::from_millis(100), error),
+            EXIT_TIMEOUT
+        );
+        server.join().expect("server thread");
+    }
+
+    #[test]
+    fn transport_failures_map_to_the_documented_exit_codes() {
+        let path = Path::new("/tmp/does-not-matter.sock");
+        let budget = Duration::from_secs(1);
+        assert_eq!(
+            report_client_error(path, budget, ClientError::NotRunning),
+            EXIT_NOT_RUNNING
+        );
+        assert_eq!(
+            report_client_error(path, budget, ClientError::TimedOut),
+            EXIT_TIMEOUT
+        );
+        assert_eq!(
+            report_client_error(path, budget, ClientError::Io("broken pipe".into())),
+            EXIT_INTERNAL
+        );
+        assert_eq!(
+            report_client_error(path, budget, ClientError::Protocol("garbage".into())),
+            EXIT_INTERNAL
+        );
+    }
+
+    /// `set_read_timeout` surfaces as `WouldBlock` on Linux, `TimedOut` on macOS.
+    #[test]
+    fn both_read_timeout_error_kinds_are_recognized() {
+        use std::io::{Error, ErrorKind};
+        for kind in [ErrorKind::WouldBlock, ErrorKind::TimedOut] {
+            assert_eq!(
+                classify_read_error(&Error::new(kind, "timed out")),
+                ClientError::TimedOut,
+                "{kind:?}"
+            );
+        }
+        assert!(matches!(
+            classify_read_error(&Error::new(ErrorKind::BrokenPipe, "gone")),
+            ClientError::Io(_)
+        ));
     }
 
     #[test]

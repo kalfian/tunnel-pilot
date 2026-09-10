@@ -374,21 +374,23 @@ and no event. Do not go looking for one.
 |---|---|
 | Transport | Unix domain socket, `#[cfg(unix)]` (Windows named pipe would slot in behind the same `serve` shape) |
 | Path | `<appConfigDir>/cli/cli.sock`; `TUNNEL_PILOT_SOCKET` overrides on BOTH sides; client also takes `--socket` |
-| Permissions | dir `0700`, socket `0600` after bind; no token (see [03 §20](03-TECH-SPEC.md)) |
+| Permissions | dir `0700` **when we create it** (an existing dir keeps its mode), socket `0600` after bind; no token (see [03 §20](03-TECH-SPEC.md)) |
 | Framing | NDJSON — one JSON object per line, each way |
-| Binary | The GUI binary itself; `main.rs` dispatches on `argv[1]` before any Tauri code |
+| Binary | The GUI binary itself; `main.rs` dispatches on `argv[1]` before any Tauri code (a leading option followed by a subcommand is a usage error, not a GUI launch) |
 | Startup | Spawned detached in `.setup()`; a bind failure is logged and the app still starts |
 
 Request / response (all `camelCase`, protocol `v: 1`):
 
 ```jsonc
-{ "v": 1, "cmd": "connect", "target": "prod-db", "timeoutMs": 30000, "wait": true }
+{ "v": 1, "cmd": "connect", "target": "prod-db", "timeoutMs": 30000, "wait": true, "force": false }
 { "v": 1, "ok": true,  "data": { "forward": { … }, "waited": true, "timedOut": false } }
 { "v": 1, "ok": false, "error": { "kind": "notFound", "message": "no forward matches 'x'" } }
 ```
 
 `error` is `AppError` serialized verbatim — the same vocabulary the frontend sees. A `v`
-other than `1` is rejected with `invalidInput`.
+other than `1` is rejected with `invalidInput` (which the client maps to exit `4`, message
+`unsupported protocol version …`). `force` is `connect`-only and defaults to `false`:
+without it a `connected`/`connecting` tunnel is reported, never re-dialed (03 §20).
 
 | Command | Target | Response `data` |
 |---|---|---|
