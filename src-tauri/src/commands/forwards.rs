@@ -88,8 +88,10 @@ pub fn build_ssh_command(cfg: &ForwardConfig) -> String {
 }
 
 /// The runtime for an id, or a `Disconnected` default when the tunnel is not
-/// live (no registry entry yet).
-fn runtime_or_default(state: &Arc<AppState>, id: &str) -> ForwardRuntime {
+/// live (no registry entry yet). `pub(crate)` because the CLI control socket
+/// (`cli/service.rs`) builds its `ForwardView` from the same pair, rather than
+/// duplicating the "not live ⇒ disconnected" rule.
+pub(crate) fn runtime_or_default(state: &Arc<AppState>, id: &str) -> ForwardRuntime {
     state
         .registry
         .runtime(id)

@@ -185,6 +185,14 @@ impl TunnelRegistry {
         self.lock().get(id).map(|h| h.runtime())
     }
 
+    /// Subscribe to a tunnel's status `watch` channel (`None` when the tunnel is
+    /// not live). Used by the CLI control socket to await a terminal status
+    /// without polling; the receiver errors when the handle is removed (or
+    /// replaced by a fresh connect), which the waiter treats as "vanished".
+    pub fn subscribe_status(&self, id: &str) -> Option<watch::Receiver<ForwardStatus>> {
+        self.lock().get(id).map(|h| h.status.subscribe())
+    }
+
     pub fn parent_token(&self, id: &str) -> Option<CancellationToken> {
         self.lock().get(id).map(|h| h.parent_cancel.clone())
     }

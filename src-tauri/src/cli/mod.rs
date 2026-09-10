@@ -14,6 +14,7 @@
 
 pub mod args;
 pub mod protocol;
+pub mod service;
 
 use std::path::{Path, PathBuf};
 
