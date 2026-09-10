@@ -275,3 +275,38 @@ async fn remove_socket_is_best_effort() {
     // A second removal (or a quit with no socket) must not panic.
     server::remove_socket(&h.path);
 }
+
+/// End-to-end over the real transport: the BLOCKING client (the code path a
+/// terminal actually runs) against the real listener, asserting exit codes.
+#[tokio::test]
+async fn the_blocking_client_round_trips_against_the_listener() {
+    use crate::cli::client;
+
+    let h = Harness::start().await;
+    let socket = h.path.display().to_string();
+
+    let cli = |args: Vec<&str>| {
+        let mut argv = vec!["--socket".to_string(), socket.clone()];
+        argv.splice(0..0, args.iter().map(|a| a.to_string()));
+        tokio::task::spawn_blocking(move || client::run(&argv))
+    };
+
+    assert_eq!(cli(vec!["list"]).await.expect("list"), client::EXIT_OK);
+    assert_eq!(
+        cli(vec!["status", "PROD-DB"]).await.expect("status"),
+        client::EXIT_OK
+    );
+    assert_eq!(
+        cli(vec!["status", "ghost"]).await.expect("unknown status"),
+        client::EXIT_NOT_FOUND
+    );
+    assert_eq!(
+        cli(vec!["list", "--json"]).await.expect("json list"),
+        client::EXIT_OK
+    );
+    assert_eq!(
+        cli(vec!["disconnect", "id-a"]).await.expect("disconnect"),
+        client::EXIT_OK
+    );
+    assert!(!h.state.registry.contains("id-a"));
+}

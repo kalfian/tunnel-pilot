@@ -13,6 +13,7 @@
 //! `ForwardView` exposes only the `hasStoredPassword` flag (AGENTS §8).
 
 pub mod args;
+pub mod client;
 pub mod protocol;
 #[cfg(unix)]
 pub mod server;
