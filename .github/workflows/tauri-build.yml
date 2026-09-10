@@ -83,8 +83,18 @@ jobs:
       # Build the Tauri bundle for the host OS. Unsigned (see header). This runs
       # `pnpm build` (frontend) via beforeBuildCommand, then the Rust release
       # build + bundler.
-      - name: Build Tauri app (unsigned)
-        run: pnpm tauri build
+      # `createUpdaterArtifacts` is true in tauri.conf.json, which makes the
+      # bundler REQUIRE `TAURI_SIGNING_PRIVATE_KEY` and fail after the bundles
+      # are already built. That key is a release-only secret and deliberately
+      # stays out of this gate (which also runs on pull_request, where fork PRs
+      # get no secrets). Override the flag off: this job verifies that the app
+      # compiles and bundles, not that it can be signed — tauri-release.yml
+      # owns signing.
+      # The override lives in a file rather than inline JSON so the same command
+      # works under bash and the Windows runner's PowerShell without quoting
+      # games.
+      - name: Build Tauri app (unsigned, no updater artifacts)
+        run: pnpm tauri build --config src-tauri/tauri.ci-gate.conf.json
 
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@v4
