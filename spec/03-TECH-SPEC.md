@@ -1205,6 +1205,8 @@ tunnel-pilot connect <id|name>         [--json] [--timeout <secs>] [--no-wait] [
 tunnel-pilot disconnect <id|name>      [--json]
 tunnel-pilot connect-all               [--json] [--timeout <secs>] [--no-wait]
 tunnel-pilot disconnect-all            [--json]
+tunnel-pilot install-cli               [--json] [--user | --system]
+tunnel-pilot uninstall-cli             [--json]
 tunnel-pilot version | help
 global: [--socket <path>]   env: TUNNEL_PILOT_SOCKET
 ```
@@ -1247,6 +1249,41 @@ serialized `AppError` goes to stderr.
   open. `connect-all` shares ONE deadline across the sweep.
 - **Reuse, not duplication**: bulk goes through `run_start_all`/`run_stop_all` (the exact
   tray/palette path) and `ForwardView` reuses `commands::forwards::runtime_or_default`.
+
+### PATH shim (`cli/shim.rs`)
+
+A `.dmg` install runs no install script, so first run inside the app is the only place that
+can put `tunnel-pilot` on `$PATH`. The shim is a **symlink to `std::env::current_exe()`**
+(invoking the app binary through a symlink dispatches CLI mode normally), named
+`tunnel-pilot`, in the first candidate directory we can write to: `~/.local/bin`, then
+`/usr/local/bin`. Writability is **probed** (create + delete a dot-file in the nearest
+existing ancestor), not inferred from mode bits — `/usr/local/bin` is `rwxr-xr-x root` and
+looks writable by mode. A directory that does not exist yet counts as writable when we could
+create it.
+
+- **Install** creates the parent dir, symlinks to a temp name beside the destination and
+  `rename`s over it, so an existing shim is replaced atomically and is never briefly missing.
+- **Elevation** (only when the chosen dir is not writable) is macOS-only:
+  `osascript -e 'do shell script "…" with administrator privileges'` running
+  `mkdir -p && ln -sfn`. Every path is single-quoted (`'` → `'\''`) — the app path contains a
+  space — and the only interpolated values are the current exe path and the link path. On
+  other unixes there is no elevation helper: the error hands the user the exact `sudo`
+  command. A cancelled prompt is an `invalidInput`, not a crash.
+- **Uninstall** removes a candidate only when `symlink_metadata().file_type().is_symlink()`
+  AND the link is attributable to us (it resolves to the running binary, or its target's file
+  name is `tunnel-pilot` — that second rule is what lets a *stale/dangling* shim be cleaned
+  up). A regular file at the path is never deleted; it is reported as a conflict.
+- **Dev builds are refused**: a `current_exe()` with a `target/` path component would put a
+  `cargo clean`-able binary on the user's `$PATH`. `TUNNEL_PILOT_ALLOW_DEV_SHIM=1` overrides
+  it for testing this module.
+- **Startup hook** (`.setup()`, unix): with `settings.autoInstallCli` on, nothing installed,
+  and a candidate writable **without elevation**, install and log the path. If it would need
+  elevation, do nothing — an unrequested admin password dialog at launch is hostile, so that
+  case waits for the Settings control. Runs on the blocking pool; failure is logged and
+  swallowed.
+
+The same functions back the IPC commands (02 §6.8) and the local `install-cli` /
+`uninstall-cli` subcommands, which never touch the socket and so work with the app closed.
 
 ### Socket path & the `sun_path` limit
 
@@ -1302,4 +1339,15 @@ writes stay a GUI action).
 - [ ] `--json` output is exactly the response `data` object.
 - [ ] No response field carries a password (asserted in a unit test).
 - [ ] `--minimized` and a bare launch still start the GUI unchanged.
+- [ ] With `autoInstallCli` on and `~/.local/bin` writable, first run leaves a
+      `tunnel-pilot` symlink there and logs the path; running the app through that symlink
+      dispatches CLI mode.
+- [ ] Startup NEVER shows an admin prompt: with no writable candidate, the boot hook does
+      nothing and Settings reports `needsElevation`.
+- [ ] `install-cli` on a `cargo`-built binary is refused (exit `2`) unless
+      `TUNNEL_PILOT_ALLOW_DEV_SHIM=1`.
+- [ ] `uninstall-cli` removes our symlink (including a dangling one) and refuses to delete a
+      regular file at the same path.
+- [ ] Installing over an existing shim is atomic (temp symlink + `rename`) and idempotent.
+- [ ] `install-cli` / `uninstall-cli` work with the app closed and never exit `3`.
 

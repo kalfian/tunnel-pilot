@@ -309,6 +309,25 @@ existing id.
 `AppSnapshot` = `{ forwards, groups, settings, logs, runtimes: Vec<(String, ForwardRuntime)>, update: UpdateStatus, keychain_available: bool }`.
 `keychain_available` drives the plaintext-fallback warning UI.
 
+### 6.8 CLI on PATH (`commands/cli_shim.rs`)
+
+| Command | Signature | Triggered by |
+|---------|-----------|--------------|
+| `cli_shim_status` | `() -> CliShimStatus` | Settings mount / after install |
+| `install_cli_shim` | `(target: Option<ShimTarget>) -> CliShimStatus` | Settings "Install CLI" (target `None` = auto) |
+| `uninstall_cli_shim` | `() -> CliShimStatus` | Settings "Remove" |
+
+`ShimTarget` enum `{ UserLocal, UsrLocal }` = `~/.local/bin` | `/usr/local/bin`.
+`CliShimStatus` = `{ supported, installed, path, target, linksToCurrent, linkedPath,
+linkedElsewhere, conflict, installTarget, installPath, needsElevation, currentExe, devBuild,
+entries: ShimEntry[] }`; `ShimEntry` = `{ target, path, state, linkedPath, writable,
+dirExists }` with `state` ∈ `absent|linkedToCurrent|linkedElsewhere|notASymlink`.
+
+The rules live in `cli/shim.rs` (03 §20) so the commands, the `install-cli` subcommand and
+the startup hook cannot drift: never delete a non-symlink, never install a `target/` build,
+never elevate without an explicit user action. `install`/`uninstall` are `async` and run on
+the blocking pool — an elevated install waits on an `osascript` password prompt.
+
 ## 7. Event catalog (Rust → Frontend, via `AppHandle::emit`)
 
 Names are constants in `events.rs`. Payloads are serde structs. Frontend subscribes in
@@ -360,6 +379,10 @@ A terminal user or an LLM agent drives the running app from a shell:
 "/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" list
 ```
 
+The binary normally reaches `$PATH` as `tunnel-pilot` through a symlink the app installs
+itself (§6.8 / 03 §20) — `~/.local/bin` when it is writable, `/usr/local/bin` with an admin
+prompt otherwise. `install-cli` / `uninstall-cli` do the same from a terminal.
+
 **This is a second DRIVER, not a second state owner.** The socket handler resolves a
 target and then calls the *same* service functions the tray and the webview use
 (`ssh::engine::connect_forward`/`disconnect_forward`, `commands::forwards::run_start_all`/
@@ -367,8 +390,10 @@ target and then calls the *same* service functions the tray and the webview use
 is still emitted, and the frontend still rehydrates via `app_hydrate()` — so a CLI-driven
 connect updates the tray and the window with no extra plumbing.
 
-**§6 and §7 above are UNCHANGED by this feature** — the CLI adds no `#[tauri::command]`
-and no event. Do not go looking for one.
+**§7 is UNCHANGED by this feature** — the CLI adds no event, and the socket adds no
+`#[tauri::command]`: driving tunnels from a shell reuses the service functions directly.
+The only IPC the CLI feature owns is §6.8, and that is about the PATH shim (a filesystem
+concern), not about the socket.
 
 | Aspect | Decision |
 |---|---|
@@ -401,6 +426,10 @@ without it a `connected`/`connecting` tunnel is reported, never re-dialed (03 §
 | `connect-all` | — | `{ results, succeeded, failed }` |
 | `disconnect-all` | — | `{ results, succeeded, failed }` |
 | `version` | — | `{ appVersion, protocol }` |
+
+`install-cli` / `uninstall-cli` are **local** subcommands: they operate on the filesystem
+through `cli/shim.rs`, never open the socket, and therefore work with the app closed (exit
+`3` is impossible for them). A refusal exits `2`, a filesystem failure `1`.
 
 `ForwardView` = config + live runtime, flattened. It carries `hasStoredPassword` (a
 boolean) and **never a secret**; there is no password command on the socket (AGENTS §8).

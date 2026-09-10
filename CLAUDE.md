@@ -20,6 +20,14 @@ available. Signed self-updates via `tauri-plugin-updater` (minisign).
 - **App version**: 2.0.0
 - **Toolchain**: Rust via rustup (do not use asdf-rust) · Node + pnpm via asdf
 
+### CLI
+
+The app binary is also the CLI (`tunnel-pilot list|status|connect|…`, spec 03 §20). It puts
+itself on `$PATH` — first run symlinks `tunnel-pilot` into `~/.local/bin` when that is
+writable (`settings.autoInstallCli`), Settings exposes install/remove, and
+`tunnel-pilot install-cli|uninstall-cli` do the same from a shell. A `target/` build is
+refused (`TUNNEL_PILOT_ALLOW_DEV_SHIM=1` overrides for testing).
+
 ### Dev commands
 
 ```bash

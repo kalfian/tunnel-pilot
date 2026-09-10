@@ -95,12 +95,23 @@ Tunnel Pilot v1 (Flutter) and v2 (Tauri) use **incompatible update mechanisms**,
 to it). The app binary **is** the CLI, so no extra download is needed:
 
 ```bash
-# one-off
-"/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" list
-
-# put it on your PATH (optional)
-sudo ln -sf "/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" /usr/local/bin/tunnel-pilot
+tunnel-pilot list
 ```
+
+**It installs itself.** On first run the app symlinks `tunnel-pilot` into `~/.local/bin`
+(or another bin directory it can write to) — no password, no manual step. **Settings** shows where the shim is and lets you install it into
+`/usr/local/bin` instead (that one asks for administrator rights), remove it, or turn the
+automatic install off. The app never asks for your password on its own: if no directory is
+writable, first run does nothing and leaves the choice to you.
+
+From a terminal it is the same thing:
+
+```bash
+tunnel-pilot install-cli            # or --system for /usr/local/bin
+tunnel-pilot uninstall-cli
+```
+
+Both run locally — they do not need the app to be running.
 
 | Command | What it does |
 |---|---|
@@ -109,10 +120,12 @@ sudo ln -sf "/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" /usr/lo
 | `tunnel-pilot connect <id\|name>` | Connect and **wait** for `connected` or `error`. Already connected (or connecting)? It reports that and leaves the tunnel alone — add `--force` to tear down and re-dial |
 | `tunnel-pilot disconnect <id\|name>` | Disconnect (waits for teardown) |
 | `tunnel-pilot connect-all` / `disconnect-all` | The tray's Start All / Stop All |
+| `tunnel-pilot install-cli` / `uninstall-cli` | Add/remove the `tunnel-pilot` symlink on your PATH (local; works with the app closed) |
 | `tunnel-pilot version` / `help` | App + protocol version / usage |
 
 Flags: `--json`, `--timeout <secs>` (1–300, default 30), `--no-wait`, `--force` (connect
-only), `--socket <path>`. Options go **after** the subcommand.
+only), `--user` / `--system` (install-cli only), `--socket <path>`. Options go **after** the
+subcommand.
 A target is a forward **id** (exact) or **name** (case-insensitive, exact); an ambiguous
 name is rejected rather than guessed.
 
@@ -137,6 +150,10 @@ Exit codes — designed for scripts and agents:
 | 4 | target not found, or ambiguous |
 | 5 | the operation ended in `error` (e.g. auth failed) |
 | 6 | timed out waiting for a terminal status |
+
+`install-cli` / `uninstall-cli` never exit `3` (they do not need the app): a refusal — a
+development build, or a real file where the symlink should go — exits `2`, a filesystem or
+permission failure exits `1`.
 
 `status` exits `0` whenever the query succeeded — read the status from the payload. A
 `connect` / `connect-all` that waited exits `5` unless it ends `connected`. A **protocol

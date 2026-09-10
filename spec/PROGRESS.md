@@ -29,6 +29,7 @@
 | M6 | Signed updater + notifications | ✅ done | 6c5970d..637d7fb (7 commits) |
 | M7 | Packaging + cutover | 🟨 prep done — release/cutover pending (manual/CI/device) | 3598b85..(this session) |
 | M8 | CLI control socket | ✅ done (code) — bundled-binary check pending a desktop session | `f36ec46`..`604589a` + docs |
+| M9 | CLI self-install on PATH | ✅ done (code) — packaged-app install pending a desktop session | `be75328`..(this session) |
 
 ## M0 item checklist (commit per item)
 - [x] Toolchain: add Tauri CLI (`pnpm add -D @tauri-apps/cli`), confirm rustup + node/pnpm.
@@ -569,6 +570,26 @@ device steps; the executable prep (bundling config + docs + checklist) is done o
 - `cb0ccd1` feat(cli): service layer driving the engine from the control socket (M8 phase 2)
 - `9b64038` feat(cli): unix control socket listener wired into app startup (M8 phase 3)
 - `604589a` feat(cli): blocking client, renderers and subcommand dispatch (M8 phase 4)
+
+- `be75328` feat(cli): PATH shim install/uninstall module (M9)
+- `b2d2325` feat(cli): autoInstallCli setting + startup shim install (M9)
+- `01bf017` feat(cli): cli_shim IPC commands + typed frontend wrappers (M9)
+- `f81de5a` feat(cli): install-cli / uninstall-cli subcommands (M9)
+
+## M9 — CLI self-install (`cli/shim.rs`)
+- [x] `cli/shim.rs`: candidates (`~/.local/bin` → `/usr/local/bin`), probed writability,
+      status classification (absent/linkedToCurrent/linkedElsewhere/notASymlink), atomic
+      symlink replace, macOS `osascript` elevation, dev-build refusal.
+- [x] `AppSettings.auto_install_cli` (default on) + `.setup()` hook — installs only when NO
+      elevation is needed, so launch never triggers a password prompt.
+- [x] IPC 02 §6.8 (`cli_shim_status`/`install_cli_shim`/`uninstall_cli_shim`) + `lib/ipc.ts`
+      + `lib/types.ts`.
+- [x] `install-cli` / `uninstall-cli` subcommands (local — no socket, never exit 3).
+- [x] Docs: 02 §6.8/§9, 03 §20 (PATH shim + acceptance), README, CLAUDE.md.
+- [ ] **Pending a desktop session**: verify first-run auto-install from the packaged
+      `/Applications` build, and the elevated `/usr/local/bin` path (password prompt).
+- Settings UI for the new commands is owned by the UI agent (this milestone is backend +
+  contract only).
 
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).
