@@ -649,6 +649,10 @@ pub fn auto_install_on_startup() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Every `fs::` use below sits in a `#[cfg(unix)]` test, so on Windows this
+    // import would be dead and `clippy -D warnings` (what the CI gate runs)
+    // fails the lib-test target. Same trap as the io traits in `client.rs`.
+    #[cfg(unix)]
     use std::fs;
 
     /// Make `dir` read-only for this user. Returns false when the process can
