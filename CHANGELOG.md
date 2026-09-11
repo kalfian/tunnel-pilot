@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-09-11
+
+### Added
+- **The CLI installs itself on PATH** — On first launch the app symlinks `tunnel-pilot` into a bin directory that needs no administrator rights (`~/.local/bin`, created if missing), so the terminal command works without any manual `ln -s`. It never raises a password prompt on its own: a location that needs admin rights waits for you to ask.
+- **Settings → Command line** — Shows where the command is installed, with Install, Repair and Remove. A location needing administrator rights says so before it asks for your password. A stale link pointing at an old copy of the app offers a repair, and a real file sitting on the name is reported rather than deleted.
+- **`tunnel-pilot install-cli` / `uninstall-cli`** — The same thing from a shell, with `--user` and `--system` to pick the location. These work while the app is closed.
+- **Setting: install automatically** — On by default; turn it off to manage the command yourself.
+
+### Fixed
+- A development build is refused as an install target, so a rebuild can no longer leave a dead command on your PATH. The refusal now applies consistently to the automatic install, the Settings button and the shell command.
+
 ## [2.1.0] - 2026-09-10
 
 ### Added
