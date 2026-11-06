@@ -121,13 +121,23 @@ src-tauri/
       autostart.rs           # tauri-plugin-autostart sync
       notify.rs              # tauri-plugin-notification wrapper; permission timing
     cli/                     # local control socket + CLI client (§9); NOT an IPC command
-      mod.rs                 # socket path, TUNNEL_PILOT_SOCKET override, sun_path length guard
-      protocol.rs            # NDJSON CliRequest/CliResponse (v1), CliData, ForwardView
+      mod.rs                 # socket path, TUNNEL_PILOT_SOCKET / _CONFIG_DIR overrides, sun_path guard, EDITION
+      protocol.rs            # NDJSON CliRequest/CliResponse (v1), CliData, ForwardView, ForwardFields
       args.rs                # hand-rolled subcommand/flag parser + HELP_TEXT
       server.rs              # #[cfg(unix)] UnixListener: 0700 dir, 0600 socket, accept loop
-      service.rs             # request -> AppState/engine handlers; resolve_target; wait_for_terminal
+      service.rs             # request -> ops/engine handlers; resolve_target; wait_for_terminal; CRUD validation
       client.rs              # blocking UnixStream client, renderers, exit codes
-    commands/
+      forward_cmd.rs         # add/edit/remove/set-password client flows (secret stored client-side)
+      desktop.rs             # `desktop install` -> install.sh --desktop
+      shim.rs                # PATH symlink install/uninstall
+    daemon/                  # #[cfg(unix)] headless AppState owner (03 §21)
+      mod.rs                 # `tunnel-pilot daemon`: boot, bind-first single owner, SIGTERM shutdown
+      service.rs             # systemd (user/system) unit + launchd agent install/uninstall/status
+    ops/
+      forwards.rs            # Tauri-free forward service fns (CRUD, passwords, start/stop all) — every driver
+    boot.rs                  # migration + config load shared by the app and the daemon
+    rt.rs                    # spawn/block_on on Tauri's runtime (gui) or plain tokio (headless)
+    commands/                # ── everything below is #[cfg(feature = "gui")] ──
       mod.rs                 # re-export + invoke_handler list
       forwards.rs            # CRUD, reorder, duplicate, connect/disconnect, retry, copy-ssh-command
       groups.rs              # group/tag CRUD, bulk start/stop, filter helpers
@@ -385,8 +395,8 @@ prompt otherwise. `install-cli` / `uninstall-cli` do the same from a terminal.
 
 **This is a second DRIVER, not a second state owner.** The socket handler resolves a
 target and then calls the *same* service functions the tray and the webview use
-(`ssh::engine::connect_forward`/`disconnect_forward`, `commands::forwards::run_start_all`/
-`run_stop_all`). Status writes still go through the guarded `set_status`, `tunnel://status`
+(`ssh::engine::connect_forward`/`disconnect_forward`, `ops::forwards::run_start_all`/
+`run_stop_all`/`create`/`update`/`delete`). Status writes still go through the guarded `set_status`, `tunnel://status`
 is still emitted, and the frontend still rehydrates via `app_hydrate()` — so a CLI-driven
 connect updates the tray and the window with no extra plumbing.
 
@@ -401,8 +411,8 @@ concern), not about the socket.
 | Path | `<appConfigDir>/cli/cli.sock`; `TUNNEL_PILOT_SOCKET` overrides on BOTH sides; client also takes `--socket` |
 | Permissions | dir `0700` **when we create it** (an existing dir keeps its mode), socket `0600` after bind; no token (see [03 §20](03-TECH-SPEC.md)) |
 | Framing | NDJSON — one JSON object per line, each way |
-| Binary | The GUI binary itself; `main.rs` dispatches on `argv[1]` before any Tauri code (a leading option followed by a subcommand is a usage error, not a GUI launch) |
-| Startup | Spawned detached in `.setup()`; a bind failure is logged and the app still starts |
+| Binary | The GUI binary itself; `main.rs` dispatches on `argv[1]` before any Tauri code (a leading option followed by a subcommand is a usage error, not a GUI launch). The CLI-only build (`--no-default-features`, 03 §21) is the same `main.rs` without the GUI fallback |
+| Owner | The desktop app (spawned detached in `.setup()`; a bind failure is logged and the app still starts) **or** `tunnel-pilot daemon` on a headless host (binds first and exits `1` if the socket is live — one owner at a time) |
 
 Request / response (all `camelCase`, protocol `v: 1`):
 
@@ -426,13 +436,24 @@ without it a `connected`/`connecting` tunnel is reported, never re-dialed (03 §
 | `connect-all` | — | `{ results, succeeded, failed }` |
 | `disconnect-all` | — | `{ results, succeeded, failed }` |
 | `version` | — | `{ appVersion, protocol }` |
+| `add` | — (+ `forward: ForwardFields`) | `{ forward, change: "created" }` |
+| `edit` | id\|name (+ `forward`) | `{ forward, change: "updated" }` |
+| `remove` | id\|name | `{ forward, change: "removed" }` |
+| `password-set` | id\|name | `{ forward, change: "passwordSet" }` — flag only; the CLI stored the secret itself |
+| `password-clear` | id\|name | `{ forward, change: "passwordCleared" }` — the owner deletes the secret |
 
 `install-cli` / `uninstall-cli` are **local** subcommands: they operate on the filesystem
 through `cli/shim.rs`, never open the socket, and therefore work with the app closed (exit
 `3` is impossible for them). A refusal exits `2`, a filesystem failure `1`.
 
 `ForwardView` = config + live runtime, flattened. It carries `hasStoredPassword` (a
-boolean) and **never a secret**; there is no password command on the socket (AGENTS §8).
+boolean) and the identity-file path, and **never a secret**: `ForwardFields` has no password
+field, `password-set` moves only the flag, and the CLI writes the secret into the shared
+credential store from its own process (03 §20, AGENTS §8). The additions are backwards
+compatible, so `v` stays `1`; an older owner answers the new commands with a parse error.
+
+`daemon`, `service`, `desktop install` and `--version` never open the socket as a client
+(03 §21).
 
 **Target resolution** (server-side, single source of truth): exact `id` first, then
 case-insensitive exact `name`. Zero matches → `notFound`; more than one → `invalidInput`

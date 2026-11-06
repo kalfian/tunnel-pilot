@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **CLI-only edition for servers** — A small standalone binary (about 7.5 MB, no window, no WebKit/GTK) for Linux x86_64/aarch64 and macOS. Install with `curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli`; the download is checksum-verified.
+- **Headless daemon** — `tunnel-pilot daemon` runs the tunnels without the desktop app; `tunnel-pilot service install [--connect-all]` keeps it running via a systemd unit (user, or system when root) or a launchd agent, and `service uninstall` / `status` manage it. Only one owner runs at a time: the daemon refuses to start while the app is serving.
+- **Manage forwards from the terminal** — `tunnel-pilot add | edit | remove | set-password | clear-password`. `--forward` takes `ssh -L` syntax and `--identity` paths are made absolute. Passwords are prompted with echo off (or read with `--password-stdin`), never accepted as a flag value.
+- **`tunnel-pilot desktop install`** — Upgrades a CLI-only install to the tray app. It uses the same config, so forwards and passwords carry over.
+- **`tunnel-pilot --version`** — Prints this binary's version and edition (`desktop` / `cli`) without needing the app.
+
+### Fixed
+- The installer no longer reads its "Reinstall anyway?" answer from the piped script when run as `curl … | bash`.
+
+### Security
+- A password still never crosses the control socket. The CLI writes it into the keychain (or the `0600` fallback file) itself and only tells the app that a password is stored.
+
 ## [2.2.0] - 2026-09-11
 
 ### Added

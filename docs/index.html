@@ -58,6 +58,7 @@
       "Groups, tags, and a Cmd/Ctrl+K command palette for keyboard-driven control",
       "Passwords stored in the OS keychain",
       "Cryptographically signed automatic updates (minisign)",
+      "CLI-only edition for servers: one small binary with a headless daemon and a systemd/launchd service (Linux x86_64/aarch64, macOS)",
       "Runs on macOS, Windows, and Linux"
     ],
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -91,6 +92,11 @@
         "@type": "Question",
         "name": "Will my saved tunnels survive upgrading from version 1?",
         "acceptedAnswer": { "@type": "Answer", "text": "Yes. Your configuration lives outside the app bundle in the OS app-support directory, so replacing the app never touches it. Tunnel Pilot 2 detects and imports your version 1 config automatically on first launch, and moves saved passwords into your OS keychain." }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I run Tunnel Pilot on a server with no desktop?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. The CLI-only edition is one 9.6 MB binary with no window and no WebKit or GTK, linking only libc, built for Linux x86_64, Linux aarch64 and macOS. Install it with curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli, add forwards with tunnel-pilot add, and run tunnel-pilot service install --connect-all to keep them up under systemd or launchd. The CLI and the headless daemon are not available on Windows; use the desktop app there." }
       },
       {
         "@type": "Question",
@@ -416,13 +422,42 @@
     .dl-formats { font-family:var(--font-mono); font-size:12px; color:var(--text-2); margin:var(--sp-4) 0 var(--sp-6); }
     .dl-card .btn { width:100%; justify-content:center; margin-top:auto; }
 
-    .install-cmd { display:flex; align-items:center; gap:var(--sp-4); background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); padding:var(--sp-4) var(--sp-5); max-width:100%; }
+    .install-cmd, .cli-code { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); padding:var(--sp-4) var(--sp-5); max-width:100%; }
+    .install-cmd { display:flex; align-items:center; gap:var(--sp-4); }
     .install-cmd .icon { width:16px; height:16px; color:var(--accent); flex-shrink:0; }
-    .install-cmd code { font-size:13px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
-    .copy-btn { display:inline-flex; align-items:center; gap:var(--sp-2); background:none; border:none; color:var(--text-2); cursor:pointer; font-size:12px; font-family:inherit; flex-shrink:0; }
+    /* Wrap rather than truncate: a piped-to-bash command must be readable in full. */
+    .install-cmd code { font-size:13px; color:var(--text); overflow-wrap:anywhere; flex:1; min-width:0; }
+    /* min-height gives a real hit target; the negative margin keeps the row height unchanged. */
+    .copy-btn { display:inline-flex; align-items:center; gap:var(--sp-2); min-height:32px; padding:0 var(--sp-2); margin:calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) 0; border-radius:var(--radius-xs); background:none; border:none; color:var(--text-2); cursor:pointer; font-size:12px; font-family:inherit; flex-shrink:0; transition:color var(--dur-fast), background var(--dur-fast); }
     .copy-btn .icon { width:15px; height:15px; color:currentColor; }
-    .copy-btn:hover { color:var(--text); }
-    .install-tabs { display:flex; gap:var(--sp-2); margin-bottom:var(--sp-4); }
+    .copy-btn:hover { color:var(--text); background:var(--hover); }
+    .copy-btn:active { background:var(--active); }
+    .install-tabs { display:flex; flex-wrap:wrap; gap:var(--sp-2); margin-bottom:var(--sp-4); }
+    .install-note { text-align:center; text-wrap:balance; color:var(--text-2); font-size:12.5px; margin-top:var(--sp-4); }
+    .install-note code { font-size:0.95em; color:var(--text); white-space:nowrap; }
+    .install-note a { text-decoration:underline; text-underline-offset:2px; }
+
+    /* ---------- CLI-only edition ---------- */
+    .cli { border-top:1px solid var(--border); }
+    .cli-grid { display:grid; grid-template-columns:1fr 1.2fr; gap:var(--sp-10); align-items:start; }
+    .cli-grid .sec-head { margin-bottom:0; }
+    .cli .hero-meta { margin-top:var(--sp-7); display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); }
+    .cli .hero-stat .n { line-height:28px; }
+    .cli .callout { margin-top:var(--sp-7); }
+    .cli .callout .mono { color:var(--text); } /* accent-on-surface-2 is 4.15:1 in light at this size */
+    .cli-aside { font-size:13.5px; color:var(--text-2); line-height:1.6; margin-top:var(--sp-5); }
+    .cli-aside code, .cli-step p code { font-size:0.92em; color:var(--text); white-space:nowrap; } /* never split a flag after its "--" */
+    .cli-steps { list-style:none; display:flex; flex-direction:column; gap:var(--sp-7); }
+    .cli-step-head { display:flex; align-items:center; gap:var(--sp-4); margin-bottom:var(--sp-2); }
+    .cli-step-n { width:24px; height:24px; border-radius:var(--radius-full); background:var(--surface); border:1px solid var(--border-strong); color:var(--accent-text); font-family:var(--font-mono); font-size:12px; font-weight:700; line-height:1; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .cli-step h3 { font-size:15px; font-weight:600; flex:1; min-width:0; }
+    .cli-step p { font-size:13.5px; color:var(--text-2); line-height:1.6; margin:0 0 var(--sp-4) calc(24px + var(--sp-4)); }
+    .cli-code { font-family:var(--font-mono); font-size:13px; line-height:1.6; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; }
+    .cli-steps .reveal:nth-child(2) { transition-delay:70ms; }
+    .cli-steps .reveal:nth-child(3) { transition-delay:140ms; }
+
+    .nobr { white-space:nowrap; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
     .install-tab { height:30px; padding:0 var(--sp-4); border-radius:var(--radius-sm); border:1px solid var(--border); background:transparent; color:var(--text-2); font-size:12.5px; font-weight:500; cursor:pointer; font-family:inherit; }
     .install-tab[aria-selected="true"] { background:var(--surface); color:var(--text); border-color:var(--border-strong); }
     .install-tab:hover:not([aria-selected="true"]) { color:var(--text); }
@@ -489,7 +524,7 @@
 
     /* ---------- Responsive ---------- */
     @media (max-width:960px) {
-      .hero-grid, .ram-grid, .showcase { grid-template-columns:1fr; gap:var(--sp-8); }
+      .hero-grid, .ram-grid, .showcase, .cli-grid { grid-template-columns:1fr; gap:var(--sp-8); }
       .showcase.rev { direction:ltr; }
       .fgrid, .dl-grid, .gallery { grid-template-columns:repeat(2,1fr); }
       .gallery .gcard:nth-child(3) { grid-column:1 / -1; max-width:520px; }
@@ -506,6 +541,8 @@
       section { padding:var(--sp-9) 0; }
       .sec-head h2 { font-size:24px; }
       .callout .os-list li { grid-template-columns:1fr; gap:var(--sp-1); }
+      .cli-step p { margin-left:0; }
+      .cli-code { padding:var(--sp-4); }
       .cta-row .btn { flex:1; justify-content:center; }
       .foot { flex-direction:column; align-items:flex-start; }
     }
@@ -561,6 +598,7 @@
       <nav class="nav-links" aria-label="Primary">
         <a href="#footprint">Footprint</a>
         <a href="#features">Features</a>
+        <a href="#cli">CLI</a>
         <a href="#download">Download</a>
         <a href="#upgrade">Upgrade</a>
         <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle color theme">
@@ -815,6 +853,85 @@
       </div>
     </section>
 
+    <!-- ============ CLI-ONLY EDITION ============ -->
+    <section class="cli" id="cli" aria-labelledby="cli-title">
+      <div class="wrap cli-grid">
+        <div>
+          <div class="sec-head reveal">
+            <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg> CLI only &middot; servers &amp; headless</span>
+            <h2 id="cli-title">Same tunnels, no window.</h2>
+            <p>For servers, CI boxes, headless Pis, and anyone who'd rather stay in a terminal. The CLI-only edition is one binary with no window and no WebKit or GTK &mdash; configure forwards with commands, run it as a service, and dropped tunnels reconnect on their own.</p>
+          </div>
+          <div class="hero-meta reveal">
+            <div class="hero-stat">
+              <span class="n">9.6 MB</span>
+              <span class="l">release binary, Linux x86_64 (7.5&nbsp;MB stripped)</span>
+            </div>
+            <div class="hero-stat">
+              <span class="n">libc</span>
+              <span class="l">the only library it links</span>
+            </div>
+            <div class="hero-stat">
+              <span class="n os-inline" aria-label="Linux and macOS">
+                <svg class="icon" aria-hidden="true"><use href="#i-linux"/></svg>
+                <svg class="icon" aria-hidden="true"><use href="#i-apple"/></svg>
+              </span>
+              <span class="l">Linux x86_64 &amp; aarch64 &middot; macOS universal</span>
+            </div>
+          </div>
+          <p class="cli-aside reveal">Not on Windows &mdash; the CLI needs a Unix socket, so Windows uses the desktop app.</p>
+          <div class="callout info reveal">
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg> Want the tray later?</h3>
+            <p>Run <span class="mono">tunnel-pilot desktop install</span>. The desktop app uses the same config directory, so your forwards and stored passwords carry over.</p>
+          </div>
+        </div>
+
+        <div>
+          <ol class="cli-steps" role="list" aria-label="CLI quick start">
+            <li class="cli-step reveal">
+              <div class="cli-step-head">
+                <span class="cli-step-n" aria-hidden="true">1</span>
+                <h3>Install the binary</h3>
+                <button class="copy-btn" type="button" data-copy="curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh \&#10;  | bash -s -- --cli">
+                  <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> install command</span>
+                </button>
+              </div>
+              <p>Lands in <code>~/.local/bin</code>; add <code>--system</code> for <code>/usr/local/bin</code> (the default as root). The download is sha256-verified.</p>
+              <pre class="cli-code"><code>curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh \
+  | bash -s -- --cli</code></pre>
+            </li>
+            <li class="cli-step reveal">
+              <div class="cli-step-head">
+                <span class="cli-step-n" aria-hidden="true">2</span>
+                <h3>Add a forward</h3>
+                <button class="copy-btn" type="button" data-copy="tunnel-pilot add prod-db \&#10;  --ssh deploy@bastion.example.com \&#10;  --forward 5432:db.internal:5432 \&#10;  --identity ~/.ssh/id_ed25519">
+                  <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> add-forward command</span>
+                </button>
+              </div>
+              <p>Key auth shown. For a password, use <code>--password</code> (prompted, echo off) or <code>--password-stdin</code> in scripts &mdash; it never goes on the command line. It's kept in the OS keychain, or a 0600 secrets file on headless Linux.</p>
+              <pre class="cli-code"><code>tunnel-pilot add prod-db \
+  --ssh deploy@bastion.example.com \
+  --forward 5432:db.internal:5432 \
+  --identity ~/.ssh/id_ed25519</code></pre>
+            </li>
+            <li class="cli-step reveal">
+              <div class="cli-step-head">
+                <span class="cli-step-n" aria-hidden="true">3</span>
+                <h3>Keep it running</h3>
+                <button class="copy-btn" type="button" data-copy="tunnel-pilot service install \&#10;  --connect-all">
+                  <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> service install command</span>
+                </button>
+              </div>
+              <p>Installs a systemd user unit on Linux (a system unit when run as root) or a launchd agent on macOS, and connects every forward. Prefer the foreground? <code>tunnel-pilot daemon</code>.</p>
+              <pre class="cli-code"><code>tunnel-pilot service install \
+  --connect-all</code></pre>
+            </li>
+          </ol>
+          <p class="cli-aside reveal"><code>list</code>, <code>status</code>, <code>connect</code>, <code>disconnect</code>, <code>connect-all</code>, <code>edit</code>, <code>remove</code> and the rest all take <code>--json</code> for scripts.</p>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ DOWNLOAD ============ -->
     <section id="download" style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
       <div class="wrap">
@@ -866,10 +983,11 @@
         </p>
 
         <!-- one-command install -->
-        <div class="reveal" style="max-width:760px;margin:0 auto;">
+        <div class="reveal" style="max-width:800px;margin:0 auto;">
           <div class="install-tabs" role="tablist" aria-label="Install command by platform">
-            <button class="install-tab" role="tab" id="tab-unix" aria-controls="panel-unix" aria-selected="true">macOS / Linux / WSL</button>
-            <button class="install-tab" role="tab" id="tab-win" aria-controls="panel-win" aria-selected="false">Windows (PowerShell)</button>
+            <button class="install-tab" type="button" role="tab" id="tab-unix" aria-controls="panel-unix" aria-selected="true">macOS / Linux / WSL</button>
+            <button class="install-tab" type="button" role="tab" id="tab-win" aria-controls="panel-win" aria-selected="false" tabindex="-1">Windows (PowerShell)</button>
+            <button class="install-tab" type="button" role="tab" id="tab-cli" aria-controls="panel-cli" aria-selected="false" tabindex="-1">Server / CLI only</button>
           </div>
           <div class="install-panel" id="panel-unix" role="tabpanel" aria-labelledby="tab-unix">
             <div class="install-cmd">
@@ -879,6 +997,7 @@
                 <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span>
               </button>
             </div>
+            <p class="install-note">The installer detects your platform, downloads the latest release, and launches the app.</p>
           </div>
           <div class="install-panel" id="panel-win" role="tabpanel" aria-labelledby="tab-win" hidden>
             <div class="install-cmd">
@@ -888,10 +1007,18 @@
                 <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span>
               </button>
             </div>
+            <p class="install-note">The installer detects your platform, downloads the latest release, and launches the app.</p>
           </div>
-          <p style="text-align:center;color:var(--text-3);font-size:12.5px;margin-top:var(--sp-4);">
-            The installer detects your platform, downloads the latest release, and launches the app.
-          </p>
+          <div class="install-panel" id="panel-cli" role="tabpanel" aria-labelledby="tab-cli" hidden>
+            <div class="install-cmd">
+              <svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg>
+              <code>curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- <span class="nobr">--cli</span></code>
+              <button class="copy-btn" type="button" data-copy="curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span>
+              </button>
+            </div>
+            <p class="install-note">One <code>tunnel-pilot</code> binary, no window, sha256-verified. Installs to <code>~/.local/bin</code> &mdash; add <code>--system</code> for <code>/usr/local/bin</code>. Linux x86_64 / aarch64 and macOS; not Windows. <a href="#cli">Quick start</a></p>
+          </div>
         </div>
       </div>
     </section>
@@ -980,6 +1107,10 @@
             <p>Manual <code>ssh -L</code> is fine for one-offs. Tunnel Pilot saves your definitions, toggles them with one click, shows live status and stats, auto-reconnects across drops, organizes forwards into groups/tags, and gives you a Cmd/Ctrl+K command palette. It's the GUI the command deserves when tunneling is part of your daily workflow.</p>
           </details>
           <details class="faq reveal">
+            <summary><span class="q-text">Can I run it on a server with no desktop?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>Yes &mdash; install the CLI-only edition with <code>install.sh | bash -s -- <span class="nobr">--cli</span></code>. It's one 9.6&nbsp;MB binary that links only libc, built for Linux x86_64 and aarch64 and macOS. Add forwards with <code>tunnel-pilot add</code>, then <code>tunnel-pilot service install <span class="nobr">--connect-all</span></code> keeps them up under systemd or launchd. The CLI isn't available on Windows; use the desktop app there. See the <a href="#cli">quick start</a>.</p>
+          </details>
+          <details class="faq reveal">
             <summary><span class="q-text">Is Tunnel Pilot free and open source?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
             <p>Yes &mdash; completely free and open source under the MIT License. No paid plans, subscriptions, telemetry, or accounts. The full source is on GitHub; build it yourself or download prebuilt releases for macOS, Windows, and Linux.</p>
           </details>
@@ -988,6 +1119,8 @@
     </section>
 
   </main>
+
+  <p class="sr-only" id="copyStatus" role="status" aria-live="polite"></p>
 
   <!-- Lightbox overlay (screenshot zoom) -->
   <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot preview">
@@ -1042,32 +1175,76 @@
       if (isWin) selectTab('win');
     })();
 
-    // ---- Install tabs ----
-    function selectTab(which) {
-      var pairs = { unix: 'panel-unix', win: 'panel-win' };
-      Object.keys(pairs).forEach(function (k) {
-        var tab = document.getElementById('tab-' + k);
-        var panel = document.getElementById(pairs[k]);
-        var on = k === which;
+    // ---- Install tabs (WAI-ARIA tabs: roving tabindex, arrows/Home/End, auto-activate) ----
+    // Tabs are found in the DOM, so a new platform needs markup only (tab-<k> + aria-controls).
+    function installTabs() {
+      return Array.prototype.slice.call(document.querySelectorAll('.install-tabs [role="tab"]'));
+    }
+    function selectTab(which, moveFocus) {
+      installTabs().forEach(function (tab) {
+        var on = tab.id === 'tab-' + which;
         tab.setAttribute('aria-selected', on ? 'true' : 'false');
-        panel.hidden = !on;
+        tab.tabIndex = on ? 0 : -1;
+        document.getElementById(tab.getAttribute('aria-controls')).hidden = !on;
+        if (on && moveFocus) tab.focus();
       });
     }
-    document.getElementById('tab-unix').addEventListener('click', function () { selectTab('unix'); });
-    document.getElementById('tab-win').addEventListener('click', function () { selectTab('win'); });
+    installTabs().forEach(function (tab) {
+      var key = tab.id.replace(/^tab-/, '');
+      tab.addEventListener('click', function () { selectTab(key); });
+      tab.addEventListener('keydown', function (e) {
+        var tabs = installTabs();
+        var i = tabs.indexOf(tab);
+        var next = e.key === 'ArrowRight' ? (i + 1) % tabs.length
+                 : e.key === 'ArrowLeft' ? (i - 1 + tabs.length) % tabs.length
+                 : e.key === 'Home' ? 0
+                 : e.key === 'End' ? tabs.length - 1
+                 : -1;
+        if (next < 0) return;
+        e.preventDefault();
+        selectTab(tabs[next].id.replace(/^tab-/, ''), true);
+      });
+    });
 
     // ---- Copy buttons ----
+    // One live region announces the result for every copy button (the label swap is visual only).
+    var copyStatus = document.getElementById('copyStatus');
+    function announce(msg) {
+      copyStatus.textContent = '';
+      setTimeout(function () { copyStatus.textContent = msg; }, 30);
+    }
     document.querySelectorAll('.copy-btn').forEach(function (btn) {
+      var label = btn.querySelector('span');
+      var use = btn.querySelector('use');
+      var idle = label.textContent;
+      var timer = null;
+      function flash(text, icon) {
+        label.textContent = text;
+        use.setAttribute('href', icon);
+        clearTimeout(timer);
+        timer = setTimeout(function () { label.textContent = idle; use.setAttribute('href', '#i-copy'); }, 1600);
+      }
+      function fallback() {
+        // Clipboard blocked (permissions / insecure context): select the command so Ctrl/Cmd+C works.
+        var scope = btn.closest('.install-cmd, .cli-step');
+        var code = scope && scope.querySelector('.install-cmd > code, .cli-code > code');
+        if (code) {
+          var range = document.createRange();
+          range.selectNodeContents(code);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        flash('Selected', '#i-copy');
+        announce('Could not copy automatically. The command is selected; press Ctrl+C or Cmd+C.');
+      }
       btn.addEventListener('click', function () {
         var text = btn.getAttribute('data-copy');
+        if (!navigator.clipboard || !navigator.clipboard.writeText) { fallback(); return; }
         navigator.clipboard.writeText(text).then(function () {
-          var label = btn.querySelector('span');
-          var use = btn.querySelector('use');
-          var old = label.textContent;
-          label.textContent = 'Copied';
-          use.setAttribute('href', '#i-check');
-          setTimeout(function () { label.textContent = old; use.setAttribute('href', '#i-copy'); }, 1600);
-        });
+          flash('Copied', '#i-check');
+          announce('Command copied to clipboard.');
+        }, fallback);
       });
     });
 

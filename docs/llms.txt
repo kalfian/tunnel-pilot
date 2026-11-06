@@ -22,6 +22,17 @@ Tunnel Pilot helps developers manage repeated `ssh -L` workflows from a desktop 
 - Export and import tunnel configurations
 - Launch automatically at login
 
+## CLI-Only Edition
+
+- What: a single `tunnel-pilot` binary with no window and no WebKit/GTK, for servers, CI boxes, headless machines, and terminal users
+- Size: 9.6 MB release binary (7.5 MB stripped) on Linux x86_64; links only libc
+- Platforms: Linux x86_64, Linux aarch64, macOS universal; not available on Windows (the CLI needs a Unix socket; Windows uses the desktop app)
+- Install: `curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli` (installs to ~/.local/bin; `--system` or root installs to /usr/local/bin; sha256-verified)
+- Configure: `tunnel-pilot add prod-db --ssh deploy@bastion.example.com --forward 5432:db.internal:5432 --identity ~/.ssh/id_ed25519`; also `edit`, `remove`, `set-password`, `clear-password`, `list`, `status`, `connect`, `disconnect`, `connect-all`, `disconnect-all`, all with `--json`
+- Passwords: `--password` prompts with echo off, `--password-stdin` for scripts; never accepted on the command line; stored in the OS keychain, or a 0600 secrets file on headless Linux
+- Run headless: `tunnel-pilot daemon` (foreground) or `tunnel-pilot service install --connect-all` (systemd user unit on Linux, system unit as root; launchd agent on macOS); tunnels auto-reconnect
+- Upgrade: `tunnel-pilot desktop install` adds the desktop app; it shares the config directory, so forwards and passwords carry over
+
 ## Important URLs
 
 - Website: https://kalfian.github.io/tunnel-pilot/

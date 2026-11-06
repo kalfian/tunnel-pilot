@@ -28,6 +28,13 @@ writable (`settings.autoInstallCli`), Settings exposes install/remove, and
 `tunnel-pilot install-cli|uninstall-cli` do the same from a shell. A `target/` build is
 refused (`TUNNEL_PILOT_ALLOW_DEV_SHIM=1` overrides for testing).
 
+**CLI-only edition** (spec 03 §21): `cargo build --no-default-features` (Linux; add
+`--features keychain` on macOS) drops Tauri/WebKit/GTK. `tunnel-pilot daemon` is then the
+headless owner of `AppState` (binds the socket first — one owner at a time), `service
+install` wraps it in systemd/launchd, `add|edit|remove|set-password` configure forwards, and
+`desktop install` hands off to `install.sh --desktop`. Desktop-only modules are
+`#[cfg(feature = "gui")]`; shared forward logic lives in Tauri-free `ops/forwards.rs`.
+
 ### Dev commands
 
 ```bash
@@ -45,9 +52,12 @@ cargo build
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt
+# CLI-only edition (must stay green too — CI job `cli-headless`)
+cargo clippy --no-default-features --all-targets -- -D warnings
+cargo test --no-default-features
 ```
 
-### CLI (macOS/Linux — talks to the RUNNING app over its control socket)
+### CLI (macOS/Linux — talks to the RUNNING app or daemon over its control socket)
 
 ```bash
 "/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" list
@@ -93,6 +103,8 @@ src-tauri/                            # Rust + Tauri v2 core (owns tray, tokio, 
     updater/                          # tauri-plugin-updater wiring; check/download/install
     commands/                         # thin #[tauri::command] handlers: forwards, groups, settings, logs, backup, updater, app
     cli/                              # local control socket + CLI client (subcommand dispatch from main.rs)
+    daemon/                           # headless AppState owner + systemd/launchd service (unix)
+    ops/                              # Tauri-free service fns shared by commands, tray and the socket
 
 assets/icons/                         # tray icons (idle grey + numbered 1-9), app + menu icons (embedded via include_bytes!)
 docs/                                 # landing page (GitHub Pages) + screenshots + install scripts

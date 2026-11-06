@@ -45,7 +45,8 @@ Manage your SSH tunnels (`ssh -L`) with ease — toggle connections on/off direc
 - **Signed Auto-Updates** — Update bundles are **minisign-signed** and verified against a public key embedded in the app before install (see [Security & signing](#security--signing)).
 - **Copy SSH Command** — Copy the equivalent `ssh -N -L …` command for any tunnel.
 - **Logs Viewer** — In-memory activity log (last 500 entries) with copy/clear.
-- **CLI / automation (macOS & Linux)** — Control the running app from a terminal or a script: `tunnel-pilot list|status|connect|disconnect`, with `--json` output and meaningful exit codes. See [CLI / automation](#cli--automation).
+- **CLI / automation (macOS & Linux)** — Control the running app from a terminal or a script: `tunnel-pilot list|status|connect|disconnect`, create and edit forwards (`add|edit|remove|set-password`), with `--json` output and meaningful exit codes. See [CLI / automation](#cli--automation).
+- **Server / CLI-only edition** — A ~7.5 MB binary with no window and no WebKit/GTK for servers and headless boxes: `tunnel-pilot daemon` runs the tunnels, `tunnel-pilot service install` keeps them up via systemd or launchd, and `tunnel-pilot desktop install` upgrades to the tray app later. See [Server / CLI only](#server--cli-only).
 - **Multi-platform** — macOS, Windows, Linux.
 
 ## Tech stack
@@ -120,8 +121,12 @@ Both run locally — they do not need the app to be running.
 | `tunnel-pilot connect <id\|name>` | Connect and **wait** for `connected` or `error`. Already connected (or connecting)? It reports that and leaves the tunnel alone — add `--force` to tear down and re-dial |
 | `tunnel-pilot disconnect <id\|name>` | Disconnect (waits for teardown) |
 | `tunnel-pilot connect-all` / `disconnect-all` | The tray's Start All / Stop All |
+| `tunnel-pilot add <name> --ssh user@host[:port] --forward [bind:]lport:host:rport (--identity <key> \| --password \| --password-stdin)` | Create a forward (`--forward` uses `ssh -L` syntax) |
+| `tunnel-pilot edit <id\|name> [--name …] [--ssh …] [--forward …] [--identity …] [--password] …` | Change a forward (a live one is disconnected first) |
+| `tunnel-pilot remove <id\|name>` | Delete a forward and its stored password |
+| `tunnel-pilot set-password <id\|name> [--password-stdin]` / `clear-password <id\|name>` | Store (prompted, echo off) or delete the password |
 | `tunnel-pilot install-cli` / `uninstall-cli` | Add/remove the `tunnel-pilot` symlink on your PATH (local; works with the app closed) |
-| `tunnel-pilot version` / `help` | App + protocol version / usage |
+| `tunnel-pilot version` / `--version` / `help` | CLI + running app versions / this binary's version and edition / usage |
 
 Flags: `--json`, `--timeout <secs>` (1–300, default 30), `--no-wait`, `--force` (connect
 only), `--user` / `--system` (install-cli only), `--socket <path>`. Options go **after** the
@@ -146,7 +151,7 @@ Exit codes — designed for scripts and agents:
 | 0 | success |
 | 1 | internal / IO error |
 | 2 | usage error |
-| 3 | Tunnel Pilot is not running (start it with `open -a "Tunnel Pilot"`) |
+| 3 | Tunnel Pilot is not running (start the app — `open -a "Tunnel Pilot"` — or `tunnel-pilot daemon`) |
 | 4 | target not found, or ambiguous |
 | 5 | the operation ended in `error` (e.g. auth failed) |
 | 6 | timed out waiting for a terminal status |
@@ -161,10 +166,60 @@ mismatch** (a stale `tunnel-pilot` symlink against a newer app) surfaces as exit
 `unsupported protocol version` message — that text is what distinguishes it from a missing
 target.
 
-Notes: the CLI talks to a **running** app and never launches it for you. It cannot read or
-set passwords — credentials stay a GUI + keychain concern. Set `TUNNEL_PILOT_SOCKET` (both
-sides, e.g. `$TMPDIR/tunnel-pilot.sock` or `~/.tunnel-pilot.sock`) if the default socket
-path is too long for your system's `sun_path` limit.
+Notes: the CLI talks to a **running** app (or daemon) and never launches it for you.
+Passwords are never accepted as a flag value and never cross the socket: the CLI prompts
+(or reads stdin), writes the secret into the keychain — or the `0600` fallback file where no
+keychain exists — itself, and only tells the app that a password is now stored. Set
+`TUNNEL_PILOT_SOCKET` (both sides, e.g. `$TMPDIR/tunnel-pilot.sock` or
+`~/.tunnel-pilot.sock`) if the default socket path is too long for your system's
+`sun_path` limit.
+
+## Server / CLI only
+
+*Linux (x86_64, aarch64) and macOS.* For servers, CI boxes and anything without a display
+there is a CLI-only edition: one static binary (about 7.5 MB, no WebKit/GTK/D-Bus), the
+same tunnel engine, no window.
+
+```bash
+curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli
+# --system installs to /usr/local/bin (automatic when run as root); the download is sha256-verified
+```
+
+```bash
+tunnel-pilot add prod-db --ssh deploy@bastion.example.com \
+  --forward 5432:db.internal:5432 --identity ~/.ssh/id_ed25519
+tunnel-pilot service install --connect-all   # systemd / launchd: starts now and at boot
+tunnel-pilot list
+```
+
+| Command | What it does |
+|---|---|
+| `tunnel-pilot daemon [--connect-all] [--connect <id\|name>]…` | Run the engine in the foreground (Ctrl-C / SIGTERM disconnects and exits) |
+| `tunnel-pilot service install [--connect-all] [--connect …]` | Run the daemon in the background: a systemd **user** unit (a **system** unit when run as root) on Linux, a launchd agent on macOS. Re-run to change flags |
+| `tunnel-pilot service uninstall` / `status` | Stop and remove it / show whether it is installed and running |
+| `tunnel-pilot desktop install` | Install the desktop tray app; it reads the same config, so forwards and passwords carry over |
+
+Every command from [CLI / automation](#cli--automation) works against the daemon unchanged.
+
+- **Only one owner at a time.** The daemon refuses to start while the desktop app (or another
+  daemon) is serving the socket. Run `tunnel-pilot service uninstall` before opening the
+  desktop app on the same machine.
+- **Passwords on a headless Linux box** live in `tunnel_pilot_secrets.json` (`0600`) in the
+  config dir, because there is no keychain; prefer `--identity` keys on servers. The macOS
+  CLI edition uses the Keychain. Passphrase-protected keys are not supported yet — use an
+  unencrypted key dedicated to the tunnel.
+- **User services stop at logout** unless lingering is enabled; `service install` prints
+  `sudo loginctl enable-linger $USER` when it is off.
+- Logs: `journalctl --user -u tunnel-pilot -f` (Linux), `~/Library/Logs/tunnel-pilot-daemon.log` (macOS).
+- `TUNNEL_PILOT_CONFIG_DIR` points the daemon and the CLI at another config dir.
+
+Build it yourself:
+
+```bash
+cd src-tauri
+cargo build --release --no-default-features                      # Linux (no keychain)
+cargo build --release --no-default-features --features keychain   # macOS
+```
 
 ## Build from source
 
