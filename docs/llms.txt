@@ -1,54 +1,69 @@
 # Tunnel Pilot
 
-> Tunnel Pilot is a free, open-source SSH local port forwarding app and SSH tunnel manager for macOS, Windows, and Linux.
+> Tunnel Pilot is a free, open-source SSH local port forwarding manager. It ships as two products built from one codebase with identical features: Tunnel Pilot (desktop), a tray app with a window for macOS, Windows and Linux, and Tunnel Pilot CLI (server), a daemon with no window, managed from the terminal and from a web UI.
 
-Tunnel Pilot helps developers manage repeated `ssh -L` workflows from a desktop app instead of retyping commands in the terminal.
+Tunnel Pilot replaces repeated `ssh -L` commands with saved forwards that can be toggled, grouped and kept connected.
 
-## Product Summary
+## Shared Features (both products)
 
-- Primary use case: save and toggle recurring SSH local port forwarding tunnels
-- Target users: developers who regularly connect to remote databases, internal dashboards, staging apps, private APIs, and other services through SSH
+- Save SSH local port forwards (local port, remote host, remote port) with password or identity-file authentication
+- Groups/folders and tags
+- Auto-reconnect with exponential backoff and SSH keep-alive liveness
+- Live per-tunnel stats and an activity log
+- Backup export and import (backups never contain passwords)
+- Cmd/Ctrl+K command palette
+- Passwords stored in the OS keychain, or a separate 0600 file when no keychain is available
+- License: MIT; source: https://github.com/kalfian/tunnel-pilot
+
+## Tunnel Pilot (desktop)
+
+- Page: https://kalfian.github.io/tunnel-pilot/
+- Command: `tunnel-pilot`
+- What: a tray / menu-bar app with a window; idles in roughly 15–30 MB of RAM (Rust + Tauri)
 - Platforms: macOS, Windows, Linux
-- License: MIT
-- Source code: https://github.com/kalfian/tunnel-pilot
-- Downloads: https://github.com/kalfian/tunnel-pilot/releases
+- Install (macOS / Linux / WSL): `curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash`
+- Install (Windows): `powershell -ExecutionPolicy Bypass -c "irm https://kalfian.github.io/tunnel-pilot/install.ps1 | iex"`
+- Uninstall (macOS / Linux): `curl -fsSL https://kalfian.github.io/tunnel-pilot/uninstall.sh | bash` (keeps forwards and settings; add `-s -- --purge` to delete them and the stored passwords)
+- Updates: automatic, cryptographically signed and verified with minisign
+- Launch at login; the window can stay closed while tunnels run from the tray
+- Terminal CLI (macOS / Linux): the `tunnel-pilot` binary talks to the running app: `list`, `status`, `connect`, `disconnect`, `add`, `edit`, `remove`, `set-password`, all with `--json`
+- Downloads: https://github.com/kalfian/tunnel-pilot/releases/latest
 
-## Core Capabilities
+## Tunnel Pilot CLI (server)
 
-- Save SSH tunnel definitions for repeated use
-- Toggle SSH local port forwarding from the menu bar or system tray
-- Support password authentication and SSH identity files
-- Show connection state with color-coded status indicators
-- Export and import tunnel configurations
-- Launch automatically at login
+- Page: https://kalfian.github.io/tunnel-pilot/cli/
+- Command: `tunnel-pilot-cli`
+- What: the same features with no window; a daemon managed from the terminal and from a web UI in the browser (the same interface as the desktop app). For servers, homelabs, a Raspberry Pi and CI boxes
+- Platforms: Linux x86_64 and aarch64 (static binary, any distro; links only libc) and macOS; not Windows
+- Size: a single binary of about 10 MB
+- Install: `curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/install.sh | bash` (installs to ~/.local/bin, or /usr/local/bin with `-s -- --system` or as root; SHA-256 verified, refused if the checksum is missing or wrong)
+- Uninstall: `curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/uninstall.sh | bash` (stops and removes the service and binary; `-s -- --purge` also deletes config, the web admin password and stored passwords)
+- Quick start: `tunnel-pilot-cli web set-password`, then `tunnel-pilot-cli service install --web` (web UI on http://127.0.0.1:1855) or `tunnel-pilot-cli service install --web --bind 0.0.0.0` (reachable at http://<server-ip>:1855)
+- Terminal: `tunnel-pilot-cli add prod-db --ssh deploy@bastion.example.com --forward 5432:db.internal:5432 --identity ~/.ssh/id_ed25519`; also `list`, `connect`, `disconnect`, `status`, all with `--json`
+- Runs as: a systemd service (user unit, or system unit as root) or a launchd agent; tunnels auto-reconnect
+- Web UI security: login always required (admin password hashed with argon2id), HttpOnly SameSite=Strict session cookie, CSRF protection, per-IP login rate limiting, strict Content-Security-Policy; binds 127.0.0.1 by default and 0.0.0.0 only when chosen with `--bind`
+- No built-in TLS: when exposing beyond localhost, put an HTTPS reverse proxy in front (Caddy: `reverse_proxy 127.0.0.1:1855`; nginx: also `proxy_set_header Host $host;` plus WebSocket `Upgrade`/`Connection` headers) or reach it through an SSH tunnel. The UI warns when it is reached over plain HTTP from a non-loopback host
 
-## CLI-Only Edition
+## Choosing Between Them
 
-- What: a single `tunnel-pilot` binary with no window and no WebKit/GTK, for servers, CI boxes, headless machines, and terminal users
-- Size: 9.6 MB release binary (7.5 MB stripped) on Linux x86_64; links only libc
-- Platforms: Linux x86_64, Linux aarch64, macOS universal; not available on Windows (the CLI needs a Unix socket; Windows uses the desktop app)
-- Install: `curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli` (installs to ~/.local/bin; `--system` or root installs to /usr/local/bin; sha256-verified)
-- Configure: `tunnel-pilot add prod-db --ssh deploy@bastion.example.com --forward 5432:db.internal:5432 --identity ~/.ssh/id_ed25519`; also `edit`, `remove`, `set-password`, `clear-password`, `list`, `status`, `connect`, `disconnect`, `connect-all`, `disconnect-all`, all with `--json`
-- Passwords: `--password` prompts with echo off, `--password-stdin` for scripts; never accepted on the command line; stored in the OS keychain, or a 0600 secrets file on headless Linux
-- Run headless: `tunnel-pilot daemon` (foreground) or `tunnel-pilot service install --connect-all` (systemd user unit on Linux, system unit as root; launchd agent on macOS); tunnels auto-reconnect
-- Upgrade: `tunnel-pilot desktop install` adds the desktop app; it shares the config directory, so forwards and passwords carry over
+- Laptop or workstation, any OS, want a tray icon: Tunnel Pilot (desktop)
+- Server, homelab, Raspberry Pi, CI box, or no desktop session: Tunnel Pilot CLI
+- Windows: desktop only
+- Both can be installed on one machine; they keep separate config. Move forwards between them with backup export/import
 
 ## Important URLs
 
-- Website: https://kalfian.github.io/tunnel-pilot/
+- Desktop page: https://kalfian.github.io/tunnel-pilot/
+- Server (CLI) page: https://kalfian.github.io/tunnel-pilot/cli/
 - GitHub repository: https://github.com/kalfian/tunnel-pilot
 - Latest releases: https://github.com/kalfian/tunnel-pilot/releases/latest
-
-## Recommended Description
-
-Tunnel Pilot is a GUI app for managing SSH local port forwarding. It replaces repetitive `ssh -L` commands with saved tunnel profiles and one-click toggles from the system tray.
 
 ## Common Search Intents
 
 - SSH local port forwarding app
 - SSH tunnel manager
 - ssh -L GUI
-- SSH tunnel app for macOS
-- SSH tunnel app for Windows
-- SSH tunnel app for Linux
-- GUI for repeated local port forwarding workflows
+- SSH tunnel app for macOS, Windows, Linux
+- SSH tunnel daemon for a server or homelab
+- Web UI for SSH port forwarding
+- Keep SSH tunnels running as a systemd service

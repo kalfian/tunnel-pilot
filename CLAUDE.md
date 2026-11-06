@@ -28,12 +28,15 @@ writable (`settings.autoInstallCli`), Settings exposes install/remove, and
 `tunnel-pilot install-cli|uninstall-cli` do the same from a shell. A `target/` build is
 refused (`TUNNEL_PILOT_ALLOW_DEV_SHIM=1` overrides for testing).
 
-**CLI-only edition** (spec 03 §21): `cargo build --no-default-features` (Linux; add
-`--features keychain` on macOS) drops Tauri/WebKit/GTK. `tunnel-pilot daemon` is then the
-headless owner of `AppState` (binds the socket first — one owner at a time), `service
-install` wraps it in systemd/launchd, `add|edit|remove|set-password` configure forwards, and
-`desktop install` hands off to `install.sh --desktop`. Desktop-only modules are
-`#[cfg(feature = "gui")]`; shared forward logic lives in Tauri-free `ops/forwards.rs`.
+**Two products, one codebase** (spec 03 §21–22, identical features): `tunnel-pilot`
+(desktop, feature `gui`, `src/main.rs`) and `tunnel-pilot-cli` (server, feature `server`,
+`src/bin/tunnel-pilot-cli.rs`, own config `com.kalfian.tunnelpilot.cli`). The server runs
+`daemon [--web]` (headless `AppState` owner; web UI = the same Svelte app over HTTP +
+WebSocket on `127.0.0.1:1855`, admin login required), `service install|uninstall|status`
+(systemd/launchd) and `web set-password`. All command logic lives in Tauri-free `ops/`;
+`commands/*` are thin Tauri wrappers and `ops/dispatch.rs` is the web binding. Desktop-only
+modules are `#[cfg(feature = "gui")]`. Install/uninstall: `docs/install.sh`,
+`docs/uninstall.sh`, `docs/cli/install.sh`, `docs/cli/uninstall.sh`.
 
 ### Dev commands
 
@@ -46,15 +49,18 @@ pnpm tauri build             # release bundle for the current OS
 pnpm check                   # svelte-check / tsc
 pnpm lint                    # prettier --check + eslint
 pnpm test                    # vitest (component/unit)
+pnpm build:web               # web UI bundle (dist-web/) embedded by tunnel-pilot-cli
+pnpm dev:web                 # web UI dev server, proxies /api to a running `daemon --web`
 
 # Rust (from src-tauri/)
 cargo build
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt
-# CLI-only edition (must stay green too — CI job `cli-headless`)
-cargo clippy --no-default-features --all-targets -- -D warnings
-cargo test --no-default-features
+# Server product (must stay green too — CI job `cli-headless`); `pnpm build:web` first
+# to embed the web UI (without it the server still builds and explains the missing UI)
+cargo clippy --no-default-features --features server --all-targets -- -D warnings
+cargo test --no-default-features --features server
 ```
 
 ### CLI (macOS/Linux — talks to the RUNNING app or daemon over its control socket)
@@ -103,8 +109,10 @@ src-tauri/                            # Rust + Tauri v2 core (owns tray, tokio, 
     updater/                          # tauri-plugin-updater wiring; check/download/install
     commands/                         # thin #[tauri::command] handlers: forwards, groups, settings, logs, backup, updater, app
     cli/                              # local control socket + CLI client (subcommand dispatch from main.rs)
-    daemon/                           # headless AppState owner + systemd/launchd service (unix)
-    ops/                              # Tauri-free service fns shared by commands, tray and the socket
+    bin/tunnel-pilot-cli.rs           # server product entry (feature `server`)
+    web/                              # web UI server: auth, sessions, router, embedded assets (feature `server`)
+    daemon/                           # headless AppState owner + systemd/launchd service (unix, `server`)
+    ops/                              # Tauri-free service fns for every command + web dispatcher
 
 assets/icons/                         # tray icons (idle grey + numbered 1-9), app + menu icons (embedded via include_bytes!)
 docs/                                 # landing page (GitHub Pages) + screenshots + install scripts

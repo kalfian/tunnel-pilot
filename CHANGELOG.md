@@ -7,17 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **CLI-only edition for servers** — A small standalone binary (about 7.5 MB, no window, no WebKit/GTK) for Linux x86_64/aarch64 and macOS. Install with `curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli`; the download is checksum-verified.
-- **Headless daemon** — `tunnel-pilot daemon` runs the tunnels without the desktop app; `tunnel-pilot service install [--connect-all]` keeps it running via a systemd unit (user, or system when root) or a launchd agent, and `service uninstall` / `status` manage it. Only one owner runs at a time: the daemon refuses to start while the app is serving.
-- **Manage forwards from the terminal** — `tunnel-pilot add | edit | remove | set-password | clear-password`. `--forward` takes `ssh -L` syntax and `--identity` paths are made absolute. Passwords are prompted with echo off (or read with `--password-stdin`), never accepted as a flag value.
-- **`tunnel-pilot desktop install`** — Upgrades a CLI-only install to the tray app. It uses the same config, so forwards and passwords carry over.
-- **`tunnel-pilot --version`** — Prints this binary's version and edition (`desktop` / `cli`) without needing the app.
+- **Tunnel Pilot CLI — the server product** — `tunnel-pilot-cli` has the same features as the desktop app in a single binary with no window and no WebKit/GTK, for Linux (x86_64, aarch64; static) and macOS. Install with `curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/install.sh | bash`. The installer refuses a download whose SHA-256 is missing or wrong. The CLI keeps its own config, so it can run next to the desktop app on the same machine.
+- **Web UI** — `tunnel-pilot-cli daemon --web` serves the desktop app's interface in the browser, with live updates, on `127.0.0.1:1855` by default. Pass `--bind 0.0.0.0` to reach it by IP. Sign-in is always required: set the admin password with `tunnel-pilot-cli web set-password`.
+- **Runs as a service** — `tunnel-pilot-cli service install [--web] [--bind …] [--connect-all]` sets up a systemd unit (user, or system when root) or a launchd agent; `service uninstall` and `service status` manage it.
+- **Manage forwards from the terminal** — `add | edit | remove | set-password | clear-password`, in both products. `--forward` takes `ssh -L` syntax. Passwords are prompted with echo off or read with `--password-stdin`; they are never accepted as a flag value.
+- **Uninstallers** — `uninstall.sh` (desktop) and `cli/uninstall.sh` (server) remove the app, its service, its launchers and its login item. Your data is kept unless you pass `--purge`, and each uninstaller leaves the other product alone.
+- **`--version`** prints the version and which product it is (`desktop` / `cli`), without needing the app.
+- **Separate download pages** for the desktop app and for the server CLI.
 
 ### Fixed
 - The installer no longer reads its "Reinstall anyway?" answer from the piped script when run as `curl … | bash`.
 
 ### Security
-- A password still never crosses the control socket. The CLI writes it into the keychain (or the `0600` fallback file) itself and only tells the app that a password is stored.
+- The web UI uses argon2id password hashing and in-memory sessions in an `HttpOnly`, `SameSite=Strict` cookie. Changing the password signs everyone out.
+- The web server checks a CSRF header and the request origin. It only answers to IP addresses, `localhost` and names you allow with `--public-host`, which blocks DNS rebinding.
+- Sign-ins are rate-limited per client. The attempt counts before the password is checked, and only two checks run at once. Slow or stalled connections are dropped. Responses carry a strict Content-Security-Policy.
+- TLS is left to a reverse proxy. Use `--trust-proxy` behind one. The daemon and the UI warn when the web UI is reachable over plain HTTP.
+- A root service with the web UI is refused unless you pass `--allow-root`, and system units are hardened.
+- In both products, changing a forward's SSH host, port or user now deletes its stored password. A forward can no longer be pointed at another server and send it the old password.
+- Identity files must be regular files of at most 64 KiB.
+- A password still never travels back out — not over the control socket, not over the web API, and not into logs or backups.
 
 ## [2.2.0] - 2026-09-11
 

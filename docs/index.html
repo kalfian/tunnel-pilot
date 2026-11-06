@@ -58,7 +58,7 @@
       "Groups, tags, and a Cmd/Ctrl+K command palette for keyboard-driven control",
       "Passwords stored in the OS keychain",
       "Cryptographically signed automatic updates (minisign)",
-      "CLI-only edition for servers: one small binary with a headless daemon and a systemd/launchd service (Linux x86_64/aarch64, macOS)",
+      "Terminal CLI on macOS and Linux that drives the running app: list, status, connect, disconnect, add, edit, remove, set-password, with --json output",
       "Runs on macOS, Windows, and Linux"
     ],
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -96,7 +96,12 @@
       {
         "@type": "Question",
         "name": "Can I run Tunnel Pilot on a server with no desktop?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Yes. The CLI-only edition is one 9.6 MB binary with no window and no WebKit or GTK, linking only libc, built for Linux x86_64, Linux aarch64 and macOS. Install it with curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli, add forwards with tunnel-pilot add, and run tunnel-pilot service install --connect-all to keep them up under systemd or launchd. The CLI and the headless daemon are not available on Windows; use the desktop app there." }
+        "acceptedAnswer": { "@type": "Answer", "text": "Use Tunnel Pilot CLI (tunnel-pilot-cli), the server edition: the same features with no window, run as a daemon and managed from the terminal or from a web UI in the browser. It is built for Linux x86_64, Linux aarch64 and macOS, installs side by side with the desktop app, and is documented at https://kalfian.github.io/tunnel-pilot/cli/." }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I uninstall Tunnel Pilot?",
+        "acceptedAnswer": { "@type": "Answer", "text": "On macOS and Linux, run curl -fsSL https://kalfian.github.io/tunnel-pilot/uninstall.sh | bash. It removes the app and keeps your forwards and settings; add -s -- --purge to delete them and the stored passwords as well. On Windows, remove Tunnel Pilot under Settings > Apps." }
       },
       {
         "@type": "Question",
@@ -368,7 +373,7 @@
     section { padding:var(--sp-11) 0; }
     .sec-head { max-width:60ch; margin-bottom:var(--sp-9); }
     .sec-head.center { margin-left:auto; margin-right:auto; text-align:center; }
-    .sec-head h2 { font-size:30px; letter-spacing:-0.02em; font-weight:700; margin:var(--sp-3) 0 var(--sp-3); }
+    .sec-head h2 { font-size:30px; line-height:1.2; letter-spacing:-0.02em; font-weight:700; margin:var(--sp-3) 0 var(--sp-3); }
     .sec-head p { color:var(--text-2); font-size:16px; }
 
     /* ---------- RAM band ---------- */
@@ -403,7 +408,7 @@
     /* ---------- Split showcase (tray + palette) ---------- */
     .showcase { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-10); align-items:center; }
     .showcase.rev { direction:rtl; } .showcase.rev > * { direction:ltr; }
-    .showcase h3 { font-size:22px; letter-spacing:-0.01em; margin:var(--sp-4) 0 var(--sp-4); font-weight:700; }
+    .showcase h2, .showcase h3 { font-size:22px; line-height:1.3; letter-spacing:-0.01em; margin:var(--sp-4) 0 var(--sp-4); font-weight:700; }
     .showcase p { color:var(--text-2); font-size:15px; line-height:1.6; }
     .showcase ul { list-style:none; margin-top:var(--sp-5); display:flex; flex-direction:column; gap:var(--sp-3); }
     .showcase li { display:flex; gap:var(--sp-3); font-size:14px; color:var(--text-2); }
@@ -437,24 +442,22 @@
     .install-note code { font-size:0.95em; color:var(--text); white-space:nowrap; }
     .install-note a { text-decoration:underline; text-underline-offset:2px; }
 
-    /* ---------- CLI-only edition ---------- */
-    .cli { border-top:1px solid var(--border); }
-    .cli-grid { display:grid; grid-template-columns:1fr 1.2fr; gap:var(--sp-10); align-items:start; }
-    .cli-grid .sec-head { margin-bottom:0; }
-    .cli .hero-meta { margin-top:var(--sp-7); display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); }
-    .cli .hero-stat .n { line-height:28px; }
-    .cli .callout { margin-top:var(--sp-7); }
-    .cli .callout .mono { color:var(--text); } /* accent-on-surface-2 is 4.15:1 in light at this size */
-    .cli-aside { font-size:13.5px; color:var(--text-2); line-height:1.6; margin-top:var(--sp-5); }
-    .cli-aside code, .cli-step p code { font-size:0.92em; color:var(--text); white-space:nowrap; } /* never split a flag after its "--" */
-    .cli-steps { list-style:none; display:flex; flex-direction:column; gap:var(--sp-7); }
-    .cli-step-head { display:flex; align-items:center; gap:var(--sp-4); margin-bottom:var(--sp-2); }
-    .cli-step-n { width:24px; height:24px; border-radius:var(--radius-full); background:var(--surface); border:1px solid var(--border-strong); color:var(--accent-text); font-family:var(--font-mono); font-size:12px; font-weight:700; line-height:1; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
-    .cli-step h3 { font-size:15px; font-weight:600; flex:1; min-width:0; }
-    .cli-step p { font-size:13.5px; color:var(--text-2); line-height:1.6; margin:0 0 var(--sp-4) calc(24px + var(--sp-4)); }
-    .cli-code { font-family:var(--font-mono); font-size:13px; line-height:1.6; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; }
-    .cli-steps .reveal:nth-child(2) { transition-delay:70ms; }
-    .cli-steps .reveal:nth-child(3) { transition-delay:140ms; }
+    /* ---------- Uninstall + server cross-link (download section) ---------- */
+    .install-label { display:block; margin:var(--sp-7) 0 var(--sp-3); }
+    .install-note.left { text-align:left; }
+    .server-link { display:flex; align-items:center; gap:var(--sp-6); max-width:800px; margin:var(--sp-8) auto 0; }
+    .server-link > div { flex:1; min-width:0; }
+    .server-link .btn { flex-shrink:0; }
+    .server-link .btn .icon { width:16px; height:16px; }
+
+    /* ---------- Terminal CLI (desktop binary) ---------- */
+    .term { margin:0; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); box-shadow:var(--shadow-2); overflow:hidden; }
+    .term figcaption { display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-5); border-bottom:1px solid var(--border); font-size:12px; font-weight:600; color:var(--text-2); }
+    .term figcaption .icon { width:14px; height:14px; color:var(--accent); }
+    .term .cli-code { border:0; border-radius:0; background:none; padding:var(--sp-5); }
+    .cli-code { font-family:var(--font-mono); font-size:13px; line-height:1.7; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; }
+    .cli-code .prompt { color:var(--text-2); user-select:none; }
+    .showcase li code, .showcase p code { font-size:0.92em; color:var(--text); white-space:nowrap; } /* never split a flag after its "--" */
 
     .nobr { white-space:nowrap; }
     .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
@@ -491,14 +494,14 @@
     .faq summary .icon { width:18px; height:18px; color:var(--text-2); transition:transform var(--dur-base); flex-shrink:0; }
     .faq[open] summary .icon { transform:rotate(180deg); color:var(--accent); }
     .faq p { padding:0 var(--sp-6) var(--sp-5); font-size:14px; color:var(--text-2); line-height:1.7; }
-    .faq p code { background:var(--surface-2); padding:1px var(--sp-2); border-radius:var(--radius-xs); font-size:0.9em; color:var(--accent-text); }
+    .faq p code { overflow-wrap:anywhere; background:var(--surface-2); padding:1px var(--sp-2); border-radius:var(--radius-xs); font-size:0.9em; color:var(--text); } /* accent-text on surface-2 is 4.15:1 in light */
 
     /* ---------- Footer ---------- */
     footer { border-top:1px solid var(--border); padding:var(--sp-10) 0; }
     .foot { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-6); flex-wrap:wrap; }
     .foot .brand img { width:22px; height:22px; }
     .foot-note { font-size:13px; color:var(--text-2); }
-    .foot-links { display:flex; gap:var(--sp-6); }
+    .foot-links { display:flex; flex-wrap:wrap; gap:var(--sp-3) var(--sp-6); }
     .foot-links a { color:var(--text-2); font-size:13px; display:inline-flex; align-items:center; gap:var(--sp-2); }
     .foot-links a:hover { color:var(--text); text-decoration:none; }
     .foot-links .icon { width:15px; height:15px; }
@@ -524,11 +527,12 @@
 
     /* ---------- Responsive ---------- */
     @media (max-width:960px) {
-      .hero-grid, .ram-grid, .showcase, .cli-grid { grid-template-columns:1fr; gap:var(--sp-8); }
+      .hero-grid, .ram-grid, .showcase { grid-template-columns:1fr; gap:var(--sp-8); }
       .showcase.rev { direction:ltr; }
       .fgrid, .dl-grid, .gallery { grid-template-columns:repeat(2,1fr); }
       .gallery .gcard:nth-child(3) { grid-column:1 / -1; max-width:520px; }
       .hero h1 { font-size:36px; }
+      .nav-links .nav-opt { display:none; } /* keep the bar on one line down to 681px */
     }
     @media (max-width:680px) {
       .wrap { padding:0 var(--sp-5); }
@@ -541,8 +545,9 @@
       section { padding:var(--sp-9) 0; }
       .sec-head h2 { font-size:24px; }
       .callout .os-list li { grid-template-columns:1fr; gap:var(--sp-1); }
-      .cli-step p { margin-left:0; }
-      .cli-code { padding:var(--sp-4); }
+      .term .cli-code { padding:var(--sp-4); }
+      .server-link { flex-direction:column; align-items:stretch; gap:var(--sp-5); }
+      .server-link .btn { justify-content:center; }
       .cta-row .btn { flex:1; justify-content:center; }
       .foot { flex-direction:column; align-items:flex-start; }
     }
@@ -586,6 +591,8 @@
     <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
     <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
   </svg>
 
@@ -596,11 +603,12 @@
         Tunnel Pilot <span class="ver">v2.0</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="#footprint">Footprint</a>
+        <a href="#footprint" class="nav-opt">Footprint</a>
         <a href="#features">Features</a>
-        <a href="#cli">CLI</a>
+        <a href="#terminal">Terminal</a>
         <a href="#download">Download</a>
-        <a href="#upgrade">Upgrade</a>
+        <a href="#upgrade" class="nav-opt">Upgrade</a>
+        <a href="cli/">Server edition</a>
         <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle color theme">
           <svg class="icon icon-sun" aria-hidden="true"><use href="#i-sun"/></svg>
           <svg class="icon icon-moon" aria-hidden="true"><use href="#i-moon"/></svg>
@@ -853,81 +861,29 @@
       </div>
     </section>
 
-    <!-- ============ CLI-ONLY EDITION ============ -->
-    <section class="cli" id="cli" aria-labelledby="cli-title">
-      <div class="wrap cli-grid">
-        <div>
-          <div class="sec-head reveal">
-            <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg> CLI only &middot; servers &amp; headless</span>
-            <h2 id="cli-title">Same tunnels, no window.</h2>
-            <p>For servers, CI boxes, headless Pis, and anyone who'd rather stay in a terminal. The CLI-only edition is one binary with no window and no WebKit or GTK &mdash; configure forwards with commands, run it as a service, and dropped tunnels reconnect on their own.</p>
-          </div>
-          <div class="hero-meta reveal">
-            <div class="hero-stat">
-              <span class="n">9.6 MB</span>
-              <span class="l">release binary, Linux x86_64 (7.5&nbsp;MB stripped)</span>
-            </div>
-            <div class="hero-stat">
-              <span class="n">libc</span>
-              <span class="l">the only library it links</span>
-            </div>
-            <div class="hero-stat">
-              <span class="n os-inline" aria-label="Linux and macOS">
-                <svg class="icon" aria-hidden="true"><use href="#i-linux"/></svg>
-                <svg class="icon" aria-hidden="true"><use href="#i-apple"/></svg>
-              </span>
-              <span class="l">Linux x86_64 &amp; aarch64 &middot; macOS universal</span>
-            </div>
-          </div>
-          <p class="cli-aside reveal">Not on Windows &mdash; the CLI needs a Unix socket, so Windows uses the desktop app.</p>
-          <div class="callout info reveal">
-            <h3><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg> Want the tray later?</h3>
-            <p>Run <span class="mono">tunnel-pilot desktop install</span>. The desktop app uses the same config directory, so your forwards and stored passwords carry over.</p>
-          </div>
+    <!-- ============ TERMINAL CLI (desktop binary) ============ -->
+    <section id="terminal" aria-labelledby="terminal-title" style="padding-top:0;">
+      <div class="wrap showcase">
+        <div class="reveal">
+          <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg> Terminal &middot; macOS &amp; Linux</span>
+          <h2 id="terminal-title">The app is a shell command, too</h2>
+          <p>On macOS and Linux the <code class="mono">tunnel-pilot</code> binary talks to the running app, so scripts and shell aliases can check or flip a tunnel without opening the window. Changes show up in the window and the tray straight away.</p>
+          <ul>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Status and control</b> &mdash; <code>list</code>, <code>status</code>, <code>connect</code>, <code>disconnect</code>, each with <code>--json</code>.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Configure from the shell</b> &mdash; <code>add</code>, <code>edit</code>, <code>remove</code> and <code>set-password</code>; a password is prompted, never passed as a flag.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Exit codes to branch on</b> &mdash; <code>0</code> ok, <code>3</code> app not running, <code>5</code> error, <code>6</code> timed out.</span></li>
+          </ul>
         </div>
-
-        <div>
-          <ol class="cli-steps" role="list" aria-label="CLI quick start">
-            <li class="cli-step reveal">
-              <div class="cli-step-head">
-                <span class="cli-step-n" aria-hidden="true">1</span>
-                <h3>Install the binary</h3>
-                <button class="copy-btn" type="button" data-copy="curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh \&#10;  | bash -s -- --cli">
-                  <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> install command</span>
-                </button>
-              </div>
-              <p>Lands in <code>~/.local/bin</code>; add <code>--system</code> for <code>/usr/local/bin</code> (the default as root). The download is sha256-verified.</p>
-              <pre class="cli-code"><code>curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh \
-  | bash -s -- --cli</code></pre>
-            </li>
-            <li class="cli-step reveal">
-              <div class="cli-step-head">
-                <span class="cli-step-n" aria-hidden="true">2</span>
-                <h3>Add a forward</h3>
-                <button class="copy-btn" type="button" data-copy="tunnel-pilot add prod-db \&#10;  --ssh deploy@bastion.example.com \&#10;  --forward 5432:db.internal:5432 \&#10;  --identity ~/.ssh/id_ed25519">
-                  <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> add-forward command</span>
-                </button>
-              </div>
-              <p>Key auth shown. For a password, use <code>--password</code> (prompted, echo off) or <code>--password-stdin</code> in scripts &mdash; it never goes on the command line. It's kept in the OS keychain, or a 0600 secrets file on headless Linux.</p>
-              <pre class="cli-code"><code>tunnel-pilot add prod-db \
-  --ssh deploy@bastion.example.com \
-  --forward 5432:db.internal:5432 \
-  --identity ~/.ssh/id_ed25519</code></pre>
-            </li>
-            <li class="cli-step reveal">
-              <div class="cli-step-head">
-                <span class="cli-step-n" aria-hidden="true">3</span>
-                <h3>Keep it running</h3>
-                <button class="copy-btn" type="button" data-copy="tunnel-pilot service install \&#10;  --connect-all">
-                  <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> service install command</span>
-                </button>
-              </div>
-              <p>Installs a systemd user unit on Linux (a system unit when run as root) or a launchd agent on macOS, and connects every forward. Prefer the foreground? <code>tunnel-pilot daemon</code>.</p>
-              <pre class="cli-code"><code>tunnel-pilot service install \
-  --connect-all</code></pre>
-            </li>
-          </ol>
-          <p class="cli-aside reveal"><code>list</code>, <code>status</code>, <code>connect</code>, <code>disconnect</code>, <code>connect-all</code>, <code>edit</code>, <code>remove</code> and the rest all take <code>--json</code> for scripts.</p>
+        <div class="reveal">
+          <figure class="term">
+            <figcaption><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg> Shell</figcaption>
+            <pre class="cli-code"><code><span class="prompt" aria-hidden="true">$ </span>tunnel-pilot list
+<span class="prompt" aria-hidden="true">$ </span>tunnel-pilot connect prod-db --json
+<span class="prompt" aria-hidden="true">$ </span>tunnel-pilot add staging-api \
+    --ssh deploy@bastion.example.com \
+    --forward 8080:api.internal:80 \
+    --identity ~/.ssh/id_ed25519</code></pre>
+          </figure>
         </div>
       </div>
     </section>
@@ -987,39 +943,46 @@
           <div class="install-tabs" role="tablist" aria-label="Install command by platform">
             <button class="install-tab" type="button" role="tab" id="tab-unix" aria-controls="panel-unix" aria-selected="true">macOS / Linux / WSL</button>
             <button class="install-tab" type="button" role="tab" id="tab-win" aria-controls="panel-win" aria-selected="false" tabindex="-1">Windows (PowerShell)</button>
-            <button class="install-tab" type="button" role="tab" id="tab-cli" aria-controls="panel-cli" aria-selected="false" tabindex="-1">Server / CLI only</button>
           </div>
           <div class="install-panel" id="panel-unix" role="tabpanel" aria-labelledby="tab-unix">
             <div class="install-cmd">
               <svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg>
-              <code>curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash</code>
+              <code>curl -fsSL https://kalfian.github.io/<wbr>tunnel-pilot/<wbr>install.sh | bash</code>
               <button class="copy-btn" type="button" data-copy="curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash">
-                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span>
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> install command</span>
               </button>
             </div>
             <p class="install-note">The installer detects your platform, downloads the latest release, and launches the app.</p>
+            <span class="eyebrow install-label" id="uninstall">Uninstall</span>
+            <div class="install-cmd">
+              <svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg>
+              <code>curl -fsSL https://kalfian.github.io/<wbr>tunnel-pilot/<wbr>uninstall.sh | bash</code>
+              <button class="copy-btn" type="button" data-copy="curl -fsSL https://kalfian.github.io/tunnel-pilot/uninstall.sh | bash">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> uninstall command</span>
+              </button>
+            </div>
+            <p class="install-note">Removes the app and keeps your forwards and settings. Add <code>-s -- --purge</code> to delete those and the stored passwords too.</p>
           </div>
           <div class="install-panel" id="panel-win" role="tabpanel" aria-labelledby="tab-win" hidden>
             <div class="install-cmd">
               <svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg>
               <code>powershell -ExecutionPolicy Bypass -c "irm https://kalfian.github.io/tunnel-pilot/install.ps1 | iex"</code>
               <button class="copy-btn" type="button" data-copy='powershell -ExecutionPolicy Bypass -c "irm https://kalfian.github.io/tunnel-pilot/install.ps1 | iex"'>
-                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span>
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> install command</span>
               </button>
             </div>
-            <p class="install-note">The installer detects your platform, downloads the latest release, and launches the app.</p>
-          </div>
-          <div class="install-panel" id="panel-cli" role="tabpanel" aria-labelledby="tab-cli" hidden>
-            <div class="install-cmd">
-              <svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg>
-              <code>curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- <span class="nobr">--cli</span></code>
-              <button class="copy-btn" type="button" data-copy="curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli">
-                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span>
-              </button>
-            </div>
-            <p class="install-note">One <code>tunnel-pilot</code> binary, no window, sha256-verified. Installs to <code>~/.local/bin</code> &mdash; add <code>--system</code> for <code>/usr/local/bin</code>. Linux x86_64 / aarch64 and macOS; not Windows. <a href="#cli">Quick start</a></p>
+            <p class="install-note">The installer detects your platform, downloads the latest release, and launches the app. To uninstall, remove Tunnel Pilot from Settings &rarr; Apps &rarr; Installed apps.</p>
           </div>
         </div>
+
+        <!-- cross-link: server edition -->
+        <aside class="callout info server-link reveal" aria-labelledby="server-link-title">
+          <div>
+            <h3 id="server-link-title"><svg class="icon" aria-hidden="true"><use href="#i-server"/></svg> Running it on a server?</h3>
+            <p><strong>Tunnel Pilot CLI</strong> is the same app without a window: a daemon you manage from the terminal, or from the desktop app&rsquo;s interface in a browser. For servers, homelabs, a Raspberry Pi &mdash; Linux and macOS.</p>
+          </div>
+          <a class="btn btn-secondary" href="cli/">Tunnel Pilot CLI <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></a>
+        </aside>
       </div>
     </section>
 
@@ -1108,7 +1071,11 @@
           </details>
           <details class="faq reveal">
             <summary><span class="q-text">Can I run it on a server with no desktop?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
-            <p>Yes &mdash; install the CLI-only edition with <code>install.sh | bash -s -- <span class="nobr">--cli</span></code>. It's one 9.6&nbsp;MB binary that links only libc, built for Linux x86_64 and aarch64 and macOS. Add forwards with <code>tunnel-pilot add</code>, then <code>tunnel-pilot service install <span class="nobr">--connect-all</span></code> keeps them up under systemd or launchd. The CLI isn't available on Windows; use the desktop app there. See the <a href="#cli">quick start</a>.</p>
+            <p>Use <a href="cli/">Tunnel Pilot CLI</a> (<code>tunnel-pilot-cli</code>), the server edition. It has the same features with no window: a daemon you manage from the terminal or from a web UI in the browser. It runs on Linux x86_64 / aarch64 and macOS, and installs side by side with this app with its own config &mdash; move forwards between them with backup export and import.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">How do I uninstall it?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>On macOS and Linux run <code>curl -fsSL https://kalfian.github.io/<wbr>tunnel-pilot/<wbr>uninstall.sh | bash</code>. It removes the app and keeps your forwards and settings, so a reinstall picks them up again; add <code>-s -- --purge</code> to delete them and the stored passwords as well. On Windows, remove Tunnel Pilot from Settings &rarr; Apps.</p>
           </details>
           <details class="faq reveal">
             <summary><span class="q-text">Is Tunnel Pilot free and open source?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
@@ -1142,6 +1109,7 @@
       </div>
       <nav class="foot-links" aria-label="Footer">
         <a href="https://github.com/kalfian/tunnel-pilot"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg> GitHub</a>
+        <a href="cli/"><svg class="icon" aria-hidden="true"><use href="#i-server"/></svg> Server edition</a>
         <a href="https://github.com/kalfian/tunnel-pilot/releases"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Releases</a>
         <a href="https://github.com/kalfian/tunnel-pilot/issues"><svg class="icon" aria-hidden="true"><use href="#i-external"/></svg> Issues</a>
       </nav>
@@ -1226,8 +1194,8 @@
       }
       function fallback() {
         // Clipboard blocked (permissions / insecure context): select the command so Ctrl/Cmd+C works.
-        var scope = btn.closest('.install-cmd, .cli-step');
-        var code = scope && scope.querySelector('.install-cmd > code, .cli-code > code');
+        var scope = btn.closest('.install-cmd, .copy-scope');
+        var code = scope && scope.querySelector('.install-cmd > code, pre > code');
         if (code) {
           var range = document.createRange();
           range.selectNodeContents(code);

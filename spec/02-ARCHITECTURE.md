@@ -128,13 +128,19 @@ src-tauri/
       service.rs             # request -> ops/engine handlers; resolve_target; wait_for_terminal; CRUD validation
       client.rs              # blocking UnixStream client, renderers, exit codes
       forward_cmd.rs         # add/edit/remove/set-password client flows (secret stored client-side)
-      desktop.rs             # `desktop install` -> install.sh --desktop
       shim.rs                # PATH symlink install/uninstall
-    daemon/                  # #[cfg(unix)] headless AppState owner (03 §21)
-      mod.rs                 # `tunnel-pilot daemon`: boot, bind-first single owner, SIGTERM shutdown
+    bin/tunnel-pilot-cli.rs  # entry of the server product (feature `server`, 03 §21)
+    web/                     # feature `server`: web UI server (§10, 03 §22)
+      mod.rs                 # axum router, security headers, CSRF/Origin checks, invoke, WebSocket events, SPA
+      auth.rs                # sessions (CSPRNG, idle/absolute expiry, password-change invalidation) + login throttle
+      admin.rs               # argon2id admin password file (0600) + `web set-password|status`
+      assets.rs              # web UI files embedded by build.rs from ../dist-web
+    daemon/                  # #[cfg(all(unix, feature = "server"))] headless AppState owner (03 §21)
+      mod.rs                 # `tunnel-pilot-cli daemon [--web]`: boot, bind-first single owner, SIGTERM shutdown
       service.rs             # systemd (user/system) unit + launchd agent install/uninstall/status
-    ops/
-      forwards.rs            # Tauri-free forward service fns (CRUD, passwords, start/stop all) — every driver
+    ops/                     # Tauri-free service fns for EVERY command — shared by webview, tray, socket, web
+      forwards.rs  groups.rs  settings.rs  logs.rs  backup.rs
+      dispatch.rs            # command name + JSON args -> ops (the web transport's binding of §6)
     boot.rs                  # migration + config load shared by the app and the daemon
     rt.rs                    # spawn/block_on on Tauri's runtime (gui) or plain tokio (headless)
     commands/                # ── everything below is #[cfg(feature = "gui")] ──
@@ -294,6 +300,8 @@ existing id.
 |---------|-----------|--------------|
 | `export_backup` | `(path: String) -> ()` | export (writes BackupFile, passwords stripped) |
 | `import_backup` | `(path: String, mode: ImportMode) -> ImportResult` | import; `mode` = `Replace`\|`Merge`; validates + rejects version>current |
+| `export_backup_text` | `() -> String` | the same backup JSON as a string (web UI download, §10) |
+| `import_backup_text` | `(content: String, mode: ImportMode) -> ImportResult` | import from uploaded text (web UI, §10) |
 
 `ImportMode` enum `{ Replace, Merge }`; `ImportResult` = `{ imported: usize, skipped: usize, replaced: bool }`.
 
@@ -411,8 +419,8 @@ concern), not about the socket.
 | Path | `<appConfigDir>/cli/cli.sock`; `TUNNEL_PILOT_SOCKET` overrides on BOTH sides; client also takes `--socket` |
 | Permissions | dir `0700` **when we create it** (an existing dir keeps its mode), socket `0600` after bind; no token (see [03 §20](03-TECH-SPEC.md)) |
 | Framing | NDJSON — one JSON object per line, each way |
-| Binary | The GUI binary itself; `main.rs` dispatches on `argv[1]` before any Tauri code (a leading option followed by a subcommand is a usage error, not a GUI launch). The CLI-only build (`--no-default-features`, 03 §21) is the same `main.rs` without the GUI fallback |
-| Owner | The desktop app (spawned detached in `.setup()`; a bind failure is logged and the app still starts) **or** `tunnel-pilot daemon` on a headless host (binds first and exits `1` if the socket is live — one owner at a time) |
+| Binary | The GUI binary itself; `main.rs` dispatches on `argv[1]` before any Tauri code (a leading option followed by a subcommand is a usage error, not a GUI launch). The server product's binary is `src/bin/tunnel-pilot-cli.rs` (feature `server`, 03 §21) — same dispatcher, no GUI fallback |
+| Owner | The desktop app (spawned detached in `.setup()`; a bind failure is logged and the app still starts) **or** `tunnel-pilot-cli daemon` (server product, its own socket under `com.kalfian.tunnelpilot.cli`; binds first and exits `1` if that socket is live — one owner per product) |
 
 Request / response (all `camelCase`, protocol `v: 1`):
 
@@ -452,7 +460,7 @@ field, `password-set` moves only the flag, and the CLI writes the secret into th
 credential store from its own process (03 §20, AGENTS §8). The additions are backwards
 compatible, so `v` stays `1`; an older owner answers the new commands with a parse error.
 
-`daemon`, `service`, `desktop install` and `--version` never open the socket as a client
+`daemon`, `service`, `web` and `--version` never open the socket as a client
 (03 §21).
 
 **Target resolution** (server-side, single source of truth): exact `id` first, then
@@ -463,3 +471,71 @@ tunnel.
 Exit codes: `0` ok · `1` internal/IO · `2` usage · `3` app not running · `4` not found or
 ambiguous · `5` operation ended in `error` · `6` timed out. `status` exits `0` whenever the
 query succeeded; the tunnel state is in the payload.
+
+## 10. Web transport (`tunnel-pilot-cli`, 03 §22)
+
+`tunnel-pilot-cli` serves the **same Svelte UI** over HTTP so a headless host is managed
+from a browser. Features are identical to the desktop app; only the transport differs.
+The IPC contract (§6/§7) stays the single source of truth: the web transport is a second
+binding of the same command names, argument objects, return values and events.
+
+| Aspect | Decision |
+|---|---|
+| Server | `tunnel-pilot-cli daemon --web [--bind <addr:port>]` (axum), default `127.0.0.1:1855` |
+| Assets | `pnpm build:web` output embedded in the binary; served at `/` (SPA fallback to `index.html`) |
+| Auth | Admin password (`tunnel-pilot-cli web set-password`, argon2id, `0600` file). Login ALWAYS required, localhost included. `--web` refuses to start without a password; a non-loopback bind is never allowed without one |
+| Session | Cookie `tp_session` — `HttpOnly; SameSite=Strict; Path=/` (+ `Secure` when a `--trust-proxy` proxy reports `X-Forwarded-Proto: https`), random 256-bit id, in-memory, 12h idle expiry, cleared on logout / password change / restart |
+| CSRF | Every non-GET `/api/*` request must carry `X-Tunnel-Pilot: 1` (a cross-site form cannot set it) on top of `SameSite=Strict`; the WebSocket handshake checks `Origin` == `Host` |
+| Brute force | Per-client throttle (IPv6 per /64), counted before argon2; 5 attempts → backing-off lockout (`429`); ≤ 2 concurrent verifications (`503` beyond) |
+| Host | `Host` must be an IP literal, `localhost` or a `--public-host` name (`421` otherwise) — DNS-rebinding defence; `X-Forwarded-*` only with `--trust-proxy` |
+| Connections | hyper with a 10s header-read timeout, ≤ 256 open connections |
+| TLS | Not built in — terminate HTTPS at a reverse proxy (Caddy/nginx). The UI warns when used over plain HTTP from a non-loopback host |
+
+### Endpoints
+
+| Method + path | Auth | Request | Response |
+|---|---|---|---|
+| `GET /api/session` | none | — | `200 { authenticated: bool, version: string, edition: "cli" }` |
+| `POST /api/login` | none (header required) | `{ password }` | `204` + `Set-Cookie`; `401 AppError(unauthorized)`; `429` when rate-limited |
+| `POST /api/logout` | session | — | `204`, cookie cleared |
+| `POST /api/invoke/<command>` | session + header | the exact args object Tauri `invoke(command, args)` takes (camelCase keys; `{}` when none) | `200` + JSON of the command's return value (`null` for unit) |
+| `GET /api/events` | session (cookie) + `Origin` check | WebSocket upgrade | text frames `{ "event": "<§7 name>", "payload": <§7 payload> }`; server closes `4401` when the session ends |
+
+Errors are the serialized `AppError` (`{ "kind": "...", "message": "..." }`) with status:
+`notFound` → 404 (also an unknown or desktop-only command), `invalidInput` → 400,
+`unauthorized` → 401, rate limit → 429, everything else → 500.
+
+### Command availability in web mode
+All §6 commands are available **except** the desktop-only ones, which answer
+`404 notFound`: `show_window`, `hide_window`, `quit_app`, `hide_tray_popover`,
+`check_update`, `install_update`, `skip_update`, `cli_shim_status`, `install_cli_shim`,
+`uninstall_cli_shim`, and the path-based `export_backup` / `import_backup` (a browser cannot
+name a server path). Web mode uses `export_backup_text() -> string` and
+`import_backup_text({ content, mode }) -> ImportResult` instead (both also registered as
+desktop commands, §6.5). `update_settings` applies the settings but skips desktop side
+effects (autostart, dock). `app_hydrate` reports the update status as idle.
+`set_forward_password` stays write-only: no command returns a secret (AGENTS §8).
+
+### Frontend
+`src/lib/transport.ts` exports `invoke(command, args)` and `listen(event, cb)`; at runtime it
+picks Tauri (`window.__TAURI_INTERNALS__` present, `src/lib/runtime.ts::isWeb`) or HTTP +
+one shared WebSocket. `ipc.ts` / `events.ts` import from it — components never see the
+difference. Web-mode rules:
+- **Sync:** the socket reconnects with backoff (500ms doubling to 10s, immediately when the
+  browser comes back online); a reconnect after a gap re-runs `app_hydrate`
+  (`onReconnect`). Close `4401` → back to the login screen, no retry. A handshake that never
+  opened checks `GET /api/session` first so an expired session does not retry forever.
+- **Auth:** `WebRoot.svelte` gates on `GET /api/session`; `LoginScreen.svelte` (wrong
+  password, 429 with `Retry-After`, unreachable, session-ended states); Sign out in
+  Settings → Session and in the command palette.
+- **Platform swaps:** browser clipboard (`navigator.clipboard`, `execCommand` fallback on
+  plain HTTP); identity file = text field for a path ON THE SERVER; backups via download
+  (`export_backup_text`) / upload (`import_backup_text`, 5 MB cap).
+- **Hidden:** tray popover, window chrome, updater UI, PATH-shim group, launch-at-login /
+  show-in-dock (replaced by a Server group with `service install --web`), desktop
+  notifications.
+- **Notices:** a persistent plain-HTTP warning on non-loopback hosts; keychain wording says
+  "on the server".
+- Below 440px of content width the Connections filter moves to its own row.
+- `pnpm build:web` → `dist-web/` (embedded by the server build); `pnpm dev:web` proxies
+  `/api` to `TUNNEL_PILOT_WEB_ORIGIN` (default `127.0.0.1:1855`).

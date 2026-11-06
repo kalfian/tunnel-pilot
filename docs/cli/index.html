@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tunnel Pilot CLI — SSH Tunnel Daemon with a Web UI for Servers &amp; Homelabs</title>
+  <meta name="description" content="Tunnel Pilot CLI keeps SSH local port forwards up on a server, homelab or Raspberry Pi. One ~10 MB binary for Linux and macOS: a daemon you manage from the terminal or from a password-protected web UI. Free and open source.">
+  <meta name="keywords" content="SSH tunnel daemon, SSH port forwarding server, headless SSH tunnel manager, ssh -L web UI, SSH tunnel systemd service, homelab SSH tunnel, Raspberry Pi SSH tunnel">
+  <meta name="robots" content="index, follow">
+  <meta name="author" content="kalfian">
+  <link rel="canonical" href="https://kalfian.github.io/tunnel-pilot/cli/">
+  <meta name="theme-color" content="#111318">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Tunnel Pilot CLI — SSH tunnels on your server, managed from a browser">
+  <meta property="og:description" content="The Tunnel Pilot daemon without the window: keeps ssh -L forwards up on servers, homelabs and a Raspberry Pi. Manage it from the terminal or a web UI. Linux and macOS, free and open source.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://kalfian.github.io/tunnel-pilot/cli/">
+  <meta property="og:image" content="https://kalfian.github.io/tunnel-pilot/og-banner.png?v=2">
+  <meta property="og:image:secure_url" content="https://kalfian.github.io/tunnel-pilot/og-banner.png?v=2">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="400">
+  <meta property="og:image:alt" content="Tunnel Pilot — SSH local port forwarding manager">
+  <meta property="og:site_name" content="Tunnel Pilot">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Tunnel Pilot CLI — SSH tunnels on your server, managed from a browser">
+  <meta name="twitter:description" content="A daemon that keeps ssh -L forwards up, managed from the terminal or a web UI. Linux and macOS, free and open source.">
+  <meta name="twitter:image" content="https://kalfian.github.io/tunnel-pilot/og-banner.png?v=2">
+  <meta name="twitter:image:alt" content="Tunnel Pilot banner — SSH local port forwarding manager">
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Tunnel Pilot CLI",
+    "alternateName": "tunnel-pilot-cli",
+    "description": "Tunnel Pilot CLI is the server edition of Tunnel Pilot: the same SSH local port forwarding features with no window. A daemon keeps the forwards up and reconnects them, managed from the terminal or from a web UI in the browser. For servers, homelabs, a Raspberry Pi and CI boxes.",
+    "url": "https://kalfian.github.io/tunnel-pilot/cli/",
+    "downloadUrl": "https://github.com/kalfian/tunnel-pilot/releases/latest",
+    "installUrl": "https://kalfian.github.io/tunnel-pilot/cli/install.sh",
+    "image": "https://kalfian.github.io/tunnel-pilot/og-banner.png",
+    "screenshot": [
+      "https://kalfian.github.io/tunnel-pilot/screenshots/web-ui.png"
+    ],
+    "applicationCategory": "DeveloperApplication",
+    "applicationSubCategory": "SSH tunnel daemon",
+    "operatingSystem": "Linux, macOS",
+    "keywords": "SSH tunnel daemon, SSH port forwarding server, headless SSH tunnel manager, ssh -L web UI, homelab SSH tunnel",
+    "featureList": [
+      "Daemon that keeps SSH local port forwards up, as a systemd service or a launchd agent",
+      "Web UI with the same interface as the desktop app; login always required",
+      "Terminal commands for every action, with --json output",
+      "Auto-reconnect with SSH keep-alive liveness",
+      "Groups, tags, live stats, activity log and backup export/import",
+      "Passwords in the OS keychain, or a 0600 file where no keychain exists",
+      "Single static binary for Linux x86_64 and aarch64, plus macOS"
+    ],
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Person", "name": "kalfian", "url": "https://github.com/kalfian" },
+    "license": "https://opensource.org/licenses/MIT",
+    "isAccessibleForFree": true
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Does Tunnel Pilot CLI run on Windows?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. Tunnel Pilot CLI is built for Linux x86_64, Linux aarch64 and macOS. On Windows, use the Tunnel Pilot desktop app, which has the same features in a tray app with a window." }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I install the CLI and the desktop app on the same machine?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. They are separate products with separate config, so they install side by side. To move forwards from one to the other, export a backup in one and import it in the other. Backups never contain passwords, so set those again afterwards." }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I serve the web UI over HTTPS?",
+        "acceptedAnswer": { "@type": "Answer", "text": "The web UI has no built-in TLS. Put an HTTPS reverse proxy such as Caddy or nginx in front of 127.0.0.1:1855, or keep the default localhost bind and reach it through an SSH tunnel. Start the daemon with --public-host <your domain> --trust-proxy. With nginx, pass the Host header (proxy_set_header Host $host;), X-Forwarded-For/-Proto, and the WebSocket Upgrade and Connection headers." }
+      },
+      {
+        "@type": "Question",
+        "name": "Do I need the web UI?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. Leave out --web and the daemon runs without it. Every action is also a terminal command: add, edit, remove, list, connect, disconnect and status, all with --json output." }
+      },
+      {
+        "@type": "Question",
+        "name": "Where are SSH passwords stored?",
+        "acceptedAnswer": { "@type": "Answer", "text": "In the OS keychain when one is available. On a server without a keychain they go to a separate file readable only by its owner (mode 0600), and the web UI shows a notice saying so. The web UI admin password is stored as an argon2id hash." }
+      }
+    ]
+  }
+  </script>
+
+  <link rel="icon" type="image/png" href="../favicon.png">
+
+  <!-- Without JS, the scroll-reveal/hero animations never trigger — show final state. -->
+  <noscript><style>
+    .reveal { opacity:1 !important; transform:none !important; }
+    .hero .eyebrow, .hero h1, .hero .lede, .hero .cta-row, .hero .hero-meta, .hero-figure { animation:none !important; }
+    .zoom-hint { display:none !important; }
+  </style></noscript>
+
+  <script>
+    // Set theme before first paint to avoid flash. Dark-first; honor saved pref, else system.
+    (function () {
+      try {
+        var saved = localStorage.getItem('tp-theme');
+        var theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    })();
+  </script>
+
+  <style>
+    /* ============================================================
+       Tokens — mirrored from spec/design-tokens.md, identical to ../index.html
+       ============================================================ */
+    :root, [data-theme="dark"] {
+      --bg:#111318; --surface:#1A1D24; --surface-2:#22262F; --surface-3:#2A2F39; --surface-overlay:#1E222A;
+      --text:#E5E7EB; --text-2:#8B919A; --text-3:#646B75; --text-on-accent:#0D1015;
+      --border:#2E333D; --border-strong:#3A404B; --divider:#22262F;
+      --accent:#4AA5E0; --accent-solid:#4AA5E0; --accent-hover:#63B4E8; --accent-active:#7CC2EE;
+      --accent-text:#4AA5E0; --accent-subtle:rgba(74,165,224,0.12); --accent-subtle-2:rgba(74,165,224,0.20);
+      --hover:rgba(255,255,255,0.05); --active:rgba(255,255,255,0.09);
+      --status-connected:#34D399; --status-pending:#FBBF24; --status-error:#F87171; --status-idle:#6B7280;
+      --status-pending-fg:#FBBF24;
+      --focus-ring:#4AA5E0; --focus-ring-halo:rgba(74,165,224,0.40); --scrim:rgba(0,0,0,0.55);
+      --shadow-1:0 1px 2px rgba(0,0,0,0.40);
+      --shadow-2:0 6px 16px rgba(0,0,0,0.50), 0 1px 3px rgba(0,0,0,0.40);
+      --shadow-3:0 16px 40px rgba(0,0,0,0.60), 0 4px 10px rgba(0,0,0,0.45);
+      --on-accent-btn:#0D1015;
+      --link-on-bg:var(--accent-text);
+    }
+    [data-theme="light"] {
+      --bg:#F8F9FB; --surface:#FFFFFF; --surface-2:#F1F3F6; --surface-3:#E9ECF1; --surface-overlay:#FFFFFF;
+      --text:#1A1D23; --text-2:#6B7280; --text-3:#868C96; --text-on-accent:#FFFFFF;
+      --border:#E2E5EA; --border-strong:#CDD2DA; --divider:#E9ECF1;
+      --accent:#288DCC; --accent-solid:#147ABD; --accent-hover:#0F6BA8; --accent-active:#0C5C90;
+      --accent-text:#147ABD; --accent-subtle:rgba(40,141,204,0.08); --accent-subtle-2:rgba(40,141,204,0.14);
+      --hover:rgba(0,0,0,0.04); --active:rgba(0,0,0,0.08);
+      --status-connected:#16A34A; --status-pending:#D97706; --status-error:#DC2626; --status-idle:#9CA3AF;
+      --status-pending-fg:#B45309;
+      --focus-ring:#288DCC; --focus-ring-halo:rgba(40,141,204,0.32); --scrim:rgba(17,19,24,0.32);
+      --shadow-1:0 1px 2px rgba(17,19,24,0.06), 0 1px 1px rgba(17,19,24,0.04);
+      --shadow-2:0 4px 12px rgba(17,19,24,0.10), 0 1px 3px rgba(17,19,24,0.06);
+      --shadow-3:0 12px 32px rgba(17,19,24,0.16), 0 4px 8px rgba(17,19,24,0.08);
+      --on-accent-btn:#FFFFFF;
+      --link-on-bg:var(--accent-hover); /* accent-text on --bg is 4.38:1 in light; this is 5.4:1 */
+    }
+
+    :root {
+      /* spacing (4/8) */
+      --sp-1:2px; --sp-2:4px; --sp-3:8px; --sp-4:12px; --sp-5:16px; --sp-6:20px;
+      --sp-7:24px; --sp-8:32px; --sp-9:40px; --sp-10:48px; --sp-11:64px;
+      --radius-xs:6px; --radius-sm:8px; --radius-md:10px; --radius-lg:12px; --radius-full:999px;
+      --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Segoe UI Variable",Roboto,"Helvetica Neue",Arial,sans-serif;
+      --font-mono:"SF Mono","JetBrains Mono",Menlo,Consolas,"Liberation Mono",monospace;
+      --ease-standard:cubic-bezier(0.2,0,0,1);
+      --ease-spring:cubic-bezier(0.34,1.4,0.64,1);
+      --dur-fast:120ms; --dur-base:150ms; --dur-slow:200ms;
+    }
+
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body {
+      font-family:var(--font-ui); background:var(--bg); color:var(--text);
+      line-height:1.55; font-size:15px;
+      -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+      overflow-x:hidden;
+    }
+    a { color:var(--accent-text); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    section:not(.band) p a, .hero-figure figcaption a { color:var(--link-on-bg); }
+    code, .mono { font-family:var(--font-mono); }
+    :focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; border-radius:3px; }
+    /* Sticky nav must not cover an anchored heading. */
+    [id] { scroll-margin-top:76px; }
+
+    .wrap { max-width:1120px; margin:0 auto; padding:0 var(--sp-7); }
+    .icon { width:1em; height:1em; display:inline-block; vertical-align:-0.125em; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+    .eyebrow {
+      display:inline-flex; align-items:center; gap:var(--sp-2);
+      font-size:11px; font-weight:600; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-2);
+    }
+    .nobr { white-space:nowrap; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+    /* ---------- Buttons ---------- */
+    .btn {
+      display:inline-flex; align-items:center; gap:var(--sp-3);
+      height:40px; padding:0 var(--sp-6);
+      border-radius:var(--radius-sm); border:1px solid transparent;
+      font-size:14px; font-weight:600; font-family:inherit;
+      cursor:pointer; text-decoration:none; white-space:nowrap;
+      transition:background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast), color var(--dur-fast), transform var(--dur-fast);
+    }
+    .btn:hover { text-decoration:none; }
+    .btn:active { transform:translateY(1px); }
+    .btn .icon { width:16px; height:16px; }
+    .btn-primary { background:var(--accent-solid); color:var(--on-accent-btn); }
+    .btn-primary:hover { background:var(--accent-hover); }
+    .btn-primary:active { background:var(--accent-active); }
+    .btn-secondary { background:var(--surface); color:var(--text); border-color:var(--border); }
+    .btn-secondary:hover { background:var(--hover); border-color:var(--border-strong); }
+    .btn-sm { height:32px; padding:0 var(--sp-4); font-size:13px; }
+
+    /* ---------- Nav ---------- */
+    .nav {
+      position:sticky; top:0; z-index:50;
+      background:color-mix(in srgb, var(--bg) 82%, transparent);
+      backdrop-filter:saturate(1.2) blur(10px);
+      border-bottom:1px solid var(--border);
+    }
+    .nav-inner { display:flex; align-items:center; height:60px; gap:var(--sp-6); }
+    .brand { display:flex; align-items:center; gap:var(--sp-3); font-weight:700; font-size:15px; color:var(--text); white-space:nowrap; }
+    .brand:hover { text-decoration:none; }
+    .brand img { width:26px; height:26px; border-radius:7px; }
+    .brand .ver { font-family:var(--font-mono); font-size:11px; color:var(--link-on-bg); background:var(--accent-subtle); padding:1px var(--sp-2); border-radius:var(--radius-xs); font-weight:600; }
+    .nav-links { margin-left:auto; display:flex; align-items:center; gap:var(--sp-6); }
+    .nav-links a:not(.btn) { color:var(--text-2); font-size:13.5px; font-weight:500; position:relative; white-space:nowrap; transition:color var(--dur-fast); }
+    .nav-links a:not(.btn):hover { color:var(--text); text-decoration:none; }
+    .nav-links a:not(.btn)::after {
+      content:""; position:absolute; left:0; right:0; bottom:-5px; height:2px;
+      background:var(--accent); border-radius:var(--radius-full);
+      transform:scaleX(0); transform-origin:left;
+      transition:transform var(--dur-base) var(--ease-standard);
+    }
+    .nav-links a:not(.btn):hover::after, .nav-links a:not(.btn):focus-visible::after { transform:scaleX(1); }
+    .theme-toggle {
+      display:inline-flex; align-items:center; justify-content:center;
+      width:34px; height:34px; border-radius:var(--radius-sm);
+      border:1px solid var(--border); background:var(--surface); color:var(--text-2);
+      cursor:pointer; font-size:16px;
+      transition:background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+    }
+    .theme-toggle:hover { background:var(--hover); color:var(--text); border-color:var(--border-strong); }
+    .theme-toggle .icon-moon { display:none; }
+    [data-theme="light"] .theme-toggle .icon-sun { display:none; }
+    [data-theme="light"] .theme-toggle .icon-moon { display:inline-block; }
+
+    /* ---------- Hero ----------
+       Stacked on purpose: the web UI is a wide browser layout, so the shot
+       gets the full column instead of half of it. */
+    .hero { padding:var(--sp-11) 0 var(--sp-10); position:relative; overflow:hidden; }
+    .hero-split { display:grid; grid-template-columns:1.1fr 1fr; gap:var(--sp-10); align-items:end; }
+    .hero h1 { font-size:44px; line-height:1.08; letter-spacing:-0.02em; font-weight:800; margin-top:var(--sp-5); }
+    .hero h1 .accent { color:var(--accent-text); }
+    .hero .lede { font-size:17px; color:var(--text-2); line-height:1.6; max-width:52ch; }
+    .hero .lede strong { color:var(--text); font-weight:600; }
+    .hero .lede .mono { color:var(--link-on-bg); font-size:0.9em; background:var(--accent-subtle); padding:1px var(--sp-2); border-radius:var(--radius-xs); }
+    .cta-row { display:flex; flex-wrap:wrap; gap:var(--sp-3); margin-top:var(--sp-7); }
+    .hero-meta { display:flex; flex-wrap:wrap; gap:var(--sp-5) var(--sp-9); margin-top:var(--sp-9); padding-top:var(--sp-6); border-top:1px solid var(--border); }
+    .hero-stat .n { font-family:var(--font-mono); font-size:20px; font-weight:700; color:var(--text); display:block; letter-spacing:-0.02em; line-height:28px; }
+    .hero-stat .l { display:block; font-size:12px; line-height:1.5; color:var(--text-2); }
+    .os-inline { display:inline-flex; gap:var(--sp-4); align-items:center; }
+    .os-inline .icon { width:18px; height:18px; }
+
+    /* ---------- Real screenshot (framed) ---------- */
+    .shot { display:block; border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow-3); background:var(--surface); overflow:hidden; position:relative; }
+    .shot picture { display:block; }
+    .shot img { display:block; width:100%; height:auto; max-width:100%; transition:transform var(--dur-slow) var(--ease-standard); }
+    .zoom { display:block; cursor:zoom-in; border:0; padding:0; margin:0; background:none; width:100%; font:inherit; color:inherit; border-radius:var(--radius-lg); }
+    .zoom .shot { transition:border-color var(--dur-fast), box-shadow var(--dur-base) var(--ease-standard), transform var(--dur-base) var(--ease-standard); }
+    .zoom:hover .shot, .zoom:focus-visible .shot { border-color:var(--border-strong); box-shadow:var(--shadow-3), 0 0 0 3px var(--accent-subtle); transform:translateY(-3px); }
+    .zoom:active .shot { transform:translateY(-1px); }
+    .zoom .zoom-hint {
+      position:absolute; right:var(--sp-3); bottom:var(--sp-3); z-index:2;
+      display:inline-flex; align-items:center; gap:var(--sp-2);
+      height:26px; padding:0 var(--sp-3); border-radius:var(--radius-full);
+      background:color-mix(in srgb, var(--surface-overlay) 88%, transparent);
+      border:1px solid var(--border); color:var(--text-2);
+      font-size:11px; font-weight:600;
+      opacity:0; transform:translateY(4px);
+      transition:opacity var(--dur-base), transform var(--dur-base);
+      pointer-events:none;
+    }
+    .zoom .zoom-hint .icon { width:13px; height:13px; }
+    .zoom:hover .zoom-hint, .zoom:focus-visible .zoom-hint { opacity:1; transform:none; }
+    .hero-figure { position:relative; margin:var(--sp-10) 0 0; }
+    .hero-figure::before {
+      content:""; position:absolute; inset:-10% -4% -14%;
+      background:radial-gradient(55% 70% at 60% 35%, var(--accent-subtle-2), transparent 70%);
+      filter:blur(8px); z-index:-1; pointer-events:none;
+    }
+    .hero-figure figcaption { margin-top:var(--sp-5); font-size:13px; color:var(--text-2); max-width:72ch; }
+    .hero-figure figcaption b { color:var(--text); font-weight:600; }
+
+    /* ---------- Lightbox ---------- */
+    .lightbox { position:fixed; inset:0; z-index:100; display:none; align-items:center; justify-content:center; padding:var(--sp-7); background:var(--scrim); backdrop-filter:blur(4px); }
+    .lightbox.open { display:flex; animation:fadeIn var(--dur-slow) var(--ease-standard); }
+    @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+    .lightbox.closing { animation:fadeOut var(--dur-base) var(--ease-standard) forwards; }
+    @keyframes fadeOut { from { opacity:1; } to { opacity:0; } }
+    .lightbox.closing .lightbox-img { animation:lb-out var(--dur-base) var(--ease-standard) forwards; }
+    @keyframes lb-out { from { opacity:1; transform:none; } to { opacity:0; transform:scale(0.97); } }
+    .lightbox-img { max-width:min(1440px, 96vw); max-height:86vh; width:auto; height:auto; border-radius:var(--radius-md); border:1px solid var(--border-strong); box-shadow:var(--shadow-3); background:var(--surface); animation:lb-in var(--dur-slow) var(--ease-standard); }
+    @keyframes lb-in { from { opacity:0; transform:scale(0.97); } to { opacity:1; transform:none; } }
+    .lightbox-close { position:absolute; top:var(--sp-6); right:var(--sp-6); width:40px; height:40px; border-radius:var(--radius-full); display:inline-flex; align-items:center; justify-content:center; background:var(--surface); border:1px solid var(--border); color:var(--text); cursor:pointer; transition:background var(--dur-fast), border-color var(--dur-fast); }
+    .lightbox-close:hover { background:var(--hover); border-color:var(--border-strong); }
+    .lightbox-close .icon { width:20px; height:20px; }
+    .lightbox-cap { position:absolute; left:0; right:0; bottom:var(--sp-6); text-align:center; color:var(--text-2); font-size:13px; padding:0 var(--sp-7); }
+
+    /* ---------- Section scaffolding ---------- */
+    section { padding:var(--sp-11) 0; }
+    .band { background:var(--surface); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+    .sec-head { max-width:60ch; margin-bottom:var(--sp-9); }
+    .sec-head.center { margin-left:auto; margin-right:auto; text-align:center; }
+    .sec-head h2 { font-size:30px; line-height:1.2; letter-spacing:-0.02em; font-weight:700; margin:var(--sp-3) 0 var(--sp-3); text-wrap:balance; }
+    .sec-head p { color:var(--text-2); font-size:16px; }
+    .sec-head p code, .aside code, .cli-step p code, .checks code, .parity code, .callout p code, .install-note code, .compare code { font-size:0.92em; color:var(--text); white-space:nowrap; } /* never split a flag after its "--" */
+
+    /* ---------- How it works ---------- */
+    .fgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-4); }
+    .fcard { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:var(--sp-6); transition:border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard); }
+    .fcard:hover { border-color:var(--border-strong); transform:translateY(-3px); box-shadow:var(--shadow-2); }
+    .fcard .ic { width:38px; height:38px; border-radius:var(--radius-sm); background:var(--accent-subtle); color:var(--accent); display:flex; align-items:center; justify-content:center; margin-bottom:var(--sp-5); transition:transform var(--dur-base) var(--ease-spring); }
+    .fcard:hover .ic { transform:scale(1.08); }
+    .fcard .ic .icon { width:19px; height:19px; }
+    .fcard h3 { font-size:15px; font-weight:600; margin-bottom:var(--sp-2); }
+    .fcard .via { display:block; font-family:var(--font-mono); font-size:12px; color:var(--accent-text); margin-bottom:var(--sp-4); overflow-wrap:anywhere; }
+    .fcard p { font-size:13.5px; color:var(--text-2); line-height:1.6; }
+    .fcard p code { font-size:0.92em; color:var(--text); white-space:nowrap; }
+
+    /* ---------- Install / uninstall ---------- */
+    .install { max-width:800px; }
+    .install-label { display:block; margin:var(--sp-7) 0 var(--sp-3); }
+    .install-label:first-child { margin-top:0; }
+    .install-cmd, .cli-code { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); padding:var(--sp-4) var(--sp-5); max-width:100%; }
+    .band .install-cmd, .band .cli-code { background:var(--bg); }
+    .install-cmd { display:flex; align-items:center; gap:var(--sp-4); }
+    .install-cmd .icon { width:16px; height:16px; color:var(--accent); flex-shrink:0; }
+    /* Wrap rather than truncate: a piped-to-bash command must be readable in full. */
+    .install-cmd code { font-size:13px; color:var(--text); overflow-wrap:anywhere; flex:1; min-width:0; }
+    /* min-height gives a real hit target; the negative margin keeps the row height unchanged. */
+    .copy-btn { display:inline-flex; align-items:center; gap:var(--sp-2); min-height:32px; padding:0 var(--sp-2); margin:calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)) 0; border-radius:var(--radius-xs); background:none; border:none; color:var(--text-2); cursor:pointer; font-size:12px; font-family:inherit; flex-shrink:0; transition:color var(--dur-fast), background var(--dur-fast); }
+    .copy-btn .icon { width:15px; height:15px; color:currentColor; }
+    .copy-btn:hover { color:var(--text); background:var(--hover); }
+    .copy-btn:active { background:var(--active); }
+    .install-note { color:var(--text-2); font-size:13px; line-height:1.6; margin-top:var(--sp-3); }
+    .win-note { margin-top:var(--sp-7); }
+
+    /* ---------- Quick start ---------- */
+    .cli-grid { display:grid; grid-template-columns:1fr 1.25fr; gap:var(--sp-10); align-items:start; }
+    .cli-grid .sec-head { margin-bottom:0; }
+    .aside { font-size:13.5px; color:var(--text-2); line-height:1.6; margin-top:var(--sp-5); }
+    .cli-steps { list-style:none; display:flex; flex-direction:column; gap:var(--sp-7); }
+    .cli-step-head { display:flex; align-items:center; gap:var(--sp-4); margin-bottom:var(--sp-2); }
+    .cli-step-n { width:24px; height:24px; border-radius:var(--radius-full); background:var(--surface); border:1px solid var(--border-strong); color:var(--accent-text); font-family:var(--font-mono); font-size:12px; font-weight:700; line-height:1; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .cli-step h3 { font-size:15px; font-weight:600; flex:1; min-width:0; }
+    .cli-step h3 .opt { font-weight:500; color:var(--text-2); }
+    .cli-step p { font-size:13.5px; color:var(--text-2); line-height:1.6; margin:0 0 var(--sp-4) calc(24px + var(--sp-4)); }
+    .cli-code { font-family:var(--font-mono); font-size:13px; line-height:1.7; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; }
+    .cli-steps .reveal:nth-child(2) { transition-delay:70ms; }
+    .cli-steps .reveal:nth-child(3) { transition-delay:140ms; }
+    .cli-steps .reveal:nth-child(4) { transition-delay:210ms; }
+
+    /* ---------- Security ---------- */
+    .sec-grid { display:grid; grid-template-columns:1fr 1.15fr; gap:var(--sp-10); align-items:start; }
+    .sec-grid .sec-head { margin-bottom:var(--sp-7); }
+    .checks { list-style:none; display:flex; flex-direction:column; gap:var(--sp-4); }
+    .checks li { display:flex; gap:var(--sp-3); font-size:14px; color:var(--text-2); line-height:1.55; }
+    .checks li .icon { width:17px; height:17px; color:var(--accent); flex-shrink:0; margin-top:2px; }
+    .checks li b { color:var(--text); font-weight:600; }
+
+    /* ---------- Callouts ---------- */
+    .callout { border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); padding:var(--sp-6); }
+    .band .callout { background:var(--bg); }
+    .callout.warn { border-left:2px solid var(--status-pending); }
+    .callout.info { border-left:2px solid var(--accent); }
+    .callout h3 { font-size:15px; font-weight:600; display:flex; align-items:center; gap:var(--sp-3); margin-bottom:var(--sp-3); }
+    .callout h3 .icon { width:17px; height:17px; flex-shrink:0; }
+    .callout.warn h3 .icon { color:var(--status-pending-fg); }
+    .callout.info h3 .icon { color:var(--accent); }
+    .callout p { font-size:13.5px; color:var(--text-2); line-height:1.65; margin-bottom:var(--sp-3); }
+    .callout p:last-child { margin-bottom:0; }
+    .callout strong { color:var(--text); }
+    .callout .cli-code { margin-bottom:var(--sp-3); }
+    .crosslink { display:flex; align-items:center; gap:var(--sp-6); }
+    .crosslink > div { flex:1; min-width:0; }
+    .crosslink .btn { flex-shrink:0; }
+
+    /* ---------- Tabs (WAI-ARIA) ---------- */
+    .tabs { display:flex; flex-wrap:wrap; gap:var(--sp-2); margin:var(--sp-5) 0 var(--sp-4); }
+    .tab { height:30px; padding:0 var(--sp-4); border-radius:var(--radius-sm); border:1px solid var(--border); background:transparent; color:var(--text-2); font-size:12.5px; font-weight:500; cursor:pointer; font-family:inherit; transition:color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast); }
+    .tab[aria-selected="true"] { background:var(--surface-2); color:var(--text); border-color:var(--border-strong); }
+    .tab:hover:not([aria-selected="true"]) { color:var(--text); }
+    .tab-panel[hidden] { display:none; }
+    .code-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-4); margin-bottom:var(--sp-2); font-size:12px; color:var(--text-2); }
+    .code-head .file { font-family:var(--font-mono); }
+
+    /* ---------- Feature parity ---------- */
+    .parity { list-style:none; display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-4) var(--sp-7); margin-bottom:var(--sp-9); }
+    .parity li { display:flex; gap:var(--sp-3); font-size:14px; color:var(--text-2); line-height:1.55; }
+    .parity li .icon { width:17px; height:17px; color:var(--accent); flex-shrink:0; margin-top:2px; }
+    .parity li b { color:var(--text); font-weight:600; }
+    .compare-wrap { border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden; background:var(--surface); margin-bottom:var(--sp-7); }
+    .compare { width:100%; border-collapse:collapse; font-size:13.5px; }
+    .compare caption { text-align:left; padding:var(--sp-4) var(--sp-5); font-size:12px; font-weight:600; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-2); border-bottom:1px solid var(--border); }
+    .compare th, .compare td { text-align:left; vertical-align:top; padding:var(--sp-4) var(--sp-5); border-top:1px solid var(--divider); }
+    .compare thead td { border-top:0; background:var(--surface-2); }
+    .compare thead th { border-top:0; font-size:13px; color:var(--text); font-weight:600; background:var(--surface-2); }
+    .compare thead a { color:var(--link-on-bg); }
+    .compare tbody th { font-weight:600; color:var(--text); width:22%; }
+    .compare td { color:var(--text-2); }
+    .compare td code { white-space:normal; overflow-wrap:anywhere; }
+    .compare .here { color:var(--text); }
+
+    /* ---------- FAQ ---------- */
+    .faq-list { max-width:760px; margin:0 auto; }
+    .faq { border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); margin-bottom:var(--sp-3); overflow:hidden; }
+    .band .faq { background:var(--bg); }
+    .faq summary { list-style:none; cursor:pointer; padding:var(--sp-5) var(--sp-6); font-size:15px; font-weight:600; display:flex; align-items:center; justify-content:space-between; gap:var(--sp-4); }
+    .faq summary::-webkit-details-marker { display:none; }
+    .faq summary .q-text { flex:1; min-width:0; }
+    .faq summary .icon { width:18px; height:18px; color:var(--text-2); transition:transform var(--dur-base); flex-shrink:0; }
+    .faq[open] summary .icon { transform:rotate(180deg); color:var(--accent); }
+    .faq p { padding:0 var(--sp-6) var(--sp-5); font-size:14px; color:var(--text-2); line-height:1.7; }
+    .faq p code { overflow-wrap:anywhere; background:var(--surface-2); padding:1px var(--sp-2); border-radius:var(--radius-xs); font-size:0.9em; color:var(--text); }
+
+    /* ---------- Footer ---------- */
+    footer { border-top:1px solid var(--border); padding:var(--sp-10) 0; }
+    .foot { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-6); flex-wrap:wrap; }
+    .foot .brand { margin-bottom:var(--sp-3); }
+    .foot .brand img { width:22px; height:22px; }
+    .foot-note { font-size:13px; color:var(--text-2); }
+    .foot-links { display:flex; flex-wrap:wrap; gap:var(--sp-3) var(--sp-6); }
+    .foot-links a { color:var(--text-2); font-size:13px; display:inline-flex; align-items:center; gap:var(--sp-2); }
+    .foot-links a:hover { color:var(--text); text-decoration:none; }
+    .foot-links .icon { width:15px; height:15px; }
+
+    /* ---------- Reveal ---------- */
+    .reveal { opacity:0; transform:translateY(16px); transition:opacity 0.5s var(--ease-standard), transform 0.5s var(--ease-standard); }
+    .reveal.in { opacity:1; transform:none; }
+    .fgrid .reveal:nth-child(2) { transition-delay:70ms; }
+    .fgrid .reveal:nth-child(3) { transition-delay:140ms; }
+
+    @keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+    @keyframes riseIn { from { transform:translateY(12px); } to { transform:none; } }
+    .hero .eyebrow  { animation:fadeUp 0.5s var(--ease-standard) both; }
+    .hero h1        { animation:fadeUp 0.5s var(--ease-standard) 0.06s both; }
+    .hero .lede     { animation:fadeUp 0.5s var(--ease-standard) 0.12s both; }
+    .hero .cta-row  { animation:fadeUp 0.5s var(--ease-standard) 0.18s both; }
+    .hero .hero-meta{ animation:fadeUp 0.5s var(--ease-standard) 0.24s both; }
+    .hero-figure    { animation:riseIn 0.6s var(--ease-standard) 0.1s both; }
+
+    /* ---------- Responsive ---------- */
+    @media (max-width:960px) {
+      .hero-split, .cli-grid, .sec-grid { grid-template-columns:1fr; gap:var(--sp-8); }
+      .hero-split { gap:var(--sp-5); }
+      .fgrid, .parity { grid-template-columns:repeat(2,1fr); }
+      .hero h1 { font-size:36px; }
+      .nav-links { gap:var(--sp-5); }
+      .nav-links .nav-opt { display:none; }
+    }
+    @media (max-width:680px) {
+      .wrap { padding:0 var(--sp-5); }
+      .nav-links a:not(.btn) { display:none; }
+      .fgrid, .parity { grid-template-columns:1fr; }
+      .hero { padding:var(--sp-9) 0; }
+      .hero h1 { font-size:30px; }
+      .hero .lede { font-size:16px; }
+      .hero-meta { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-5); margin-top:var(--sp-8); }
+      .hero-figure { margin-top:var(--sp-8); }
+      section { padding:var(--sp-9) 0; }
+      .sec-head h2 { font-size:24px; }
+      .cli-step p { margin-left:0; }
+      .cli-code { padding:var(--sp-4); }
+      .cta-row .btn { flex:1; justify-content:center; }
+      .crosslink { flex-direction:column; align-items:stretch; gap:var(--sp-5); }
+      .crosslink .btn { justify-content:center; }
+      .compare th, .compare td { padding:var(--sp-3) var(--sp-4); }
+      .foot { flex-direction:column; align-items:flex-start; }
+    }
+
+    @media (prefers-reduced-motion:reduce) {
+      html { scroll-behavior:auto; }
+      *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+      .reveal { opacity:1 !important; transform:none !important; }
+      .fcard:hover, .zoom:hover .shot, .zoom:focus-visible .shot, .zoom:active .shot, .fcard:hover .ic { transform:none !important; }
+      .hero .eyebrow, .hero h1, .hero .lede, .hero .cta-row, .hero .hero-meta, .hero-figure { animation:none !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Icon sprite (Lucide-derived, MIT). Referenced via <use>. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-lock-open" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></symbol>
+    <symbol id="i-apple" viewBox="0 0 24 24"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/></symbol>
+    <symbol id="i-linux" viewBox="0 0 24 24"><path d="M9 3a3 3 0 0 1 6 0c0 1.5-.5 2.3-.5 3.5 0 1 .8 1.7 1.5 3 1 1.8 2 3.4 2 5.5 0 2-1 3.5-1.8 4.7-.4.6-1 .8-1.6.5-.5-.2-.8-.8-1.4-.8h-3.4c-.6 0-.9.6-1.4.8-.6.3-1.2.1-1.6-.5C4.9 18.5 4 17 4 15c0-2.1 1-3.7 2-5.5.7-1.3 1.5-2 1.5-3C7.5 5.3 7 4.5 9 3Z"/><path d="M10 8h.01M14 8h.01"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M16 21h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  </svg>
+
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a href="#top" class="brand">
+        <img src="../app_icon.png" alt="" width="26" height="26">
+        Tunnel Pilot <span class="ver">CLI</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#how" class="nav-opt">How it works</a>
+        <a href="#install">Install</a>
+        <a href="#quick-start">Quick start</a>
+        <a href="#security">Security</a>
+        <a href="../">Desktop app</a>
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle color theme">
+          <svg class="icon icon-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+          <svg class="icon icon-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        </button>
+        <a href="https://github.com/kalfian/tunnel-pilot" class="btn btn-secondary btn-sm">
+          <svg class="icon" aria-hidden="true"><use href="#i-github"/></svg> GitHub
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="wrap">
+        <div class="hero-split">
+          <div>
+            <span class="eyebrow">
+              <svg class="icon" aria-hidden="true"><use href="#i-server"/></svg>
+              Server edition &middot; Linux &amp; macOS
+            </span>
+            <h1>SSH tunnels that stay up on your server, <span class="accent">managed from a browser.</span></h1>
+          </div>
+          <div>
+            <p class="lede">
+              <strong>Tunnel Pilot CLI</strong> is Tunnel Pilot without the window. A daemon holds your
+              <span class="mono">ssh -L</span> forwards open and reconnects them when they drop; you manage it
+              from the terminal or from the desktop app&rsquo;s interface in your browser.
+              For servers, homelabs, a Raspberry Pi, CI boxes.
+            </p>
+            <div class="cta-row">
+              <a href="#install" class="btn btn-primary">
+                <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Install
+              </a>
+              <a href="#quick-start" class="btn btn-secondary">
+                <svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg> Quick start
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-meta">
+          <div class="hero-stat">
+            <span class="n">~10 MB</span>
+            <span class="l">one binary, nothing else to install</span>
+          </div>
+          <div class="hero-stat">
+            <span class="n">libc</span>
+            <span class="l">the only library it links on Linux</span>
+          </div>
+          <div class="hero-stat">
+            <span class="n">:1855</span>
+            <span class="l">web UI, on 127.0.0.1 by default</span>
+          </div>
+          <div class="hero-stat">
+            <span class="n os-inline" aria-hidden="true">
+              <svg class="icon"><use href="#i-linux"/></svg>
+              <svg class="icon"><use href="#i-apple"/></svg>
+            </span>
+            <span class="l">Linux x86_64 &middot; aarch64 &middot; macOS</span>
+          </div>
+        </div>
+
+        <!-- Real screenshot of the web UI (demo data). Phones get the narrow layout. -->
+        <figure class="hero-figure">
+          <button type="button" class="zoom" data-full="../screenshots/web-ui.png"
+                  data-cap="The web UI reached over plain HTTP from another machine, with demo data"
+                  aria-label="Enlarge the web UI screenshot">
+            <span class="shot">
+              <picture>
+                <source media="(max-width: 680px)" srcset="../screenshots/web-ui-mobile.png" width="390" height="600">
+                <img src="../screenshots/web-ui.png" width="1440" height="484"
+                     loading="eager" fetchpriority="high" decoding="async"
+                     alt="The Tunnel Pilot CLI web UI, Connections view: a 'Not encrypted' plain-HTTP warning and a no-keychain notice across the top; a toolbar with Filter, Tag and Add; a Production group with a connected 'Postgres primary' tunnel (127.0.0.1:5432 to 10.0.4.12:5432) showing live traffic and latency, and a 'Redis cache' tunnel showing 'Authentication failed: publickey' with Retry and View log; and an Ungrouped 'Grafana' tunnel.">
+              </picture>
+              <span class="zoom-hint"><svg class="icon" aria-hidden="true"><use href="#i-maximize"/></svg> Click to enlarge</span>
+            </span>
+          </button>
+          <figcaption><b>The desktop app&rsquo;s Connections view, served by the daemon.</b> The banner on top is the warning it shows when reached over plain HTTP from another machine &mdash; it goes away once you put <a href="#security">HTTPS in front</a>.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ============ HOW IT WORKS ============ -->
+    <section id="how" class="band" aria-labelledby="how-title">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <span class="eyebrow">How it works</span>
+          <h2 id="how-title">One daemon, two ways in</h2>
+          <p>The daemon owns the tunnels. The terminal and the browser are two front ends to the same state, so a forward you add in one shows up in the other.</p>
+        </div>
+        <div class="fgrid">
+          <article class="fcard reveal">
+            <div class="ic"><svg class="icon" aria-hidden="true"><use href="#i-server"/></svg></div>
+            <h3>The daemon</h3>
+            <code class="via">tunnel-pilot-cli service install</code>
+            <p>Keeps every forward open with SSH keep-alive and reconnects with backoff when one drops. Runs as a systemd service (a user unit, or a system unit as root) or a launchd agent on macOS.</p>
+          </article>
+          <article class="fcard reveal">
+            <div class="ic"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg></div>
+            <h3>The terminal</h3>
+            <code class="via">tunnel-pilot-cli list --json</code>
+            <p><code>add</code>, <code>edit</code>, <code>remove</code>, <code>connect</code>, <code>disconnect</code>, <code>status</code> &mdash; every command takes <code>--json</code>, so scripts, cron jobs and CI can drive it.</p>
+          </article>
+          <article class="fcard reveal">
+            <div class="ic"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></div>
+            <h3>The web UI</h3>
+            <code class="via">http://127.0.0.1:1855</code>
+            <p>The same interface as the desktop app &mdash; groups, tags, live stats, logs, backup, the &#8984;K palette &mdash; behind an admin password. Optional: leave out <code>--web</code> and it isn&rsquo;t served.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ INSTALL ============ -->
+    <section id="install" aria-labelledby="install-title">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Install</span>
+          <h2 id="install-title">One command in, one command out</h2>
+          <p>Linux x86_64 and aarch64 (a static binary that runs on any distro) and macOS. Not Windows &mdash; use the <a href="../#download">desktop app</a> there.</p>
+        </div>
+
+        <div class="install reveal">
+          <span class="eyebrow install-label">Install</span>
+          <div class="install-cmd">
+            <svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg>
+            <code>curl -fsSL https://kalfian.github.io/<wbr>tunnel-pilot/<wbr>cli/install.sh | bash</code>
+            <button class="copy-btn" type="button" data-copy="curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/install.sh | bash">
+              <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> install command</span>
+            </button>
+          </div>
+          <p class="install-note">Installs <code>tunnel-pilot-cli</code> to <code>~/.local/bin</code>, or to <code>/usr/local/bin</code> as root or with <code>-s -- --system</code>. The download is SHA-256 verified and refused if the checksum is missing or wrong.</p>
+
+          <span class="eyebrow install-label" id="uninstall">Uninstall</span>
+          <div class="install-cmd">
+            <svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg>
+            <code>curl -fsSL https://kalfian.github.io/<wbr>tunnel-pilot/<wbr>cli/uninstall.sh | bash</code>
+            <button class="copy-btn" type="button" data-copy="curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/uninstall.sh | bash">
+              <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> uninstall command</span>
+            </button>
+          </div>
+          <p class="install-note">Stops and removes the service and the binary, and keeps your config. Add <code>-s -- --purge</code> to also delete the config, the web admin password and stored passwords.</p>
+
+          <div class="callout warn win-note" id="winNote" hidden>
+            <h3><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg> You&rsquo;re on Windows</h3>
+            <p>This edition doesn&rsquo;t run on Windows. The <a href="../#download">desktop app</a> has the same features, in the tray.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ QUICK START ============ -->
+    <section id="quick-start" class="band" aria-labelledby="qs-title">
+      <div class="wrap cli-grid">
+        <div class="sec-head reveal">
+          <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg> Quick start</span>
+          <h2 id="qs-title">From install to a running web UI</h2>
+          <p>Set a password, install the service, open the browser. The service starts at boot and the web UI listens on localhost until you choose otherwise.</p>
+          <p class="aside">Terminal only? Leave out <code>--web</code>; the daemon runs without the web UI and every action is a command.</p>
+        </div>
+
+        <ol class="cli-steps" role="list" aria-label="Quick start steps">
+          <li class="cli-step copy-scope reveal">
+            <div class="cli-step-head">
+              <span class="cli-step-n" aria-hidden="true">1</span>
+              <h3>Set the web admin password</h3>
+              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli web set-password">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> set-password command</span>
+              </button>
+            </div>
+            <p>Prompted with echo off and stored as an argon2id hash. Setting it again signs everyone out.</p>
+            <pre class="cli-code"><code>tunnel-pilot-cli web set-password</code></pre>
+          </li>
+          <li class="cli-step copy-scope reveal">
+            <div class="cli-step-head">
+              <span class="cli-step-n" aria-hidden="true">2</span>
+              <h3>Install the service with the web UI</h3>
+              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli service install --web">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> service install command</span>
+              </button>
+            </div>
+            <p>The web UI is on <code>http://127.0.0.1:1855</code> &mdash; on the server itself, or from your machine <a href="#proxy-ssh">through an SSH tunnel</a>.</p>
+            <pre class="cli-code"><code>tunnel-pilot-cli service install --web</code></pre>
+          </li>
+          <li class="cli-step copy-scope reveal">
+            <div class="cli-step-head">
+              <span class="cli-step-n" aria-hidden="true">3</span>
+              <h3>Reach it from other machines <span class="opt">(optional)</span></h3>
+              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli service install --web --bind 0.0.0.0">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> service install command with --bind 0.0.0.0</span>
+              </button>
+            </div>
+            <p>Listens on every interface at <code>http://&lt;server-ip&gt;:1855</code>. Plain HTTP &mdash; <a href="#security">put HTTPS in front</a> before you rely on it.</p>
+            <pre class="cli-code"><code>tunnel-pilot-cli service install --web --bind 0.0.0.0</code></pre>
+          </li>
+          <li class="cli-step copy-scope reveal">
+            <div class="cli-step-head">
+              <span class="cli-step-n" aria-hidden="true">4</span>
+              <h3>Add forwards &mdash; in the browser or here</h3>
+              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli add prod-db \&#10;  --ssh deploy@bastion.example.com \&#10;  --forward 5432:db.internal:5432 \&#10;  --identity ~/.ssh/id_ed25519">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> add-forward command</span>
+              </button>
+            </div>
+            <p>Key auth shown; <code>--password</code> prompts instead and never takes the password as a flag value. Then <code>list</code>, <code>connect</code>, <code>disconnect</code> and <code>status</code>, all with <code>--json</code>.</p>
+            <pre class="cli-code"><code>tunnel-pilot-cli add prod-db \
+  --ssh deploy@bastion.example.com \
+  --forward 5432:db.internal:5432 \
+  --identity ~/.ssh/id_ed25519</code></pre>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============ SECURITY ============ -->
+    <section id="security" aria-labelledby="security-title">
+      <div class="wrap sec-grid">
+        <div>
+          <div class="sec-head reveal">
+            <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg> Web UI security</span>
+            <h2 id="security-title">Locked by default. Bring your own HTTPS.</h2>
+            <p>The web UI controls SSH access to your network, so it is built to be safe on localhost and explicit about what it doesn&rsquo;t do.</p>
+          </div>
+          <ul class="checks reveal">
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Login always required</b> &mdash; one admin password, stored as an argon2id hash.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Session cookie</b> &mdash; <code>HttpOnly</code> and <code>SameSite=Strict</code>.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>CSRF protection</b> &mdash; a request&rsquo;s <code>Origin</code> must match the host it was sent to.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Login rate limiting</b> per client (IPv6 per /64), with a lockout that backs off, and a cap on concurrent password checks.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Host allowlist</b> &mdash; only IP addresses, <code>localhost</code> and names you add with <code>--public-host</code> are answered, which blocks DNS rebinding.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Connection limits</b> &mdash; slow or stalled clients are dropped and open connections are capped.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Not as root</b> &mdash; a root service with the web UI is refused unless you pass <code>--allow-root</code>; install it as a normal user.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Strict Content-Security-Policy</b> &mdash; its own scripts only, no framing.</span></li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Localhost unless you say otherwise</b> &mdash; binds <code>127.0.0.1</code>; <code>0.0.0.0</code> only with <code>--bind</code>.</span></li>
+          </ul>
+        </div>
+
+        <div class="callout warn reveal">
+          <h3><svg class="icon" aria-hidden="true"><use href="#i-lock-open"/></svg> No built-in TLS</h3>
+          <p>The web UI speaks plain HTTP, and warns on every page when it is reached that way from another machine. Before you expose it beyond localhost, put an <strong>HTTPS reverse proxy</strong> in front of it &mdash; or skip exposing it and reach it <strong>through an SSH tunnel</strong>.</p>
+
+          <div class="tabs" role="tablist" aria-label="Ways to reach the web UI securely">
+            <button class="tab" type="button" role="tab" id="tab-caddy" aria-controls="proxy-caddy" aria-selected="true">Caddy</button>
+            <button class="tab" type="button" role="tab" id="tab-nginx" aria-controls="proxy-nginx" aria-selected="false" tabindex="-1">nginx</button>
+            <button class="tab" type="button" role="tab" id="tab-ssh" aria-controls="proxy-ssh" aria-selected="false" tabindex="-1">SSH tunnel</button>
+          </div>
+
+          <div class="tab-panel copy-scope" id="proxy-caddy" role="tabpanel" aria-labelledby="tab-caddy">
+            <div class="code-head">
+              <span class="file">Caddyfile</span>
+              <button class="copy-btn" type="button" data-copy="tunnels.example.com {&#10;    reverse_proxy 127.0.0.1:1855&#10;}">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> Caddy configuration</span>
+              </button>
+            </div>
+            <pre class="cli-code"><code>tunnels.example.com {
+    reverse_proxy 127.0.0.1:1855
+}</code></pre>
+            <div class="code-head">
+              <span class="file">then run the daemon for that name</span>
+              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli service install --web --public-host tunnels.example.com --trust-proxy">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> service install command for a reverse proxy (Caddy)</span>
+              </button>
+            </div>
+            <pre class="cli-code"><code>tunnel-pilot-cli service install --web \
+  --public-host tunnels.example.com --trust-proxy</code></pre>
+            <p>Caddy gets a certificate for the domain automatically and passes the <code>Host</code> header, the <code>X-Forwarded-*</code> headers and WebSocket upgrades through. Keep the daemon on the default <code>127.0.0.1</code> bind. <code>--public-host</code> allows the domain name (other names are refused, which blocks DNS rebinding); <code>--trust-proxy</code> makes the rate limit and the secure cookie use the client address and HTTPS the proxy reports.</p>
+          </div>
+
+          <div class="tab-panel copy-scope" id="proxy-nginx" role="tabpanel" aria-labelledby="tab-nginx" hidden>
+            <div class="code-head">
+              <span class="file">inside your HTTPS server { } block</span>
+              <button class="copy-btn" type="button" data-copy="location / {&#10;    proxy_pass http://127.0.0.1:1855;&#10;    proxy_http_version 1.1;&#10;    proxy_set_header Host $host;&#10;    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;&#10;    proxy_set_header X-Forwarded-Proto $scheme;&#10;    proxy_set_header Upgrade $http_upgrade;&#10;    proxy_set_header Connection &quot;upgrade&quot;;&#10;}">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> nginx configuration</span>
+              </button>
+            </div>
+            <pre class="cli-code"><code>location / {
+    proxy_pass http://127.0.0.1:1855;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}</code></pre>
+            <div class="code-head">
+              <span class="file">then run the daemon for that name</span>
+              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli service install --web --public-host tunnels.example.com --trust-proxy">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> service install command for a reverse proxy (nginx)</span>
+              </button>
+            </div>
+            <pre class="cli-code"><code>tunnel-pilot-cli service install --web \
+  --public-host tunnels.example.com --trust-proxy</code></pre>
+            <p><code>proxy_set_header Host $host;</code> is required: the CSRF check compares the browser&rsquo;s <code>Origin</code> with the host, and the host must be one you allowed with <code>--public-host</code>. The <code>X-Forwarded-*</code> lines feed <code>--trust-proxy</code>; the <code>Upgrade</code> and <code>Connection</code> headers keep the live status stream, a WebSocket, working.</p>
+          </div>
+
+          <div class="tab-panel copy-scope" id="proxy-ssh" role="tabpanel" aria-labelledby="tab-ssh" hidden>
+            <div class="code-head">
+              <span class="file">on your own machine</span>
+              <button class="copy-btn" type="button" data-copy="ssh -N -L 1855:127.0.0.1:1855 you@your-server">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> SSH tunnel command</span>
+              </button>
+            </div>
+            <pre class="cli-code"><code>ssh -N -L 1855:127.0.0.1:1855 you@your-server</code></pre>
+            <p>Then open <code>http://127.0.0.1:1855</code> locally. Nothing is exposed and SSH encrypts the traffic. Replace <code>you@your-server</code> with your login &mdash; or save it as a forward in <a href="../">Tunnel Pilot desktop</a>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FEATURE PARITY ============ -->
+    <section id="features" class="band" aria-labelledby="features-title">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg> Same app, different delivery</span>
+          <h2 id="features-title">Everything the desktop app does</h2>
+          <p>One codebase, identical features. Only the delivery differs: no tray and no window &mdash; a service, a terminal and a browser instead.</p>
+        </div>
+
+        <ul class="parity reveal">
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Local port forwards</b> &mdash; <code class="mono">ssh -L</code> with a password or an identity file.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Groups and tags</b> to sort forwards by environment.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Auto-reconnect</b> with SSH keep-alive liveness.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Live stats</b> per tunnel &mdash; connections, traffic, latency, uptime.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Activity log</b> with level filter and search.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Backup export and import</b>; backups never contain passwords.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>&#8984;K command palette</b> in the web UI.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Passwords in the OS keychain</b>, or a 0600 file where there is none.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><b>Free and open source</b>, MIT License.</span></li>
+        </ul>
+
+        <div class="compare-wrap reveal">
+          <table class="compare">
+            <caption>Which one do I want?</caption>
+            <thead>
+              <tr>
+                <td></td>
+                <th scope="col"><a href="../">Tunnel Pilot</a> (desktop)</th>
+                <th scope="col">Tunnel Pilot CLI (server)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Command</th>
+                <td><code>tunnel-pilot</code></td>
+                <td class="here"><code>tunnel-pilot-cli</code></td>
+              </tr>
+              <tr>
+                <th scope="row">You use it from</th>
+                <td>The tray, a window, and the terminal</td>
+                <td class="here">The terminal and a browser</td>
+              </tr>
+              <tr>
+                <th scope="row">Runs</th>
+                <td>While you&rsquo;re logged in</td>
+                <td class="here">As a service, from boot</td>
+              </tr>
+              <tr>
+                <th scope="row">Platforms</th>
+                <td>macOS, Windows, Linux</td>
+                <td class="here">Linux x86_64 / aarch64, macOS</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <aside class="callout info crosslink reveal" aria-labelledby="desktop-link-title">
+          <div>
+            <h3 id="desktop-link-title"><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg> Want it in your menu bar instead?</h3>
+            <p>The desktop app is the same tool in a tray app with a window, for macOS, Windows and Linux. Both install side by side with separate config; move forwards between them with backup export and import.</p>
+          </div>
+          <a class="btn btn-secondary" href="../">Tunnel Pilot desktop <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg></a>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============ FAQ ============ -->
+    <section id="faq" aria-labelledby="faq-title">
+      <div class="wrap">
+        <div class="sec-head center reveal">
+          <span class="eyebrow">FAQ</span>
+          <h2 id="faq-title">Common questions</h2>
+        </div>
+        <div class="faq-list">
+          <details class="faq reveal">
+            <summary><span class="q-text">Does it run on Windows?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>No &mdash; Tunnel Pilot CLI is built for Linux x86_64, Linux aarch64 and macOS. On Windows, use the <a href="../#download">desktop app</a>: the same features in a tray app with a window.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">Can I install it next to the desktop app?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>Yes. They are separate products with separate config, so they install side by side. To move forwards from one to the other, export a backup in one and import it in the other. Backups never contain passwords, so set those again afterwards.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">How do I serve the web UI over HTTPS?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>It has no built-in TLS. Put an HTTPS reverse proxy such as Caddy or nginx in front of <code>127.0.0.1:1855</code>, or keep the default localhost bind and reach it through an SSH tunnel. Start the daemon with <code>--public-host &lt;your domain&gt; --trust-proxy</code>. With nginx, pass <code>proxy_set_header Host $host;</code>, the <code>X-Forwarded-*</code> headers and the WebSocket <code>Upgrade</code> and <code>Connection</code> headers. Examples are in <a href="#security">Web UI security</a>.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">Do I need the web UI?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>No. Leave out <code>--web</code> and the daemon runs without it. Every action is also a terminal command &mdash; <code>add</code>, <code>edit</code>, <code>remove</code>, <code>list</code>, <code>connect</code>, <code>disconnect</code>, <code>status</code> &mdash; all with <code>--json</code> output.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">Where are SSH passwords stored?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>In the OS keychain when one is available. On a server without a keychain they go to a separate file readable only by its owner (mode 0600), and the web UI shows a notice saying so. The web UI admin password is stored as an argon2id hash.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <p class="sr-only" id="copyStatus" role="status" aria-live="polite"></p>
+
+  <!-- Lightbox overlay (screenshot zoom) -->
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Screenshot preview">
+    <button type="button" class="lightbox-close" id="lightboxClose" aria-label="Close preview">
+      <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+    </button>
+    <img class="lightbox-img" id="lightboxImg" src="data:," alt="">
+    <p class="lightbox-cap" id="lightboxCap"></p>
+  </div>
+
+  <footer>
+    <div class="wrap foot">
+      <div>
+        <a href="#top" class="brand">
+          <img src="../app_icon.png" alt="" width="22" height="22">
+          Tunnel Pilot <span class="ver">CLI</span>
+        </a>
+        <p class="foot-note">Open-source SSH local port forwarding for servers. MIT License &middot; &copy; 2026 kalfian.</p>
+      </div>
+      <nav class="foot-links" aria-label="Footer">
+        <a href="../"><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg> Desktop app</a>
+        <a href="https://github.com/kalfian/tunnel-pilot"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg> GitHub</a>
+        <a href="https://github.com/kalfian/tunnel-pilot/releases"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Releases</a>
+        <a href="https://github.com/kalfian/tunnel-pilot/issues"><svg class="icon" aria-hidden="true"><use href="#i-external"/></svg> Issues</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    // ---- Theme toggle (same storage key as the desktop page, so the choice carries over) ----
+    document.getElementById('themeToggle').addEventListener('click', function () {
+      var cur = document.documentElement.getAttribute('data-theme');
+      var next = cur === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('tp-theme', next); } catch (e) {}
+      document.querySelector('meta[name="theme-color"]').setAttribute('content', next === 'dark' ? '#111318' : '#F8F9FB');
+    });
+
+    // ---- Windows visitors: this edition doesn't run there; point at the desktop app ----
+    (function () {
+      var ua = navigator.userAgent || '';
+      var p = navigator.platform || '';
+      if (/Win/i.test(p) || /Windows/i.test(ua)) document.getElementById('winNote').hidden = false;
+    })();
+
+    // ---- Tabs (WAI-ARIA: roving tabindex, arrows/Home/End, auto-activate), one set per tablist ----
+    Array.prototype.forEach.call(document.querySelectorAll('[role="tablist"]'), function (list) {
+      var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]'));
+      function select(target, moveFocus) {
+        tabs.forEach(function (tab) {
+          var on = tab === target;
+          tab.setAttribute('aria-selected', on ? 'true' : 'false');
+          tab.tabIndex = on ? 0 : -1;
+          document.getElementById(tab.getAttribute('aria-controls')).hidden = !on;
+          if (on && moveFocus) tab.focus();
+        });
+      }
+      tabs.forEach(function (tab, i) {
+        tab.addEventListener('click', function () { select(tab); });
+        tab.addEventListener('keydown', function (e) {
+          var next = e.key === 'ArrowRight' ? (i + 1) % tabs.length
+                   : e.key === 'ArrowLeft' ? (i - 1 + tabs.length) % tabs.length
+                   : e.key === 'Home' ? 0
+                   : e.key === 'End' ? tabs.length - 1
+                   : -1;
+          if (next < 0) return;
+          e.preventDefault();
+          select(tabs[next], true);
+        });
+      });
+      // A link to a panel (e.g. #proxy-ssh) opens that tab.
+      function fromHash() {
+        var id = location.hash.slice(1);
+        tabs.forEach(function (tab) { if (tab.getAttribute('aria-controls') === id) select(tab); });
+      }
+      window.addEventListener('hashchange', fromHash);
+      fromHash();
+    });
+
+    // ---- Copy buttons ----
+    // One live region announces the result for every copy button (the label swap is visual only).
+    var copyStatus = document.getElementById('copyStatus');
+    function announce(msg) {
+      copyStatus.textContent = '';
+      setTimeout(function () { copyStatus.textContent = msg; }, 30);
+    }
+    document.querySelectorAll('.copy-btn').forEach(function (btn) {
+      var label = btn.querySelector('span');
+      var use = btn.querySelector('use');
+      var idle = label.textContent;
+      var timer = null;
+      function flash(text, icon) {
+        label.textContent = text;
+        use.setAttribute('href', icon);
+        clearTimeout(timer);
+        timer = setTimeout(function () { label.textContent = idle; use.setAttribute('href', '#i-copy'); }, 1600);
+      }
+      function fallback() {
+        // Clipboard blocked (permissions / insecure context): select the command so Ctrl/Cmd+C works.
+        var scope = btn.closest('.install-cmd, .copy-scope');
+        var code = scope && scope.querySelector('.install-cmd > code, pre > code');
+        if (code) {
+          var range = document.createRange();
+          range.selectNodeContents(code);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        flash('Selected', '#i-copy');
+        announce('Could not copy automatically. The text is selected; press Ctrl+C or Cmd+C.');
+      }
+      btn.addEventListener('click', function () {
+        var text = btn.getAttribute('data-copy');
+        if (!navigator.clipboard || !navigator.clipboard.writeText) { fallback(); return; }
+        navigator.clipboard.writeText(text).then(function () {
+          flash('Copied', '#i-check');
+          announce('Copied to clipboard.');
+        }, fallback);
+      });
+    });
+
+    // ---- Scroll reveal ----
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.12 });
+    document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+
+    // ---- Lightbox (click-to-enlarge screenshot) ----
+    (function () {
+      var lb = document.getElementById('lightbox');
+      var lbImg = document.getElementById('lightboxImg');
+      var lbCap = document.getElementById('lightboxCap');
+      var lbClose = document.getElementById('lightboxClose');
+      var reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      var lastFocus = null;
+
+      function openLb(src, alt, cap) {
+        lastFocus = document.activeElement;
+        lbImg.setAttribute('src', src);
+        lbImg.setAttribute('alt', alt || '');
+        lbCap.textContent = cap || '';
+        lb.classList.add('open');
+        document.body.style.overflow = 'hidden';
+        lbClose.focus();
+        document.addEventListener('keydown', onKey);
+      }
+      function finishClose() {
+        lb.classList.remove('open', 'closing');
+        lbImg.setAttribute('src', 'data:,');
+        document.body.style.overflow = '';
+        if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+      }
+      function closeLb() {
+        document.removeEventListener('keydown', onKey);
+        if (reduceMq.matches) { finishClose(); return; }
+        lb.classList.add('closing');
+        var done = false;
+        function end() { if (done) return; done = true; lb.removeEventListener('animationend', end); finishClose(); }
+        lb.addEventListener('animationend', end);
+        setTimeout(end, 280); // fallback if animationend doesn't fire
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); closeLb(); }
+        else if (e.key === 'Tab') { e.preventDefault(); lbClose.focus(); } // trap: only close is focusable
+      }
+
+      document.querySelectorAll('.zoom').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var img = btn.querySelector('img');
+          // currentSrc follows the <picture> source, so phones enlarge the phone shot.
+          var src = (img && img.currentSrc) || btn.getAttribute('data-full');
+          openLb(src, img ? img.getAttribute('alt') : '', btn.getAttribute('data-cap'));
+        });
+      });
+      lbClose.addEventListener('click', closeLb);
+      lb.addEventListener('click', function (e) { if (e.target === lb) closeLb(); });
+    })();
+  </script>
+</body>
+</html>

@@ -593,26 +593,20 @@ device steps; the executable prep (bundling config + docs + checklist) is done o
       destructive button), dev build (disabled + reason), no writable location — plus the
       `autoInstallCli` toggle. Hidden entirely when `supported` is false. 10 component tests.
 
-## M10 — CLI-only edition + headless daemon (03 §21) — branch `feat/cli-only`
-- [x] Cargo features `gui` (default) / `keychain`; Tauri, plugins, `tauri-build`, objc2,
-      mac-notification-sys and keyring optional. `tokio` now declares `fs` + `signal`.
-- [x] `ops/forwards.rs` (Tauri-free service layer); `commands/forwards.rs` thin wrappers.
-- [x] `AppState::new_persistent`, cfg'd `emit` helpers, `rt::spawn/block_on`, `boot.rs`.
-- [x] Socket CRUD: `add`/`edit`/`remove`/`password-set`/`password-clear` + client flows
-      (`cli/forward_cmd.rs`); secret written client-side, flag-only over the socket.
-- [x] `daemon` (bind-first single owner, SIGTERM shutdown) + `service install|uninstall|status`
-      (systemd user/system, launchd) + `desktop install` + local `--version`.
-- [x] `install.sh --cli [--system] [--force] [-y]` with sha256 verification; `/dev/tty` prompt fix.
-- [x] CI: `tauri-build.yml` job `cli-headless`; `tauri-release.yml` job `cli` (musl x86_64/aarch64,
-      macOS universal) uploading `tunnel-pilot-cli-*.tar.gz` + `.sha256`.
-- [x] Verified on Linux: headless fmt/clippy/test (210 pass, 1 ignored), e2e daemon+CRUD+
-      password+SIGTERM, `docs/install_test.sh` 48 pass.
-- [x] Verified in a Debian trixie container (rust:1 + WebKitGTK + musl-tools): default `gui`
-      build `clippy --all-targets -D warnings` clean, `cargo test` 258 pass (1 ignored);
-      `x86_64-unknown-linux-musl` CLI build is static-pie, 9.5 MB unstripped, prints `(cli)`.
-- [ ] **Not verified**: macOS builds (keychain feature, universal lipo), aarch64 musl, a real
-      `service install` against systemd/launchd, `desktop install` end to end, the GUI at
-      runtime (`pnpm tauri dev`), and the CI workflows themselves (never run).
+## M10 — Tunnel Pilot CLI (server product) + web UI (03 §21–22)
+Superseded design (2026-11-06, Kalfian): the first cut (`0bf03aa`, pushed to master) shipped a
+"CLI-only edition" of the same `tunnel-pilot` binary sharing the desktop config with
+`desktop install`; replaced by two independent products with identical features.
+- [x] `ops/` for every command + `ops/dispatch.rs`; `commands/*` thin wrappers; EventBus.
+- [x] Bins `tunnel-pilot` (gui) / `tunnel-pilot-cli` (server); `com.kalfian.tunnelpilot.cli`.
+- [x] `web/` (axum): admin password (argon2id), sessions, throttle, CSRF/Origin, CSP,
+      WebSocket events, embedded SPA; `daemon --web --bind`, default `127.0.0.1:1855`.
+- [x] Frontend `transport.ts` + web mode (login, plain-HTTP notice, platform swaps).
+- [x] Installers/uninstallers for both products + tests; CI `cli-headless`, release `cli`.
+- [x] Verified: server build fmt/clippy/test, desktop build clippy/test in Docker, curl
+      contract E2E, Chromium E2E against the real binary (11/11), installer suites.
+- [ ] **Not verified**: macOS builds, aarch64 musl, real systemd/launchd install, CI runs,
+      the desktop app at runtime after the transport refactor (`pnpm tauri dev`).
 
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).

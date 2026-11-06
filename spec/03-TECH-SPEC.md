@@ -1191,7 +1191,7 @@ Clear action. `LogEntry`: level(info/warning/error), tunnelName, message, timest
 ### Behavior
 
 A terminal user or an LLM agent controls the **running** owner of the tunnels from a shell —
-the desktop app, or on a headless host the `tunnel-pilot daemon` (§21). The socket is a
+the desktop app, or on a headless host the `tunnel-pilot-cli daemon` (§21). The socket is a
 remote control, not a second tunnel engine: with no owner running there is nothing to talk
 to (exit `3` + a hint naming both the app and the daemon), and the CLI never auto-launches
 anything.
@@ -1216,9 +1216,9 @@ tunnel-pilot edit <id|name> [same field options] [--name N] [--no-tags]         
 tunnel-pilot remove|rm <id|name>                                                  [--json]
 tunnel-pilot set-password <id|name> [--password-stdin]                            [--json]
 tunnel-pilot clear-password <id|name>                                             [--json]
-tunnel-pilot daemon [--connect-all] [--connect <id|name>]...          (§21, no socket client)
-tunnel-pilot service install [--connect-all] [--connect <id|name>]... | uninstall | status
-tunnel-pilot desktop install
+tunnel-pilot-cli daemon [--web [--bind <addr[:port]>]] [--connect-all] [--connect <t>]...  (§21)
+tunnel-pilot-cli web set-password [--password-stdin] | web status                         (§22)
+tunnel-pilot-cli service install [daemon options] | uninstall | status
 tunnel-pilot version | --version | -V | help
 global: [--socket <path>]   env: TUNNEL_PILOT_SOCKET, TUNNEL_PILOT_CONFIG_DIR
 ```
@@ -1390,75 +1390,163 @@ deletes.
       `hasStoredPassword: true`; the secret appears in neither the config file nor the log.
 - [ ] `password-clear` deletes the secret and clears the flag.
 
-## 21. CLI-only edition + headless daemon (`daemon/`, feature `gui`)
+## 21. Two products, one codebase (`ops/`, features `gui` / `server`)
 
 ### Behavior
 
-Servers and headless boxes get the tunnel engine without a window. One crate, two builds:
+Tunnel Pilot ships as two products with **identical features**; only delivery differs
+(Kalfian, 2026-11-06):
 
-| Build | Command | Contains |
-|---|---|---|
-| Desktop (default) | `cargo build` / `pnpm tauri build` | everything; the binary is also the CLI |
-| CLI-only, Linux | `cargo build --release --no-default-features` | core + CLI + daemon; no Tauri/WebKit/GTK, no keychain (fallback file); static musl in CI |
-| CLI-only, macOS | `… --no-default-features --features keychain` | as above + the OS keychain |
+| Product | Binary | Feature set | For | UI |
+|---|---|---|---|---|
+| **Tunnel Pilot** (desktop) | `tunnel-pilot` | `gui` (default) | macOS / Windows / Linux desktops | tray + window; the binary is also a CLI client (§20) |
+| **Tunnel Pilot CLI** (server) | `tunnel-pilot-cli` | `server` (+ `keychain` on macOS) | headless Linux / macOS | daemon + CLI + web UI (§22) |
 
-Measured (Linux x86_64, glibc dev build of the CLI-only edition): 9.6 MB release binary,
-7.5 MB stripped, linking only libc/libm/libgcc.
+```
+cargo build                                                    # desktop (pnpm tauri build)
+pnpm build:web && cargo build --release --no-default-features --features server --bin tunnel-pilot-cli
+                                                               # server; add `,keychain` on macOS
+```
 
-- **`tunnel-pilot daemon`** is the second owner of `AppState`: it boots exactly what the
-  desktop `setup` hook boots minus the window (`boot::load_document` = migration + config
-  load, `CredentialStore`, `AppState::new_persistent`, wake watchdog, control socket) and
-  serves until SIGINT/SIGTERM, then runs `run_stop_all` (10s budget) and unlinks the socket.
-  `--connect-all` / `--connect <target>` bring tunnels up at start; failures are logged,
-  never fatal. Logs go to stdout (no ANSI when not a TTY) → journald / launchd log file.
-- **Single owner.** The daemon binds the socket **before** loading config or dialing; the
-  existing live-socket probe makes a second daemon — or a daemon next to the desktop app —
-  exit `1`. Desktop app and daemon share one config dir and must not run together.
-- **`service install`** writes and enables a service that runs `daemon` with the given
-  flags, pinning the absolute binary path and `TUNNEL_PILOT_CONFIG_DIR` (so a system unit
-  without `$XDG_CONFIG_HOME` still finds the same config/socket): systemd user unit
-  (`~/.config/systemd/user/tunnel-pilot.service`) for a normal user — with a
-  `loginctl enable-linger` hint when lingering is off — a system unit
-  (`/etc/systemd/system/…`, `multi-user.target`) for root, a launchd agent
-  (`~/Library/LaunchAgents/com.kalfian.tunnelpilot.daemon.plist`) on macOS. Re-running
-  re-applies (restart / bootout+bootstrap). A `target/` dev build is refused like the shim.
-- **`desktop install`** hands off to the published `install.sh --desktop` (one install path
-  to maintain). The desktop app reads the same config dir, so forwards and passwords carry
-  over; on macOS the installer re-points a CLI-only binary on PATH at the app binary, and
-  the CLI warns if the daemon service is still installed.
-- **`--version` / `-V`** is local (no socket) and prints `tunnel-pilot <ver> (desktop|cli)`;
-  install scripts key off the edition.
-- **Distribution**: `tauri-release.yml` job `cli` publishes
-  `tunnel-pilot-cli-{linux-x86_64,linux-aarch64,macos-universal}.tar.gz` + `.sha256` to the
-  draft release; `install.sh --cli [--system]` downloads, verifies the checksum, and
-  installs to `~/.local/bin` (or `/usr/local/bin` with `--system`/as root). It refuses to
-  replace a desktop launcher on PATH without `--force` (the desktop build already is the
-  CLI). No Windows CLI-only build (the socket is Unix-only).
+- **Independent installs.** The server product uses its own identifier
+  `com.kalfian.tunnelpilot.cli`: its own config dir, secrets file, control socket, service
+  name (`tunnel-pilot-cli.service`, launchd `com.kalfian.tunnelpilot.cli.daemon`) and log.
+  Both products can be installed and run on one machine without touching each other's
+  tunnels. Forwards move between them via backup export/import. (Keychain entries share
+  the `tunnel-pilot` service string; accounts are forward uuids, so they never collide.)
+- **Edition-specific commands.** Both: the §20 tunnel/forward commands. Desktop only:
+  `install-cli` / `uninstall-cli` (PATH shim). Server only: `daemon`, `service`, `web`.
+  The wrong product's command exits `2` naming the product that has it. `--version` prints
+  `<ver> (desktop|cli)`; help text and the not-running hint are per product.
+- **`tunnel-pilot-cli daemon [--web [--bind <addr[:port]>]] [--connect-all] [--connect <t>]…`**
+  is the server's owner of `AppState`: it boots what the desktop `setup` hook boots minus
+  the window (`boot::load_document`, `CredentialStore`, `AppState::new_persistent`, wake
+  watchdog, control socket, optionally the web server), serves until SIGINT/SIGTERM, then
+  runs `run_stop_all` (10s budget) and unlinks the socket. Options are validated before
+  anything is claimed; the socket is bound before any tunnel dials (one owner at a time).
+  Logs go to stdout (no ANSI when not a TTY) → journald / launchd log file.
+- **`service install [daemon options]`** writes + enables a systemd user unit (system unit
+  in `/etc/systemd/system` when root, `multi-user.target`) or a launchd agent that runs
+  `daemon` with the same options, pinning the absolute binary path and
+  `TUNNEL_PILOT_CONFIG_DIR`. `--web` is refused at install time without an admin password.
+  A user unit prints a `loginctl enable-linger` hint when lingering is off. `uninstall` /
+  `status` manage it. A `target/` dev build is refused like the PATH shim.
+- **One release, one version.** The `v*` tag publishes the desktop bundles AND
+  `tunnel-pilot-cli-{linux-x86_64,linux-aarch64,macos-universal}.tar.gz` + `.sha256`
+  (`tauri-release.yml` job `cli`). Keeping both in one release keeps the desktop updater's
+  `releases/latest/download/latest.json` endpoint correct — a separate CLI release must
+  never become "latest".
+- **Installers** (all `curl … | bash`, all network-free unit-tested):
+  `docs/install.sh` + `docs/uninstall.sh` (desktop), `docs/cli/install.sh` +
+  `docs/cli/uninstall.sh` (server). The server installer **requires** the `.sha256` and
+  aborts on a missing or wrong checksum, never writes through a symlink at the
+  destination, and installs to `~/.local/bin` (`/usr/local/bin` with `--system` or as
+  root). Uninstallers keep config by default; `--purge` (confirmed on the TTY or `--yes`)
+  also deletes the config dir and that product's keychain entries (by forward id read from
+  its own config — the other product's entries are never touched).
 
 ### Rust approach
-- Cargo features: `default = ["gui"]`; `gui` pulls Tauri, its plugins, `tauri-build`
-  (optional build-dependency), `objc2`, `mac-notification-sys` and `keychain`;
-  `keychain = ["dep:keyring"]`. Without `keychain`, `KeyringBackend` is `NullBackend`
-  (probe → false → fallback file), the same route a headless Linux host already takes.
-- Desktop-only modules (`commands`, `tray`, `window`, `updater`, `platform::{autostart,
-  dock, macos, notify}`) are `#[cfg(feature = "gui")]`; headless `platform::notify` is a
-  no-op facade so the engine calls it unconditionally.
-- `AppState`/`LogBuffer` keep their `AppHandle` slot only under `gui`; one private `emit`
-  helper per type is the single cfg point. `rt::spawn` / `rt::block_on` pick Tauri's global
-  runtime (desktop: `setup` is not on a tokio worker) or plain tokio (headless).
-- `tokio` declares `fs` and `signal` itself (previously `fs` arrived only via Tauri).
+- `[[bin]] tunnel-pilot` (`required-features = ["gui"]`, `src/main.rs`) and
+  `[[bin]] tunnel-pilot-cli` (`required-features = ["server"]`,
+  `src/bin/tunnel-pilot-cli.rs`); `default-run = "tunnel-pilot"`. `gui` pulls Tauri, its
+  plugins, `tauri-build`, `objc2`, `mac-notification-sys` and `keychain`; `server` pulls
+  `axum`, `argon2`, `getrandom`; `keychain = ["dep:keyring"]` (without it
+  `KeyringBackend` is `NullBackend` → fallback file).
+- `ops/` is the Tauri-free service layer for EVERY command (forwards, groups, settings,
+  logs, backup, dispatch). `commands/*` are thin `#[tauri::command]` wrappers; settings'
+  desktop side effects (autostart, dock) stay in the wrapper.
+- `AppState`/`LogBuffer` emit through one private `emit` helper that publishes to the
+  `events::EventBus` (tokio broadcast, serialized only while subscribed) and, under `gui`,
+  to Tauri. `rt::spawn` / `rt::block_on` pick Tauri's runtime (desktop) or tokio.
+- `cli::{EDITION, PROGRAM, APP_IDENTIFIER}` are compile-time per product.
 
 ### Acceptance criteria
-- [ ] `cargo clippy --no-default-features --all-targets -D warnings` and
-      `cargo test --no-default-features` pass (CI job `cli-headless`, Linux + macOS).
-- [ ] The CLI-only binary links no WebKit/GTK/D-Bus (`ldd` shows only libc-family).
-- [ ] A bare invocation of the CLI-only binary prints usage and exits `2`.
-- [ ] A second `daemon` against the same socket exits `1` and leaves the first serving.
-- [ ] SIGTERM disconnects every tunnel and removes the socket file.
-- [ ] `service install` output pins the binary path, flags and config dir (unit-tested
-      `systemd_unit` / `launchd_plist`, quoting/escaping included).
-- [ ] `install.sh --cli` skips an existing desktop launcher unless `--force`, verifies the
-      `.sha256`, and aborts on a mismatch (`docs/install_test.sh`).
-- [ ] Installing over an existing shim is atomic (temp symlink + `rename`) and idempotent.
-- [ ] `install-cli` / `uninstall-cli` work with the app closed and never exit `3`.
+- [ ] `cargo clippy --all-targets -D warnings` + `cargo test` (desktop) and the same with
+      `--no-default-features --features server` (CI `build` + `cli-headless`) pass.
+- [ ] The Linux server binary links no WebKit/GTK/D-Bus; a bare invocation prints usage, exit 2.
+- [ ] A second `daemon` against the same socket exits `1` and leaves the first serving;
+      SIGTERM disconnects every tunnel and removes the socket.
+- [ ] `tunnel-pilot-cli` uses `com.kalfian.tunnelpilot.cli`; the desktop's config is untouched.
+- [ ] `service install` pins the binary path, flags and config dir (unit-tested
+      `systemd_unit` / `launchd_plist`, quoting included) and refuses `--web` without a password.
+- [ ] Installer/uninstaller suites pass (`docs/install_test.sh`, `docs/uninstall_test.sh`,
+      `docs/cli/install_test.sh`): checksum required, symlink not written through, the
+      other product's binary/config/secrets untouched, `--purge` only with confirmation.
 
+## 22. Web UI (`web/`, `tunnel-pilot-cli daemon --web`)
+
+### Behavior
+The server serves the **same Svelte UI** as the desktop app and a JSON binding of the same
+IPC contract (02 §10): `POST /api/invoke/<command>` → `ops::dispatch::invoke`,
+`GET /api/events` → WebSocket of the §7 events. Default `127.0.0.1:1855`; `--bind 0.0.0.0`
+(port optional) makes it reachable by IP.
+
+**Security (the server may face a network):**
+- Login always required, localhost included. Admin password via
+  `tunnel-pilot-cli web set-password [--password-stdin]` (≥10 chars, no surrounding
+  whitespace; prompt twice), stored as argon2id PHC in `<config>/web_admin.json`, `0600`,
+  atomic. `web status` reports whether it is set. `--web` refuses to start without it.
+- Session: 32 CSPRNG bytes, hex, in memory only; cookie `tp_session` `HttpOnly;
+  SameSite=Strict; Path=/` (+ `Secure` behind `X-Forwarded-Proto: https`); 12h idle / 7d
+  absolute; max 64 live (LRU evicted). A session remembers the hash it was created under:
+  changing the password signs everyone out immediately.
+- CSRF: every POST needs `X-Tunnel-Pilot: 1`; a present `Origin` must equal `Host` (or
+  `X-Forwarded-Host`); `Origin: null` is refused. The WebSocket requires a matching Origin,
+  and session + origin are checked BEFORE the upgrade is considered.
+- Host allowlist on EVERY route: `Host` (and `X-Forwarded-Host` when trusted) must be an
+  IP literal, `localhost`, or a `--public-host` name, else `421` — a DNS-rebinding page
+  names its own domain there.
+- `X-Forwarded-For/-Proto/-Host` are ignored unless `--trust-proxy`; with it, the client
+  IP is the LAST `X-Forwarded-For` entry (the one the proxy appended).
+- Login throttle per client (IPv4, or IPv6 /64; IPv4-mapped folded): the attempt is counted
+  BEFORE argon2 runs (no parallel bypass); 5 attempts without a success → lockout 30s,
+  doubling per repeat up to 15 min; a success clears it. At most 2 argon2 verifications
+  run at once (each ~19 MiB) — beyond that, `503` + `Retry-After: 2` without counting.
+- Connections: served with hyper directly — 10s header-read timeout (slowloris) and at
+  most 256 open connections; WebSocket inbound messages capped at 4 KiB.
+- `service install --web` as root (system unit) is refused without `--allow-root`; system
+  units add `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=full`, `ProtectKernel*`,
+  `ProtectControlGroups`, `RestrictSUIDSGID`, `RestrictRealtime`, `LockPersonality`
+  (user units: `NoNewPrivileges` only).
+- Every `tp_session` cookie value presented is tried (a planted sibling cookie cannot
+  shadow the real one).
+- Identity files (settable from the web UI) must be regular files ≤ 64 KiB — no devices,
+  FIFOs or huge files; errors never contain file contents.
+- Editing a forward's SSH host, port or user deletes its stored password (both products):
+  a forward cannot be re-aimed at another server to send an existing password there.
+- The server product uses its own keychain service (`tunnel-pilot-cli`).
+- Known gaps (documented, not fixed here): SSH host keys are not pinned
+  (`check_server_key` accepts any key — pre-existing in the desktop app); CLI release
+  archives carry a SHA-256, not a signature.
+- Headers on every response: strict CSP (`script-src 'self'`, `connect-src 'self'`,
+  `frame-ancestors 'none'`, …), `X-Frame-Options: DENY`, `nosniff`, `no-referrer`,
+  `Cross-Origin-Resource-Policy: same-origin`; COOP only behind TLS (browsers ignore it, and
+  log an error, on plain HTTP); `/api/*` is `no-store`. Bodies capped at 4 MiB.
+- No TLS in the binary: terminate HTTPS at a reverse proxy (Caddy / nginx with
+  `proxy_set_header Host $host` + WebSocket upgrade headers) or reach it over an SSH
+  tunnel. The daemon warns at startup on a non-loopback bind; the UI shows a persistent
+  notice on plain HTTP from a non-loopback host.
+- Desktop-only commands are not dispatched (`404`); `set_forward_password` stays write-only;
+  no response, log line or error carries a secret or a session id.
+
+### Rust approach
+- `web/mod.rs` (axum: router, middleware, handlers, WebSocket pump), `web/auth.rs`
+  (sessions + throttle), `web/admin.rs` (password file + CLI), `web/assets.rs` (files
+  embedded by `build.rs` from `../dist-web`; SPA fallback to `index.html`; hashed
+  `assets/*` cached immutable; a missing UI build still compiles and serves an explainer).
+- The event pump closes with `4000` when a client lags (it reconnects and rehydrates) and
+  `4401` when its session ends; it re-validates the session and pings every 30s.
+
+### Acceptance criteria
+- [ ] In-process router tests (`web::tests`): 401 without a session, 403 without the CSRF
+      header or with a foreign Origin, 404 for desktop-only commands, 401→429 throttling,
+      logout clears the cookie, SPA fallback vs JSON 404 for unknown `/api/*`, the event
+      stream refuses missing session / missing or foreign Origin.
+- [ ] Browser E2E against the real binary: login, wrong password message, live
+      `forwards://changed` and `tunnel://status` without reload, cookie invisible to JS, a
+      cross-site page cannot call the API, logout, zero CSP violations.
+- [ ] No secret appears in `app_hydrate`, `export_backup_text`, the config file or the log
+      after `set_forward_password` over the web.
+- [ ] Live attack re-tests: 40 parallel wrong logins verify ≤ 2 passwords and keep memory
+      flat; 50 half-open connections are closed within the header timeout; a rebound `Host`
+      gets `421`; a `--public-host` name works.

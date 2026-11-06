@@ -46,7 +46,7 @@ Manage your SSH tunnels (`ssh -L`) with ease — toggle connections on/off direc
 - **Copy SSH Command** — Copy the equivalent `ssh -N -L …` command for any tunnel.
 - **Logs Viewer** — In-memory activity log (last 500 entries) with copy/clear.
 - **CLI / automation (macOS & Linux)** — Control the running app from a terminal or a script: `tunnel-pilot list|status|connect|disconnect`, create and edit forwards (`add|edit|remove|set-password`), with `--json` output and meaningful exit codes. See [CLI / automation](#cli--automation).
-- **Server / CLI-only edition** — A ~7.5 MB binary with no window and no WebKit/GTK for servers and headless boxes: `tunnel-pilot daemon` runs the tunnels, `tunnel-pilot service install` keeps them up via systemd or launchd, and `tunnel-pilot desktop install` upgrades to the tray app later. See [Server / CLI only](#server--cli-only).
+- **Tunnel Pilot CLI for servers** — The same features as a headless product: `tunnel-pilot-cli` runs as a systemd/launchd service and is managed from the terminal or a **web UI** (the same interface, login-protected, port 1855). See [Tunnel Pilot CLI (server)](#tunnel-pilot-cli-server).
 - **Multi-platform** — macOS, Windows, Linux.
 
 ## Tech stack
@@ -64,6 +64,16 @@ Download the latest build for your OS from [**GitHub Releases**](https://github.
 | **macOS** | `.dmg` | Open the `.dmg`, drag **Tunnel Pilot** to `/Applications`. |
 | **Windows** | `.exe` (NSIS installer) | Run the installer and follow the prompts. |
 | **Linux** | `.AppImage`, `.deb`, `.rpm` | AppImage: `chmod +x` then run. `.deb`/`.rpm`: install with your package manager. |
+
+Or from a terminal (macOS / Linux / WSL), and to remove it again:
+
+```bash
+curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash
+curl -fsSL https://kalfian.github.io/tunnel-pilot/uninstall.sh | bash          # keeps your forwards
+curl -fsSL https://kalfian.github.io/tunnel-pilot/uninstall.sh | bash -s -- --purge   # deletes them too
+```
+
+On a server, install [Tunnel Pilot CLI](#tunnel-pilot-cli-server) instead.
 
 ### First launch — unsigned build workarounds
 
@@ -151,7 +161,7 @@ Exit codes — designed for scripts and agents:
 | 0 | success |
 | 1 | internal / IO error |
 | 2 | usage error |
-| 3 | Tunnel Pilot is not running (start the app — `open -a "Tunnel Pilot"` — or `tunnel-pilot daemon`) |
+| 3 | Tunnel Pilot is not running (start the app — `open -a "Tunnel Pilot"`; for the server product, `tunnel-pilot-cli daemon`) |
 | 4 | target not found, or ambiguous |
 | 5 | the operation ended in `error` (e.g. auth failed) |
 | 6 | timed out waiting for a terminal status |
@@ -174,51 +184,82 @@ keychain exists — itself, and only tells the app that a password is now stored
 `~/.tunnel-pilot.sock`) if the default socket path is too long for your system's
 `sun_path` limit.
 
-## Server / CLI only
+## Tunnel Pilot CLI (server)
 
-*Linux (x86_64, aarch64) and macOS.* For servers, CI boxes and anything without a display
-there is a CLI-only edition: one static binary (about 7.5 MB, no WebKit/GTK/D-Bus), the
-same tunnel engine, no window.
-
-```bash
-curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli
-# --system installs to /usr/local/bin (automatic when run as root); the download is sha256-verified
-```
+*Linux (x86_64, aarch64) and macOS.* `tunnel-pilot-cli` is the same product without a window:
+a daemon you manage from the terminal **or from a web UI** — the very interface the desktop
+app shows, in your browser. One static binary (no WebKit/GTK), its own config, so it can sit
+next to the desktop app on the same machine. Forwards move between the two with backup
+export/import.
 
 ```bash
-tunnel-pilot add prod-db --ssh deploy@bastion.example.com \
-  --forward 5432:db.internal:5432 --identity ~/.ssh/id_ed25519
-tunnel-pilot service install --connect-all   # systemd / launchd: starts now and at boot
-tunnel-pilot list
+curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/install.sh | bash        # sha256-verified
+tunnel-pilot-cli web set-password                                              # admin login for the web UI
+tunnel-pilot-cli service install --web                   # http://127.0.0.1:1855, starts at boot
+tunnel-pilot-cli service install --web --bind 0.0.0.0    # reachable at http://<server-ip>:1855
 ```
+
+Uninstall with `curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/uninstall.sh | bash`
+(add `-s -- --purge` to also delete the config, the admin password and stored passwords).
 
 | Command | What it does |
 |---|---|
-| `tunnel-pilot daemon [--connect-all] [--connect <id\|name>]…` | Run the engine in the foreground (Ctrl-C / SIGTERM disconnects and exits) |
-| `tunnel-pilot service install [--connect-all] [--connect …]` | Run the daemon in the background: a systemd **user** unit (a **system** unit when run as root) on Linux, a launchd agent on macOS. Re-run to change flags |
-| `tunnel-pilot service uninstall` / `status` | Stop and remove it / show whether it is installed and running |
-| `tunnel-pilot desktop install` | Install the desktop tray app; it reads the same config, so forwards and passwords carry over |
+| `tunnel-pilot-cli daemon [--web [--bind <addr[:port]>]] [--connect-all] [--connect <id\|name>]…` | Run the engine (and the web UI) in the foreground; Ctrl-C / SIGTERM disconnects and exits |
+| `tunnel-pilot-cli service install [same options]` / `uninstall` / `status` | Run it in the background: systemd **user** unit (**system** unit when root) or launchd agent |
+| `tunnel-pilot-cli web set-password [--password-stdin]` / `web status` | Set the web UI admin password (signs every session out) / check it is set |
+| `--public-host <name>` / `--trust-proxy` | Behind a reverse proxy: allow its domain name, and trust its `X-Forwarded-*` headers for the client IP and HTTPS |
+| `--allow-root` (`service install` only) | Accept running the web UI in a root system service (refused by default) |
 
-Every command from [CLI / automation](#cli--automation) works against the daemon unchanged.
+Every command from [CLI / automation](#cli--automation) works too (`tunnel-pilot-cli list`,
+`add`, `connect`, …), except the desktop-only `install-cli`.
 
-- **Only one owner at a time.** The daemon refuses to start while the desktop app (or another
-  daemon) is serving the socket. Run `tunnel-pilot service uninstall` before opening the
-  desktop app on the same machine.
+**Web UI security.** Login is always required (admin password, argon2id, ≥ 10 characters);
+the session is an `HttpOnly`, `SameSite=Strict` cookie; every change needs a CSRF header and
+a same-origin request; only IP addresses, `localhost` and `--public-host` names are answered
+(DNS-rebinding defence); failed logins are rate-limited per client with a backing-off
+lockout and a cap on concurrent password checks; slow or stalled connections are dropped;
+responses carry a strict Content-Security-Policy. It listens on `127.0.0.1` unless you pass
+`--bind`, and a root service with `--web` is refused without `--allow-root` — run it as a
+normal user. Editing a forward's SSH host, port or user deletes its stored password, so a
+forward can never be re-aimed to send an existing password somewhere else.
+
+**There is no built-in TLS**: when it is reachable beyond the machine, put HTTPS in front,
+e.g. Caddy —
+
+```
+tunnels.example.com {
+    reverse_proxy 127.0.0.1:1855
+}
+```
+
+```bash
+tunnel-pilot-cli service install --web --public-host tunnels.example.com --trust-proxy
+```
+
+— or nginx with `proxy_set_header Host $host;`, `X-Forwarded-For` / `X-Forwarded-Proto`, and
+the WebSocket `Upgrade`/`Connection` headers. Without a proxy, an SSH tunnel
+(`ssh -L 1855:127.0.0.1:1855 server`) works too.
+
+Known limits: SSH host keys are not pinned yet (both products accept the server's key, as
+the desktop app always has), and the CLI release archives are protected by a published
+SHA-256, not a signature.
+
 - **Passwords on a headless Linux box** live in `tunnel_pilot_secrets.json` (`0600`) in the
-  config dir, because there is no keychain; prefer `--identity` keys on servers. The macOS
-  CLI edition uses the Keychain. Passphrase-protected keys are not supported yet — use an
-  unencrypted key dedicated to the tunnel.
-- **User services stop at logout** unless lingering is enabled; `service install` prints
-  `sudo loginctl enable-linger $USER` when it is off.
-- Logs: `journalctl --user -u tunnel-pilot -f` (Linux), `~/Library/Logs/tunnel-pilot-daemon.log` (macOS).
-- `TUNNEL_PILOT_CONFIG_DIR` points the daemon and the CLI at another config dir.
+  config dir because there is no keychain — prefer `--identity` keys on servers. The macOS
+  build uses the Keychain. Passphrase-protected keys are not supported yet.
+- **User services stop at logout** unless lingering is on; `service install` prints the
+  `sudo loginctl enable-linger $USER` command when needed.
+- Config: `~/.config/com.kalfian.tunnelpilot.cli` (Linux), `~/Library/Application
+  Support/com.kalfian.tunnelpilot.cli` (macOS); `TUNNEL_PILOT_CONFIG_DIR` overrides it.
+- Logs: `journalctl --user -u tunnel-pilot-cli -f` (Linux), `~/Library/Logs/tunnel-pilot-cli.log` (macOS).
 
 Build it yourself:
 
 ```bash
+pnpm install && pnpm build:web          # the web UI is embedded at compile time
 cd src-tauri
-cargo build --release --no-default-features                      # Linux (no keychain)
-cargo build --release --no-default-features --features keychain   # macOS
+cargo build --release --no-default-features --features server --bin tunnel-pilot-cli           # Linux
+cargo build --release --no-default-features --features server,keychain --bin tunnel-pilot-cli  # macOS
 ```
 
 ## Build from source
