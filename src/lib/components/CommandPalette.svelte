@@ -45,7 +45,7 @@
   import Icon from "./ui/Icon.svelte";
   import StatusDot from "./ui/StatusDot.svelte";
 
-  const DESKTOP_VERSION = "2.0.0";
+  const DESKTOP_VERSION = "2.3.0";
   // Web mode reports the server build it is talking to.
   const VERSION = $derived(
     isWeb ? ($serverVersion ?? DESKTOP_VERSION) : DESKTOP_VERSION,

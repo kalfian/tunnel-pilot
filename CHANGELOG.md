@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.3.0] - 2026-11-06
 
 ### Added
 - **Tunnel Pilot CLI — the server product** — `tunnel-pilot-cli` has the same features as the desktop app in a single binary with no window and no WebKit/GTK, for Linux (x86_64, aarch64; static) and macOS. Install with `curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/install.sh | bash`. The installer refuses a download whose SHA-256 is missing or wrong. The CLI keeps its own config, so it can run next to the desktop app on the same machine.

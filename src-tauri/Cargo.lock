@@ -6253,7 +6253,7 @@ dependencies = [
 
 [[package]]
 name = "tunnel-pilot"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",

@@ -36,7 +36,7 @@
   import Icon from "../components/ui/Icon.svelte";
   import Dialog from "../components/ui/Dialog.svelte";
 
-  const VERSION = "2.0.0";
+  const VERSION = "2.3.0";
   // Web mode shows the server build it is talking to.
   const shownVersion = $derived(isWeb ? ($serverVersion ?? VERSION) : VERSION);
 
