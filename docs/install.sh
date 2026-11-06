@@ -196,15 +196,44 @@ get_installed_version() {
 }
 
 # ── Fetch latest release from GitHub ──────────────────────────────────────────
+# GET a GitHub API URL into $API_BODY (status in $API_STATUS). Authenticated when
+# GITHUB_TOKEN is set — 5000 requests/hour instead of 60 per IP, which shared CI
+# runners exhaust — and retried with a short backoff. Written for bash 3.2 (macOS).
+github_api_get() {
+  local url="$1" attempt raw
+  local auth=()
+  [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  API_BODY=""; API_STATUS="000"
+  for attempt in 1 2 3; do
+    raw=$(curl -sSL -w '\n%{http_code}' -H "Accept: application/vnd.github+json" \
+      ${auth[@]+"${auth[@]}"} "$url" 2>/dev/null) || raw=$'\n000'
+    API_STATUS="${raw##*$'\n'}"
+    API_BODY="${raw%$'\n'*}"
+    [ "$API_STATUS" = "200" ] && return 0
+    [ "$API_STATUS" = "404" ] && return 1
+    [ "$attempt" -lt 3 ] && sleep $((attempt * 2))
+  done
+  return 1
+}
+
+# A human reason for a failed github_api_get.
+github_api_error() {
+  case "$API_STATUS" in
+    000)     echo "Could not reach GitHub. Check your internet connection." ;;
+    403|429) echo "GitHub's API rate limit was reached for your network (HTTP $API_STATUS). Try again in a while, or set GITHUB_TOKEN." ;;
+    404)     echo "No published release was found." ;;
+    *)       echo "GitHub answered HTTP $API_STATUS." ;;
+  esac
+}
+
 fetch_latest() {
   spinner_start "Fetching latest release"
   local api_url="https://api.github.com/repos/${REPO}/releases/latest"
-  RELEASE_JSON=$(curl -fsSL \
-    -H "Accept: application/vnd.github+json" \
-    "$api_url" 2>/dev/null) || {
+  github_api_get "$api_url" || {
     spinner_stop
-    print_error "Could not reach GitHub. Check your internet connection.\n  URL: $api_url"
+    print_error "$(github_api_error)\n  URL: $api_url"
   }
+  RELEASE_JSON="$API_BODY"
   spinner_stop
 
   VERSION=$(json_get "$RELEASE_JSON" "tag_name")
