@@ -51,6 +51,7 @@ app.*.map.json
 # Node / frontend
 node_modules/
 /dist/
+/dist-web/
 .vite/
 vite.config.ts.timestamp-*
 vite.config.js.timestamp-*

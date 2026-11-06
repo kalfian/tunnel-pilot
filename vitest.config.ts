@@ -13,5 +13,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // jsdom has no `__TAURI_INTERNALS__`, which would read as web mode; make
+    // desktop the default and let web-mode tests opt in (see the file).
+    setupFiles: ["src/test-setup.ts"],
   },
 });

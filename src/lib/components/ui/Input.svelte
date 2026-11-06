@@ -14,6 +14,10 @@
     max?: number;
     step?: number;
     ariaLabel?: string;
+    /** Id(s) of helper text that describes the field (merged with the error). */
+    describedby?: string;
+    name?: string;
+    autocomplete?: "off" | "current-password" | "username";
     autofocus?: boolean;
     onkeydown?: (e: KeyboardEvent) => void;
   }
@@ -32,11 +36,19 @@
     max,
     step,
     ariaLabel,
+    describedby,
+    name,
+    autocomplete,
     autofocus = false,
     onkeydown,
   }: Props = $props();
 
   const errorId = $derived(id ? `${id}-error` : undefined);
+  const describedBy = $derived(
+    [describedby, invalid && errorText ? errorId : undefined]
+      .filter(Boolean)
+      .join(" ") || undefined,
+  );
 
   let el: HTMLInputElement | undefined = $state();
   $effect(() => {
@@ -61,7 +73,9 @@
     class:invalid={invalid && !!errorText}
     aria-label={ariaLabel}
     aria-invalid={invalid && !!errorText}
-    aria-describedby={invalid && errorText ? errorId : undefined}
+    aria-describedby={describedBy}
+    {name}
+    {autocomplete}
     {value}
     oninput={(e) => (value = e.currentTarget.value)}
     {onkeydown}

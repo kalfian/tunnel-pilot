@@ -3,13 +3,15 @@
  *
  * ONE function per `#[tauri::command]` in spec 02 §6. Components MUST call these
  * wrappers, never `invoke()` with raw command strings. Argument keys are
- * camelCase (Tauri v2 maps them to the snake_case Rust parameters).
+ * camelCase (Tauri v2 maps them to the snake_case Rust parameters; the web
+ * server takes the same objects, spec 02 §10). `invoke` comes from
+ * `transport.ts`, which picks Tauri IPC or HTTP at runtime.
  *
  * NOTE (M0): the backend command handlers are still stubs (implemented M3/M4+),
  * so these are not yet called at runtime — they establish the typed surface.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./transport";
 import type {
   AppSettings,
   AppSnapshot,
@@ -127,6 +129,16 @@ export const importBackup = (
   path: string,
   mode: ImportMode,
 ): Promise<ImportResult> => invoke("import_backup", { path, mode });
+
+/** Backup as JSON text (passwords stripped). Web mode downloads it as a file. */
+export const exportBackupText = (): Promise<string> =>
+  invoke("export_backup_text");
+
+/** Import a backup from its JSON text. Web mode reads it from an upload. */
+export const importBackupText = (
+  content: string,
+  mode: ImportMode,
+): Promise<ImportResult> => invoke("import_backup_text", { content, mode });
 
 // --- Updater (spec 02 §6.6) ---
 

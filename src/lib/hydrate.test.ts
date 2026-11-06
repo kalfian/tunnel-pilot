@@ -28,11 +28,12 @@ vi.mock("./events", () => {
     onUpdateProgress: register("onUpdateProgress"),
     onWindowFocus: register("onWindowFocus"),
     onTrayOpened: register("onTrayOpened"),
+    onEventsResumed: register("onEventsResumed"),
   };
 });
 
 import { appHydrate } from "./ipc";
-import { hydrateAll, subscribeEvents } from "./hydrate";
+import { hydrateAll, startSync, subscribeEvents } from "./hydrate";
 import { forwards, statusById, statsById } from "./stores/forwards";
 import { groups } from "./stores/groups";
 import { logs } from "./stores/logs";
@@ -211,5 +212,38 @@ describe("subscribeEvents", () => {
     handlers.onTrayOpened(null);
     await Promise.resolve();
     expect(vi.mocked(appHydrate)).toHaveBeenCalledOnce();
+  });
+
+  it("re-hydrates when the web event socket resumes after a gap", async () => {
+    vi.mocked(appHydrate).mockResolvedValue(SNAPSHOT);
+    await subscribeEvents();
+    expect(vi.mocked(appHydrate)).not.toHaveBeenCalled();
+
+    handlers.onEventsResumed(null);
+    await Promise.resolve();
+    expect(vi.mocked(appHydrate)).toHaveBeenCalledOnce();
+  });
+});
+
+describe("startSync", () => {
+  beforeEach(() => {
+    vi.mocked(appHydrate).mockReset();
+  });
+
+  it("subscribes, then pulls the snapshot", async () => {
+    vi.mocked(appHydrate).mockResolvedValue(SNAPSHOT);
+    const stop = await startSync();
+    expect(handlers.onTunnelStatus).toBeTypeOf("function");
+    expect(vi.mocked(appHydrate)).toHaveBeenCalledOnce();
+    expect(stop).toBeTypeOf("function");
+  });
+
+  it("reports a failed first snapshot without dropping the subscriptions", async () => {
+    const failure = { kind: "io", message: "down" };
+    vi.mocked(appHydrate).mockRejectedValue(failure);
+    const onError = vi.fn();
+    const stop = await startSync(onError);
+    expect(onError).toHaveBeenCalledWith(failure);
+    expect(stop).toBeTypeOf("function");
   });
 });

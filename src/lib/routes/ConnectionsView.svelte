@@ -16,7 +16,7 @@
     copySshCommand,
     deleteGroup,
   } from "../ipc";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { copyText } from "../platform";
   import { activeView } from "../ui/view";
   import { paletteOpen } from "../stores/palette";
   import { pendingForm, pendingDelete } from "../stores/commands";
@@ -161,7 +161,7 @@
     if (!selected) return;
     try {
       const cmd = await copySshCommand(selected.id);
-      await writeText(cmd);
+      await copyText(cmd);
       pushToast("SSH command copied", { tone: "success" });
     } catch (err) {
       pushToast(`Copy failed: ${String(err)}`, { tone: "error" });
@@ -572,6 +572,24 @@
     }
     .compact-only {
       display: inline-flex;
+    }
+  }
+  /* Phone widths (web mode only — the desktop window's 560px minimum never
+     gets the content area this narrow): the title gets its own line and the
+     filter takes the full row instead of squeezing the title to a sliver. */
+  @container content (max-width: 440px) {
+    .toolbar {
+      flex-wrap: wrap;
+    }
+    .tools {
+      flex: 1 1 100%;
+    }
+    .filter {
+      flex: 1;
+      min-width: 0;
+    }
+    .filter-input {
+      width: 100%;
     }
   }
   .skeletons {

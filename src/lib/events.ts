@@ -2,16 +2,18 @@
  * Typed Rust→Frontend event subscriptions (spec 02 §7).
  *
  * Event names mirror the constants in `src-tauri/src/events.rs` exactly. Each
- * `onX` helper wraps Tauri's `listen<T>` with the correct payload type and
+ * `onX` helper wraps the transport's `listen<T>` (Tauri events on desktop, the
+ * shared WebSocket in web mode) with the correct payload type and
  * returns the `UnlistenFn`. Stores are the only place that reconcile these
  * payloads into UI state (AGENTS.md §5); M4 wires them up.
  */
 
 import {
   listen,
+  onReconnect,
   type EventCallback,
   type UnlistenFn,
-} from "@tauri-apps/api/event";
+} from "./transport";
 import type {
   AppSettings,
   ForwardConfig,
@@ -96,3 +98,10 @@ export const onWindowFocus = (cb: EventCallback<null>): Promise<UnlistenFn> =>
 
 export const onTrayOpened = (cb: EventCallback<null>): Promise<UnlistenFn> =>
   listen(EVENTS.trayOpened, cb);
+
+/**
+ * Web mode only: the event socket came back after a gap, so events may have
+ * been lost and stores must re-pull a snapshot. Never fires on the desktop.
+ */
+export const onEventsResumed = (cb: () => void): Promise<UnlistenFn> =>
+  Promise.resolve(onReconnect(cb));

@@ -8,6 +8,7 @@ export default tseslint.config(
   {
     ignores: [
       "dist/",
+      "dist-web/",
       "node_modules/",
       "src-tauri/",
       "lib/",

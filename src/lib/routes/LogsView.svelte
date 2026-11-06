@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { copyText } from "../platform";
   import type { LogEntry, LogLevel } from "../types";
   import { logs } from "../stores/logs";
   import { clearLogs, getLogsText } from "../ipc";
@@ -55,7 +55,7 @@
 
   async function copyRow(l: LogEntry): Promise<void> {
     try {
-      await writeText(line(l));
+      await copyText(line(l));
       pushToast("Log line copied", { tone: "success" });
     } catch (err) {
       pushToast(`Copy failed: ${String(err)}`, { tone: "error" });
@@ -65,7 +65,7 @@
   async function copyAll(): Promise<void> {
     try {
       const text = await getLogsText();
-      await writeText(text);
+      await copyText(text);
       pushToast("All logs copied", { tone: "success" });
     } catch (err) {
       pushToast(`Copy failed: ${String(err)}`, { tone: "error" });

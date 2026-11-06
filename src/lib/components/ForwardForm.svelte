@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { open } from "@tauri-apps/plugin-dialog";
-  import { homeDir } from "@tauri-apps/api/path";
+  import { pickIdentityFile } from "../platform";
+  import { isWeb } from "../runtime";
   import type { ForwardConfig, ForwardInput } from "../types";
   import {
     validateForwardForm,
@@ -157,14 +157,8 @@
 
   async function browse(): Promise<void> {
     try {
-      const home = await homeDir();
-      const picked = await open({
-        multiple: false,
-        directory: false,
-        defaultPath: `${home}/.ssh`,
-        title: "Select identity file",
-      });
-      if (typeof picked === "string") {
+      const picked = await pickIdentityFile();
+      if (picked !== null) {
         identityFilePath = picked;
         touch("auth");
       }
@@ -409,15 +403,32 @@
       {#if authMode === "identity"}
         <div class="row">
           <label class="lbl" for="f-identity">Identity file</label>
-          <div class="browse">
+          {#if isWeb}
+            <!-- Web mode: the key must exist on the server running the
+                 tunnels, which a browser file picker cannot reach. -->
             <Input
               id="f-identity"
               bind:value={identityFilePath}
               placeholder="~/.ssh/id_ed25519"
+              describedby="f-identity-hint"
+              autocomplete="off"
               mono
             />
-            <Button onclick={() => void browse()}>Browse…</Button>
-          </div>
+            <p class="hint" id="f-identity-hint">
+              Path to the private key on the server running Tunnel Pilot, not on
+              this computer.
+            </p>
+          {:else}
+            <div class="browse">
+              <Input
+                id="f-identity"
+                bind:value={identityFilePath}
+                placeholder="~/.ssh/id_ed25519"
+                mono
+              />
+              <Button onclick={() => void browse()}>Browse…</Button>
+            </div>
+          {/if}
         </div>
       {:else}
         <div class="row">
@@ -432,8 +443,13 @@
           />
           {#if $keychainUnavailable}
             <p class="hint warn">
-              OS keychain unavailable — passwords are stored in a local
-              plaintext fallback file.
+              {#if isWeb}
+                No keychain on the server — passwords are stored there in a
+                plaintext fallback file.
+              {:else}
+                OS keychain unavailable — passwords are stored in a local
+                plaintext fallback file.
+              {/if}
             </p>
           {/if}
         </div>

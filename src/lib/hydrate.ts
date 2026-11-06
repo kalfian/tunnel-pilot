@@ -10,13 +10,16 @@
  *
  * `window://focus` (fired when a hidden window is re-shown, e.g. via
  * single-instance) triggers a fresh {@link hydrateAll} — never assume the
- * webview kept state while hidden.
+ * webview kept state while hidden. In web mode the same applies when the event
+ * socket reconnects after a drop (`onEventsResumed`): events sent during the
+ * gap are lost, so the snapshot is pulled again.
  */
 
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "./transport";
 
 import { appHydrate } from "./ipc";
 import {
+  onEventsResumed,
   onForwardsChanged,
   onGroupsChanged,
   onLogCleared,
@@ -82,10 +85,33 @@ export async function subscribeEvents(): Promise<UnlistenFn> {
     onTrayOpened(() => {
       void hydrateAll();
     }),
+    // Web: the event socket reconnected after a gap — resync like a re-show.
+    onEventsResumed(() => {
+      void hydrateAll();
+    }),
   ]);
   return () => {
     for (const unlisten of unlisteners) {
       unlisten();
     }
   };
+}
+
+/**
+ * Boot the live mirror: subscribe first, then pull the snapshot (F45 ordering,
+ * see main.ts). Returns the teardown. Web mode calls this after sign-in and
+ * tears it down on sign-out, which also closes the event socket. A failed
+ * first snapshot is reported, not fatal: the subscriptions stay up, and the
+ * next reconnect or re-show pulls a fresh snapshot.
+ */
+export async function startSync(
+  onHydrateError?: (err: unknown) => void,
+): Promise<UnlistenFn> {
+  const unlisten = await subscribeEvents();
+  try {
+    await hydrateAll();
+  } catch (err) {
+    onHydrateError?.(err);
+  }
+  return unlisten;
 }

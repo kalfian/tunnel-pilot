@@ -7,7 +7,9 @@
 -->
 <script lang="ts">
   import { get } from "svelte/store";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { copyText } from "../platform";
+  import { isWeb } from "../runtime";
+  import { serverVersion, signOut } from "../auth";
   import type { ForwardConfig, ForwardStatus } from "../types";
   import type { IconName } from "./ui/icons";
   import { forwards, statusById } from "../stores/forwards";
@@ -43,7 +45,11 @@
   import Icon from "./ui/Icon.svelte";
   import StatusDot from "./ui/StatusDot.svelte";
 
-  const VERSION = "2.0.0";
+  const DESKTOP_VERSION = "2.0.0";
+  // Web mode reports the server build it is talking to.
+  const VERSION = $derived(
+    isWeb ? ($serverVersion ?? DESKTOP_VERSION) : DESKTOP_VERSION,
+  );
 
   interface PaletteItem {
     id: string;
@@ -86,7 +92,7 @@
 
   async function copyCmd(f: ForwardConfig): Promise<void> {
     try {
-      await writeText(await copySshCommand(f.id));
+      await copyText(await copySshCommand(f.id));
       pushToast("SSH command copied", { tone: "success" });
     } catch (err) {
       pushToast(`Copy failed: ${String(err)}`, { tone: "error" });
@@ -141,6 +147,51 @@
       };
     }),
   );
+
+  // Updates come from the desktop updater; the web server has none.
+  const updateItems: PaletteItem[] = isWeb
+    ? []
+    : [
+        {
+          id: "action:check-update",
+          title: "Check for updates",
+          icon: "refresh-cw",
+          haystack: "check updates version",
+          run: () =>
+            void checkUpdate()
+              .then((s) =>
+                pushToast(
+                  s.available
+                    ? `Version ${s.version} available`
+                    : "You're on the latest version",
+                  { tone: "info" },
+                ),
+              )
+              .catch(() =>
+                pushToast("Update checks arrive in a later build", {
+                  tone: "info",
+                }),
+              ),
+        },
+      ];
+
+  // Web mode is behind a sign-in; the desktop app has no session to end.
+  const sessionItems: PaletteItem[] = isWeb
+    ? [
+        {
+          id: "action:sign-out",
+          title: "Sign out",
+          icon: "log-out",
+          haystack: "sign out log out logout session lock",
+          run: () =>
+            void signOut().catch((err: unknown) =>
+              pushToast(`Couldn't sign out: ${String(err)}`, {
+                tone: "error",
+              }),
+            ),
+        },
+      ]
+    : [];
 
   // --- Static + per-group action items ---
   const actionItems = $derived<PaletteItem[]>([
@@ -233,27 +284,7 @@
       haystack: "toggle theme dark light appearance",
       run: toggleTheme,
     },
-    {
-      id: "action:check-update",
-      title: "Check for updates",
-      icon: "refresh-cw",
-      haystack: "check updates version",
-      run: () =>
-        void checkUpdate()
-          .then((s) =>
-            pushToast(
-              s.available
-                ? `Version ${s.version} available`
-                : "You're on the latest version",
-              { tone: "info" },
-            ),
-          )
-          .catch(() =>
-            pushToast("Update checks arrive in a later build", {
-              tone: "info",
-            }),
-          ),
-    },
+    ...updateItems,
     {
       id: "action:about",
       title: `About Tunnel Pilot v${VERSION}`,
@@ -261,6 +292,7 @@
       haystack: "about version",
       run: () => pushToast(`Tunnel Pilot v${VERSION}`, { tone: "info" }),
     },
+    ...sessionItems,
   ]);
 
   // --- Sub-menu items for a single tunnel (spec §10 →) ---

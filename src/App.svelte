@@ -4,17 +4,23 @@
   import { keychainUnavailable } from "./lib/stores/settings";
   import { activeView, type ViewId } from "./lib/ui/view";
   import { isMacOS } from "./lib/ui/platform";
+  import { isWeb } from "./lib/runtime";
+  import { isInsecureRemote } from "./lib/platform";
   import { paletteOpen, togglePalette } from "./lib/stores/palette";
   import { requestAddForm } from "./lib/stores/commands";
   import SidebarItem from "./lib/components/ui/SidebarItem.svelte";
   import Icon from "./lib/components/ui/Icon.svelte";
   import ToastHost from "./lib/components/ui/ToastHost.svelte";
   import CommandPalette from "./lib/components/CommandPalette.svelte";
+  import InsecureHttpNotice from "./lib/components/InsecureHttpNotice.svelte";
   import ConnectionsView from "./lib/routes/ConnectionsView.svelte";
   import LogsView from "./lib/routes/LogsView.svelte";
   import SettingsView from "./lib/routes/SettingsView.svelte";
 
-  const mac = isMacOS();
+  // The custom titlebar is window chrome: only a Tauri window on macOS has one.
+  // A browser on a Mac (web mode) keeps its own.
+  const mac = !isWeb && isMacOS();
+  const insecure = isInsecureRemote();
 
   // Compact rail (icon-only) on narrow windows (spec §3 Compact < 640).
   let compact = $state(false);
@@ -118,12 +124,20 @@
     </nav>
 
     <main class="content">
+      {#if insecure}
+        <InsecureHttpNotice layout="strip" />
+      {/if}
       {#if $keychainUnavailable}
         <div class="keychain-warn" role="alert">
           <Icon name="alert-triangle" size={15} />
           <span>
-            OS keychain unavailable — SSH passwords are stored in a local
-            plaintext fallback file.
+            {#if isWeb}
+              No keychain on the server — SSH passwords are stored there in a
+              plaintext fallback file.
+            {:else}
+              OS keychain unavailable — SSH passwords are stored in a local
+              plaintext fallback file.
+            {/if}
           </span>
         </div>
       {/if}

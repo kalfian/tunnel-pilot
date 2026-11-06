@@ -189,3 +189,36 @@ export interface CliShimStatus {
   /** Every candidate, in preference order. */
   entries: ShimEntry[];
 }
+
+// --- Errors (src-tauri/src/error.rs) ---
+
+/** `AppError` variant tags (`#[serde(tag = "kind", rename_all = "camelCase")]`). */
+export type AppErrorKind =
+  | "ssh"
+  | "connection"
+  | "notFound"
+  | "invalidInput"
+  | "config"
+  | "storage"
+  | "backup"
+  | "credential"
+  | "updater"
+  | "serialization"
+  | "io"
+  | "internal"
+  | "unauthorized";
+
+/** Every command rejects with this shape, over Tauri IPC and over HTTP alike. */
+export interface AppError {
+  kind: AppErrorKind;
+  message: string;
+}
+
+// --- Web transport (spec 02 §10) ---
+
+/** `GET /api/session` — the only endpoint answered without a session. */
+export interface WebSession {
+  authenticated: boolean;
+  version: string;
+  edition: string;
+}

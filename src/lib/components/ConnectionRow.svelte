@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { copyText } from "../platform";
   import type {
     ForwardConfig,
     ForwardStatus,
@@ -115,7 +115,7 @@
   async function copyCommand(): Promise<void> {
     try {
       const cmd = await copySshCommand(forward.id);
-      await writeText(cmd);
+      await copyText(cmd);
       pushToast("SSH command copied", { tone: "success" });
     } catch (err) {
       pushToast(`Copy failed: ${String(err)}`, { tone: "error" });

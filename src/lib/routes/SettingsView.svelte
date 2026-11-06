@@ -1,7 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { save, open } from "@tauri-apps/plugin-dialog";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import {
+    copyText,
+    exportConfiguration,
+    pickBackup,
+    type PickedBackup,
+  } from "../platform";
+  import { isWeb } from "../runtime";
+  import { serverVersion, signOut } from "../auth";
   import type { AppSettings, CliShimStatus, ThemeMode } from "../types";
   import { settings } from "../stores/settings";
   import {
@@ -15,8 +21,6 @@
   import { effectiveTheme } from "../ui/theme";
   import {
     updateSettings,
-    exportBackup,
-    importBackup,
     checkUpdate,
     installUpdate,
     skipUpdate,
@@ -33,10 +37,12 @@
   import Dialog from "../components/ui/Dialog.svelte";
 
   const VERSION = "2.0.0";
+  // Web mode shows the server build it is talking to.
+  const shownVersion = $derived(isWeb ? ($serverVersion ?? VERSION) : VERSION);
 
   let checking = $state(false);
   let updateError = $state<string | null>(null);
-  let importPath = $state<string | null>(null);
+  let pendingImport = $state<PickedBackup | null>(null);
 
   // Settings write: send the whole struct with one field changed. The store is
   // source of truth and only advances on the backend's settings://changed, so a
@@ -274,7 +280,8 @@
   }
 
   onMount(() => {
-    void refreshCliStatus();
+    // The PATH shim is a desktop feature; the web server has no such command.
+    if (!isWeb) void refreshCliStatus();
   });
 
   async function runCliAction(
@@ -319,25 +326,42 @@
       "Couldn't remove tunnel-pilot",
     );
 
-  async function copyCliExample(): Promise<void> {
+  async function copyCommand(command: string): Promise<void> {
     try {
-      await writeText(CLI_EXAMPLE);
+      await copyText(command);
       pushToast("Command copied", { tone: "success" });
     } catch (err) {
       pushToast(`Copy failed: ${String(err)}`, { tone: "error" });
     }
   }
 
+  const copyCliExample = (): Promise<void> => copyCommand(CLI_EXAMPLE);
+
+  // --- Server (web mode) ---
+  const SERVICE_COMMAND = "tunnel-pilot-cli service install --web";
+  let signingOut = $state(false);
+
+  async function doSignOut(): Promise<void> {
+    signingOut = true;
+    try {
+      // On success the shell swaps this view for the login screen.
+      await signOut();
+    } catch (err) {
+      pushToast(`Couldn't sign out: ${String(err)}`, { tone: "error" });
+    } finally {
+      signingOut = false;
+    }
+  }
+
   // --- Backup ---
+  // Desktop: native save/open dialogs + path commands. Web: download the
+  // backup text / upload a file (see platform.ts).
   async function doExport(): Promise<void> {
     try {
-      const path = await save({
-        defaultPath: "tunnel-pilot-backup.json",
-        filters: [{ name: "JSON", extensions: ["json"] }],
+      if (!(await exportConfiguration())) return;
+      pushToast(isWeb ? "Backup downloaded" : "Configuration exported", {
+        tone: "success",
       });
-      if (!path) return;
-      await exportBackup(path);
-      pushToast("Configuration exported", { tone: "success" });
     } catch (err) {
       pushToast(`Export failed: ${String(err)}`, { tone: "error" });
     }
@@ -345,24 +369,22 @@
 
   async function pickImport(): Promise<void> {
     try {
-      const picked = await open({
-        multiple: false,
-        directory: false,
-        filters: [{ name: "JSON", extensions: ["json"] }],
-        title: "Select a backup file",
-      });
-      if (typeof picked === "string") importPath = picked;
+      const picked = await pickBackup();
+      if (picked) pendingImport = picked;
     } catch (err) {
-      pushToast(`Could not open file picker: ${String(err)}`, {
-        tone: "error",
-      });
+      pushToast(
+        isWeb
+          ? `Couldn't read the file: ${String(err)}`
+          : `Could not open file picker: ${String(err)}`,
+        { tone: "error" },
+      );
     }
   }
 
   async function confirmImport(): Promise<void> {
-    if (!importPath) return;
+    if (!pendingImport) return;
     try {
-      const result = await importBackup(importPath, $importMode);
+      const result = await pendingImport.apply($importMode);
       pushToast(
         `Imported ${result.imported} tunnel${result.imported === 1 ? "" : "s"}` +
           (result.skipped > 0 ? `, skipped ${result.skipped}` : ""),
@@ -371,7 +393,7 @@
     } catch (err) {
       pushToast(`Import failed: ${String(err)}`, { tone: "error" });
     } finally {
-      importPath = null;
+      pendingImport = null;
     }
   }
 </script>
@@ -381,8 +403,8 @@
     <div class="col">
       <h1 class="title">Settings</h1>
 
-      <!-- Update banner (spec §8) -->
-      {#if updateState !== "idle"}
+      <!-- Update banner (spec §8) — desktop only; the web server has no updater. -->
+      {#if !isWeb && updateState !== "idle"}
         <div
           class="banner {updateState}"
           role={updateState === "error" ? "alert" : "status"}
@@ -477,50 +499,100 @@
 
       {#if $settings}
         {@const s = $settings}
-        <!-- STARTUP -->
-        <section class="group">
-          <h2 class="overline">Startup</h2>
-          <div class="rows">
-            <div class="setting">
-              <div class="s-text">
-                <span class="s-label">Launch at login</span>
+        {#if isWeb}
+          <!-- SERVER (web mode): replaces Startup — the browser can't launch
+               anything at login; the host starts the service at boot. -->
+          <section class="group">
+            <h2 class="overline">Server</h2>
+            <div class="rows">
+              <div class="setting">
+                <div class="s-text">
+                  <span class="s-label">Start at boot</span>
+                  <span class="s-sub">
+                    Tunnel Pilot runs as a service on this server. Install it
+                    once from a shell there:
+                  </span>
+                  <span class="cli-example">
+                    <code class="cmd mono selectable">{SERVICE_COMMAND}</code>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      iconOnly="copy"
+                      ariaLabel="Copy service install command"
+                      onclick={() => void copyCommand(SERVICE_COMMAND)}
+                    />
+                  </span>
+                </div>
               </div>
-              <Toggle
-                checked={s.launchAtLogin}
-                ariaLabel="Launch at login"
-                onchange={(v) => void patch({ launchAtLogin: v })}
-              />
-            </div>
-            <div class="setting">
-              <div class="s-text">
-                <span class="s-label">Show in Dock / taskbar</span>
+              <div class="setting">
+                <div class="s-text">
+                  <span class="s-label">Session</span>
+                  <span class="s-sub">
+                    Signed in to <span class="mono">{location.host}</span>. Idle
+                    sessions end after 12 hours.
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  iconLeft="log-out"
+                  loading={signingOut}
+                  onclick={() => void doSignOut()}
+                >
+                  Sign out
+                </Button>
               </div>
-              <Toggle
-                checked={s.showInDock}
-                ariaLabel="Show in Dock or taskbar"
-                onchange={(v) => void patch({ showInDock: v })}
-              />
             </div>
-          </div>
-        </section>
+          </section>
+        {:else}
+          <!-- STARTUP -->
+          <section class="group">
+            <h2 class="overline">Startup</h2>
+            <div class="rows">
+              <div class="setting">
+                <div class="s-text">
+                  <span class="s-label">Launch at login</span>
+                </div>
+                <Toggle
+                  checked={s.launchAtLogin}
+                  ariaLabel="Launch at login"
+                  onchange={(v) => void patch({ launchAtLogin: v })}
+                />
+              </div>
+              <div class="setting">
+                <div class="s-text">
+                  <span class="s-label">Show in Dock / taskbar</span>
+                </div>
+                <Toggle
+                  checked={s.showInDock}
+                  ariaLabel="Show in Dock or taskbar"
+                  onchange={(v) => void patch({ showInDock: v })}
+                />
+              </div>
+            </div>
+          </section>
+        {/if}
 
         <!-- CONNECTIONS -->
         <section class="group">
           <h2 class="overline">Connections</h2>
           <div class="rows">
-            <div class="setting">
-              <div class="s-text">
-                <span class="s-label">Desktop notifications</span>
-                <span class="s-sub"
-                  >Notify on connect, disconnect, and errors.</span
-                >
+            <!-- Desktop notifications pop on the machine running the tunnels;
+                 a headless server has no desktop to show them on. -->
+            {#if !isWeb}
+              <div class="setting">
+                <div class="s-text">
+                  <span class="s-label">Desktop notifications</span>
+                  <span class="s-sub"
+                    >Notify on connect, disconnect, and errors.</span
+                  >
+                </div>
+                <Toggle
+                  checked={s.showNotifications}
+                  ariaLabel="Desktop notifications"
+                  onchange={(v) => void patch({ showNotifications: v })}
+                />
               </div>
-              <Toggle
-                checked={s.showNotifications}
-                ariaLabel="Desktop notifications"
-                onchange={(v) => void patch({ showNotifications: v })}
-              />
-            </div>
+            {/if}
             <div class="setting">
               <div class="s-text">
                 <span class="s-label">Auto-reconnect</span>
@@ -564,36 +636,38 @@
           </div>
         </section>
 
-        <!-- UPDATES -->
-        <section class="group">
-          <h2 class="overline">Updates</h2>
-          <div class="rows">
-            <div class="setting">
-              <div class="s-text">
-                <span class="s-label">Automatically check for updates</span>
+        <!-- UPDATES (desktop only) -->
+        {#if !isWeb}
+          <section class="group">
+            <h2 class="overline">Updates</h2>
+            <div class="rows">
+              <div class="setting">
+                <div class="s-text">
+                  <span class="s-label">Automatically check for updates</span>
+                </div>
+                <Toggle
+                  checked={s.autoCheckUpdates}
+                  ariaLabel="Automatically check for updates"
+                  onchange={(v) => void patch({ autoCheckUpdates: v })}
+                />
               </div>
-              <Toggle
-                checked={s.autoCheckUpdates}
-                ariaLabel="Automatically check for updates"
-                onchange={(v) => void patch({ autoCheckUpdates: v })}
-              />
+              <div class="setting inline-action">
+                <span class="s-sub">Check the release channel now.</span>
+                <Button
+                  size="sm"
+                  iconLeft="refresh-cw"
+                  loading={checking}
+                  onclick={() => void checkNow()}
+                >
+                  Check now
+                </Button>
+              </div>
             </div>
-            <div class="setting inline-action">
-              <span class="s-sub">Check the release channel now.</span>
-              <Button
-                size="sm"
-                iconLeft="refresh-cw"
-                loading={checking}
-                onclick={() => void checkNow()}
-              >
-                Check now
-              </Button>
-            </div>
-          </div>
-        </section>
+          </section>
+        {/if}
 
-        <!-- COMMAND LINE (CLI shim on PATH) -->
-        {#if cliState}
+        <!-- COMMAND LINE (CLI shim on PATH) — never loaded in web mode -->
+        {#if !isWeb && cliState}
           <section class="group">
             <h2 class="overline">Command line</h2>
             <div class="rows">
@@ -763,6 +837,9 @@
             >
               <div class="s-text">
                 <span class="s-label">Import configuration</span>
+                {#if isWeb}
+                  <span class="s-sub">Upload a backup .json file.</span>
+                {/if}
               </div>
               <span class="row-cta"
                 ><Icon name="upload" size={16} /> Import</span
@@ -773,20 +850,22 @@
       {/if}
 
       <footer class="footer">
-        <span class="version mono">Tunnel Pilot v{VERSION}</span>
-        <button type="button" class="link" onclick={() => void checkNow()}>
-          check for updates
-        </button>
+        <span class="version mono">Tunnel Pilot v{shownVersion}</span>
+        {#if !isWeb}
+          <button type="button" class="link" onclick={() => void checkNow()}>
+            check for updates
+          </button>
+        {/if}
       </footer>
     </div>
   </div>
 </section>
 
-{#if importPath}
+{#if pendingImport}
   <Dialog
     title="Import configuration?"
     size="sm"
-    onClose={() => (importPath = null)}
+    onClose={() => (pendingImport = null)}
   >
     <p class="dlg-body">
       {#if $importMode === "replace"}
@@ -797,9 +876,9 @@
         existing ones. Duplicates are skipped.
       {/if}
     </p>
-    <p class="dlg-path mono">{importPath}</p>
+    <p class="dlg-path mono">{pendingImport.label}</p>
     {#snippet footer()}
-      <Button onclick={() => (importPath = null)}>Cancel</Button>
+      <Button onclick={() => (pendingImport = null)}>Cancel</Button>
       <Button
         variant={$importMode === "replace" ? "danger" : "primary"}
         onclick={() => void confirmImport()}
