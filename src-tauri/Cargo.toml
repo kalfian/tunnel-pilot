@@ -5,12 +5,28 @@ description = "Cross-platform SSH local port forwarding manager"
 authors = ["Kalfian"]
 edition = "2021"
 rust-version = "1.77"
+# `pnpm tauri build|dev` and a bare `cargo run` mean the desktop app.
+default-run = "tunnel-pilot"
 
 # The library target is what the Tauri app runs; main.rs is a thin entry that
 # calls `run()`. cdylib/staticlib kept for parity with the Tauri template.
 [lib]
 name = "tunnel_pilot_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Two products, one codebase (spec 03 §21–22): identical features, different
+# delivery. `tunnel-pilot` is the desktop tray app; `tunnel-pilot-cli` is the
+# headless server (daemon + web UI). Each binary only builds when its feature
+# set is enabled, so one `cargo build` never produces the wrong product.
+[[bin]]
+name = "tunnel-pilot"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "tunnel-pilot-cli"
+path = "src/bin/tunnel-pilot-cli.rs"
+required-features = ["server"]
 
 [build-dependencies]
 # Optional: only the `gui` feature runs `tauri_build::build()` (build.rs). The
@@ -52,8 +68,18 @@ tauri-plugin-clipboard-manager = { version = "2", optional = true }
 # impls use plain `async fn` — no `async-trait` crate needed anymore. Keys now
 # live under `russh::keys` (the separate `russh-keys` crate is gone).
 russh = "0.62"
-# No-echo password prompt for `tunnel-pilot set-password` / `add --password`.
+# No-echo password prompt for `set-password` / `add --password` / `web set-password`.
 rpassword = "7"
+
+# Web UI server for `tunnel-pilot-cli` (feature `server`, spec 02 §10 / 03 §22).
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "ws", "query"], optional = true }
+argon2 = { version = "0.5", features = ["std"], optional = true }
+getrandom = { version = "0.3", optional = true }
+# Serve connections ourselves (header-read timeout + connection cap, which
+# `axum::serve` does not offer) — slowloris defence.
+hyper = { version = "1", features = ["server", "http1"], optional = true }
+hyper-util = { version = "0.1", features = ["tokio"], optional = true }
+tower = { version = "0.5", features = ["util"], optional = true }
 
 # OS keychain (credentials/, M2). keyring v3 ships NO backend by default (F9):
 # each target MUST pin its native backend feature or `keychain_available()` is
@@ -85,13 +111,12 @@ keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"], op
 
 [dev-dependencies]
 tempfile = "3"
+# Read response bodies in the in-process web router tests.
+http-body-util = "0.1"
 
 [features]
-# The desktop app. On by default so `pnpm tauri dev|build` and plain `cargo
-# build` are unchanged. The headless CLI/daemon build is
-#   cargo build --release --no-default-features            (Linux: no keychain)
-#   cargo build --release --no-default-features --features keychain   (macOS)
-# (spec 03 §21).
+# The desktop app `tunnel-pilot`. On by default so `pnpm tauri dev|build` and
+# plain `cargo build` are unchanged.
 default = ["gui"]
 gui = [
     "keychain",
@@ -106,6 +131,11 @@ gui = [
     "dep:objc2",
     "dep:mac-notification-sys",
 ]
+# The headless server product `tunnel-pilot-cli`: daemon, systemd/launchd
+# service and the embedded web UI (spec 03 §22). Build it with
+#   cargo build --release --no-default-features --features server           (Linux)
+#   cargo build --release --no-default-features --features server,keychain  (macOS)
+server = ["dep:axum", "dep:argon2", "dep:getrandom", "dep:hyper", "dep:hyper-util", "dep:tower"]
 # OS keychain via `keyring`. Without it every password goes to the 0600
 # fallback secrets file — the same route a headless Linux box (no Secret
 # Service) already takes at runtime (spec 03 §9).

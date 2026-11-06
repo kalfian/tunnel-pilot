@@ -19,8 +19,14 @@ use crate::error::AppError;
 
 /// Stable, deliberate service string (spec 03 §9, 04 §10). It intentionally
 /// does NOT match the bundle id so keychain entries survive a future bundle-id
-/// change. Do not change once shipped.
-pub const KC_SERVICE: &str = "tunnel-pilot";
+/// change. Do not change once shipped. The server product uses its own service
+/// so the two products never read, overwrite or purge each other's secrets —
+/// backup import keeps forward ids, so a shared service would collide (03 §21).
+pub const KC_SERVICE: &str = if cfg!(feature = "gui") {
+    "tunnel-pilot"
+} else {
+    "tunnel-pilot-cli"
+};
 
 /// Sentinel account used only by the boot-time availability probe. Namespaced
 /// so it can never collide with a real forward id (uuid).

@@ -18,7 +18,7 @@
 pub mod boot;
 pub mod cli;
 pub mod credentials;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "server"))]
 pub mod daemon;
 pub mod error;
 pub mod events;
@@ -29,6 +29,8 @@ pub mod rt;
 pub mod ssh;
 pub mod state;
 pub mod storage;
+#[cfg(feature = "server")]
+pub mod web;
 
 // Desktop-only (feature `gui`, on by default): Tauri commands, tray, window,
 // updater. `--no-default-features` builds the CLI-only binary without them
@@ -136,6 +138,8 @@ pub fn run() {
             // Backup (§6.5)
             crate::commands::backup::export_backup,
             crate::commands::backup::import_backup,
+            crate::commands::backup::export_backup_text,
+            crate::commands::backup::import_backup_text,
             // Updater (§6.6)
             crate::commands::updater::check_update,
             crate::commands::updater::install_update,

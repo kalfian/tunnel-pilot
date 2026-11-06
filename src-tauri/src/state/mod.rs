@@ -178,6 +178,9 @@ pub struct AppState {
     /// the headless daemon. Absent entirely from the CLI-only build.
     #[cfg(feature = "gui")]
     app: RwLock<Option<tauri::AppHandle>>,
+    /// Fan-out of every §7 event to non-Tauri listeners (web UI WebSockets,
+    /// 02 §10). The same bus the log buffer publishes to.
+    bus: crate::events::EventBus,
 }
 
 impl AppState {
@@ -217,6 +220,7 @@ impl AppState {
         let (persist_tx, persist_rx) = mpsc::unbounded_channel::<PersistMsg>();
         let writer_store = config_store.clone();
         crate::rt::spawn(persist_writer_loop(writer_store, persist_rx));
+        let bus = logs.bus().clone();
         Self {
             registry: Arc::new(TunnelRegistry::new()),
             configs: RwLock::new(doc.forwards),
@@ -229,6 +233,7 @@ impl AppState {
             persist_tx: Some(persist_tx),
             #[cfg(feature = "gui")]
             app: RwLock::new(None),
+            bus,
         }
     }
 
@@ -239,18 +244,21 @@ impl AppState {
     pub fn new_headless() -> Self {
         let credentials = Arc::new(CredentialStore::in_memory());
         let keychain_available = credentials.keychain_available();
+        let logs = Arc::new(LogBuffer::new());
+        let bus = logs.bus().clone();
         Self {
             registry: Arc::new(TunnelRegistry::new()),
             configs: RwLock::new(Vec::new()),
             groups: RwLock::new(Vec::new()),
             settings: RwLock::new(AppSettings::default()),
-            logs: Arc::new(LogBuffer::new()),
+            logs,
             credentials,
             keychain_available,
             config_store: None,
             persist_tx: None,
             #[cfg(feature = "gui")]
             app: RwLock::new(None),
+            bus,
         }
     }
 
@@ -264,13 +272,20 @@ impl AppState {
     /// Emit one event to the webview. A no-op without an `AppHandle` (tests,
     /// headless daemon) and compiled out of the CLI-only build, where the
     /// control socket is the only observer and reads state on demand.
-    fn emit<P: serde::Serialize + Clone>(&self, event: &str, payload: P) {
+    fn emit<P: serde::Serialize + Clone>(&self, event: &'static str, payload: P) {
+        self.bus.publish(event, &payload);
         #[cfg(feature = "gui")]
         if let Some(app) = self.app_handle() {
             let _ = app.emit(event, payload);
         }
         #[cfg(not(feature = "gui"))]
         let _ = (event, payload);
+    }
+
+    /// Subscribe to every §7 event this state (and its log buffer) emits — the
+    /// web transport's WebSocket feed (spec 02 §10).
+    pub fn subscribe_events(&self) -> tokio::sync::broadcast::Receiver<crate::events::BusEvent> {
+        self.bus.subscribe()
     }
 
     /// Emit `tunnel://status` (no-op when headless).

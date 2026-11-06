@@ -1,4 +1,4 @@
-//! `tunnel-pilot daemon` — the headless owner of `AppState` (spec 03 §21).
+//! `tunnel-pilot-cli daemon` — the headless owner of `AppState` (spec 03 §21).
 //!
 //! The desktop app is one owner of the tunnel engine; this is the other, for
 //! hosts with no display (servers, containers, a Pi). It boots exactly what the
@@ -15,12 +15,13 @@
 
 pub mod service;
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::cli::args::DaemonOptions;
-use crate::cli::client::{EXIT_INTERNAL, EXIT_OK};
+use crate::cli::client::{EXIT_INTERNAL, EXIT_OK, EXIT_USAGE};
 use crate::credentials::CredentialStore;
 use crate::ops::forwards::{run_start_all, run_stop_all};
 use crate::state::log_buffer::LogBuffer;
@@ -67,6 +68,26 @@ async fn serve(options: DaemonOptions, config_dir: PathBuf) -> i32 {
         return EXIT_INTERNAL;
     }
 
+    // Validate the web options BEFORE claiming anything: a bad flag or a
+    // missing admin password must not leave a half-started daemon.
+    let web_addr = if options.web {
+        if !crate::web::admin::password_is_set(&config_dir) {
+            eprintln!(
+                "error: --web needs an admin password first: tunnel-pilot-cli web set-password"
+            );
+            return EXIT_USAGE;
+        }
+        match crate::web::parse_bind(options.bind.as_deref()) {
+            Ok(addr) => Some(addr),
+            Err(e) => {
+                eprintln!("error: {e}");
+                return EXIT_USAGE;
+            }
+        }
+    } else {
+        None
+    };
+
     // Claim the socket first: it is the single-owner lock (see module docs).
     let socket_path = crate::cli::resolved_socket_path(&config_dir);
     let listener = match crate::cli::server::bind(&socket_path).await {
@@ -77,7 +98,7 @@ async fn serve(options: DaemonOptions, config_dir: PathBuf) -> i32 {
             if e.to_string().contains("already serving") {
                 eprintln!(
                     "The desktop app or another daemon already owns the tunnels. \
-                     Check with: tunnel-pilot list"
+                     Check with: tunnel-pilot-cli list"
                 );
             }
             return EXIT_INTERNAL;
@@ -95,6 +116,33 @@ async fn serve(options: DaemonOptions, config_dir: PathBuf) -> i32 {
 
     crate::ssh::wake::spawn_wake_watchdog(state.clone());
     let server = tokio::spawn(crate::cli::server::serve_on(state.clone(), listener));
+
+    let web = match web_addr {
+        Some(addr) => match crate::web::start(
+            state.clone(),
+            config_dir.clone(),
+            addr,
+            crate::web::WebOptions {
+                trust_proxy: options.trust_proxy,
+                public_hosts: options.public_hosts.clone(),
+            },
+        )
+        .await
+        {
+            Ok((bound, task)) => {
+                announce_web(bound);
+                Some(task)
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "web UI failed to start");
+                eprintln!("error: {e}");
+                server.abort();
+                crate::cli::server::remove_socket(&socket_path);
+                return EXIT_INTERNAL;
+            }
+        },
+        None => None,
+    };
     tracing::info!(
         socket = %socket_path.display(),
         forwards = state.configs_snapshot().len(),
@@ -106,6 +154,9 @@ async fn serve(options: DaemonOptions, config_dir: PathBuf) -> i32 {
     wait_for_shutdown_signal().await;
     tracing::info!("shutdown requested; disconnecting tunnels");
     server.abort();
+    if let Some(web) = web {
+        web.abort();
+    }
     if tokio::time::timeout(SHUTDOWN_BUDGET, run_stop_all(&state))
         .await
         .is_err()
@@ -115,6 +166,20 @@ async fn serve(options: DaemonOptions, config_dir: PathBuf) -> i32 {
     crate::cli::server::remove_socket(&socket_path);
     tracing::info!("daemon stopped");
     EXIT_OK
+}
+
+/// Log where the web UI listens, and warn when it is reachable beyond this
+/// machine over plain HTTP (the admin password would cross the network in
+/// clear text unless a TLS reverse proxy fronts it).
+fn announce_web(addr: SocketAddr) {
+    tracing::info!(url = %format!("http://{addr}/"), "web UI listening");
+    if !addr.ip().is_loopback() {
+        tracing::warn!(
+            bind = %addr,
+            "web UI is reachable from the network over plain HTTP — put an HTTPS reverse \
+             proxy (Caddy, nginx) in front of it, or bind 127.0.0.1 and use an SSH tunnel"
+        );
+    }
 }
 
 /// Load config + credentials and build the shared state (the desktop `setup`

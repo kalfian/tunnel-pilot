@@ -63,6 +63,10 @@ pub enum AppError {
     #[error("I/O error: {0}")]
     Io(String),
 
+    /// Not signed in to the web UI, or the session ended (spec 02 §10).
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
+
     /// Catch-all for unexpected internal failures.
     #[error("internal error: {0}")]
     Internal(String),

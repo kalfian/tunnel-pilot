@@ -95,8 +95,17 @@ pub enum Command {
     Daemon(DaemonOptions),
     /// Manage the background service that runs `daemon` at login/boot.
     Service(ServiceAction),
-    /// Install the desktop app (tray + window) on top of a CLI-only install.
-    DesktopInstall,
+    /// Web UI administration (`tunnel-pilot-cli` only).
+    Web(WebAction),
+}
+
+/// `web` subcommands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebAction {
+    /// Set (or change) the admin password; `stdin` reads it from stdin.
+    SetPassword { stdin: bool },
+    /// Report whether an admin password is configured.
+    Status,
 }
 
 /// Where a password comes from. Never a flag value: argv is visible in `ps`
@@ -119,6 +128,21 @@ pub struct DaemonOptions {
     pub connect_all: bool,
     /// Connect these forwards (id or name) once up (`--connect`, repeatable).
     pub connect: Vec<String>,
+    /// Serve the web UI (`--web`).
+    pub web: bool,
+    /// Web UI listen address (`--bind <addr[:port]>`); `None` = 127.0.0.1:1855.
+    pub bind: Option<String>,
+    /// Behind a reverse proxy: take the client IP / scheme / host from the
+    /// `X-Forwarded-*` headers (`--trust-proxy`). Off by default — without a
+    /// proxy those headers are attacker-controlled.
+    pub trust_proxy: bool,
+    /// Extra host names the web UI answers to (`--public-host`, repeatable),
+    /// e.g. the proxy's domain. IP literals and `localhost` are always allowed;
+    /// any other `Host` is refused (DNS-rebinding defence).
+    pub public_hosts: Vec<String>,
+    /// `service install` only: allow a root (system) service to serve the web
+    /// UI (`--allow-root`). Refused by default.
+    pub allow_root: bool,
 }
 
 /// `service` subcommands.
@@ -177,27 +201,25 @@ pub fn is_cli_subcommand(word: &str) -> bool {
             | "clear-password"
             | "daemon"
             | "service"
-            | "desktop"
+            | "web"
             | "help"
             | "--help"
             | "-h"
     )
 }
 
-pub const HELP_TEXT: &str = "\
-tunnel-pilot — SSH port forwards from a terminal (desktop app or headless daemon)
+/// The program name of this product (`tunnel-pilot` or `tunnel-pilot-cli`).
+pub const PROGRAM: &str = crate::cli::PROGRAM;
 
-USAGE:
-    tunnel-pilot <command> [options]
-
+const HELP_TUNNELS: &str = "\
 TUNNELS:
     list                       List every configured forward and its status
     status <id|name>           Show one forward's status, endpoints and stats
     connect <id|name>          Connect a forward and wait for a terminal status
                                (already connected/connecting: reports it, no re-dial)
     disconnect <id|name>       Disconnect a forward (waits for teardown)
-    connect-all                Connect every forward (tray 'Start All')
-    disconnect-all             Disconnect every live forward (tray 'Stop All')
+    connect-all                Connect every forward ('Start All')
+    disconnect-all             Disconnect every live forward ('Stop All')
 
 FORWARDS:
     add <name> --ssh <user@host[:port]> --forward <[bind:]lport:host:rport>
@@ -209,22 +231,41 @@ FORWARDS:
     set-password <id|name> [--password-stdin]
                                Store a password (prompted with echo off)
     clear-password <id|name>   Delete the stored password
+";
 
-HEADLESS / SERVER:
-    daemon [--connect-all] [--connect <id|name>]...
-                               Run the tunnel engine without a window, in the
-                               foreground (Ctrl-C / SIGTERM disconnects and exits)
-    service install [--connect-all] [--connect <id|name>]...
+const HELP_SERVER: &str = "
+SERVER:
+    daemon [--connect-all] [--connect <id|name>]... [web options]
+                               Run the tunnel engine in the foreground (Ctrl-C /
+                               SIGTERM disconnects and exits)
+    service install [daemon options] [--allow-root]
                                Run the daemon in the background at login/boot
-                               (systemd user unit on Linux, launchd agent on macOS)
+                               (systemd unit on Linux, launchd agent on macOS).
+                               As root, --web is refused unless --allow-root
     service uninstall          Stop and remove that service
     service status             Show whether the service is installed and running
-    desktop install            Install the desktop app (tray + window); it reuses
-                               the same forwards and passwords
+    web set-password [--password-stdin]
+                               Set the web UI admin password (signs everyone out)
+    web status                 Show whether an admin password is set
 
-OTHER:
+WEB OPTIONS (daemon / service install):
+    --web                      Serve the web UI (login required; set a password first)
+    --bind <addr[:port]>       Listen address (default 127.0.0.1:1855; 0.0.0.0 = all)
+    --public-host <name>       A host name the UI is reached by (repeatable), e.g. the
+                               HTTPS proxy's domain. IPs and localhost always work;
+                               other names are refused (DNS-rebinding defence)
+    --trust-proxy              Behind a reverse proxy: trust X-Forwarded-For/-Proto/-Host
+                               for the client IP, HTTPS and host checks
+";
+
+const HELP_DESKTOP: &str = "
+DESKTOP:
     install-cli                Symlink this binary onto PATH as 'tunnel-pilot'
     uninstall-cli              Remove that symlink
+";
+
+const HELP_COMMON_TAIL: &str = "
+OTHER:
     version                    CLI version + version of the running app/daemon
     --version, -V              This binary's version and edition (no app needed)
     help                       Show this help
@@ -235,8 +276,6 @@ OPTIONS:
     --timeout <secs>           Wait budget for connect/connect-all (1-300, default 30)
     --no-wait                  Return as soon as the connect is dispatched
     --force                    connect only: bounce an already-connected tunnel
-    --user | --system          install-cli only: force ~/.local/bin or /usr/local/bin
-                               (/usr/local/bin usually prompts for admin rights)
 
 FIELD OPTIONS (add / edit):
     --name <name>              edit only: rename (add takes the name positionally)
@@ -259,22 +298,37 @@ TARGETS:
     Ambiguous names are rejected — use the id.
 
 EXIT CODES:
-    0 ok   1 internal/IO   2 usage   3 app not running
+    0 ok   1 internal/IO   2 usage   3 app/daemon not running
     4 target not found or ambiguous   5 operation ended in error   6 timed out
     A protocol-version mismatch (stale binary vs running app) also exits 4, with
-    an 'unsupported protocol version' message.
-    install-cli / uninstall-cli run locally (no socket, no exit 3): 0 ok,
-    1 filesystem/permission failure, 2 refused (dev build, or something that is
-    not our symlink is in the way).
-    add / edit validation failures exit 2. daemon exits 1 when another app or
-    daemon already owns the control socket.
+    an 'unsupported protocol version' message. add / edit validation failures
+    exit 2.
 
 ENVIRONMENT:
-    TUNNEL_PILOT_SOCKET        Socket path override (both app and CLI)
-    TUNNEL_PILOT_CONFIG_DIR    Config dir override for the daemon and the CLI's
-                               password store (default: the app's config dir)
-    TUNNEL_PILOT_ALLOW_DEV_SHIM=1  Let install-cli link a development build
+    TUNNEL_PILOT_SOCKET        Socket path override (both owner and CLI)
+    TUNNEL_PILOT_CONFIG_DIR    Config dir override (default: this product's own
+                               config dir); also where CLI-stored passwords go
 ";
+
+/// The full usage text for THIS product: the shared sections plus either the
+/// desktop (PATH shim) or the server (daemon / service / web) commands, with the
+/// program name filled in.
+pub fn help_text() -> String {
+    let edition_section = if cfg!(feature = "gui") {
+        HELP_DESKTOP
+    } else {
+        HELP_SERVER
+    };
+    let intro = if cfg!(feature = "gui") {
+        "SSH port forwards from a terminal (talks to the running desktop app)"
+    } else {
+        "SSH port forwards on a server (daemon, CLI and web UI)"
+    };
+    format!(
+        "{PROGRAM} — {intro}\n\nUSAGE:\n    {PROGRAM} <command> [options]\n\n\
+         {HELP_TUNNELS}{edition_section}{HELP_COMMON_TAIL}"
+    )
+}
 
 /// Parse the argv tail (everything after the program name).
 pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
@@ -321,6 +375,30 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             "--connect-all" => {
                 daemon_flag = Some("--connect-all");
                 daemon.connect_all = true;
+            }
+            "--web" => {
+                daemon_flag = Some("--web");
+                daemon.web = true;
+            }
+            _ if is_flag(arg, "--bind") => {
+                daemon_flag = Some("--bind");
+                daemon.bind = Some(take_value(arg, "--bind", &mut rest)?);
+            }
+            "--trust-proxy" => {
+                daemon_flag = Some("--trust-proxy");
+                daemon.trust_proxy = true;
+            }
+            _ if is_flag(arg, "--public-host") => {
+                daemon_flag = Some("--public-host");
+                let host = non_blank(
+                    "--public-host",
+                    take_value(arg, "--public-host", &mut rest)?,
+                )?;
+                daemon.public_hosts.push(host.to_ascii_lowercase());
+            }
+            "--allow-root" => {
+                daemon_flag = Some("--allow-root");
+                daemon.allow_root = true;
             }
             _ if is_flag(arg, "--connect") => {
                 daemon_flag = Some("--connect");
@@ -437,16 +515,28 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
         }
     }
     if password != PasswordSource::None
-        && !matches!(subcommand.as_str(), "add" | "edit" | "set-password")
+        && !matches!(subcommand.as_str(), "add" | "edit" | "set-password" | "web")
     {
         return Err(UsageError::new(format!(
-            "--password/--password-stdin only apply to 'add', 'edit' and 'set-password', \
-             not '{subcommand}'"
+            "--password/--password-stdin only apply to 'add', 'edit', 'set-password' and \
+             'web set-password', not '{subcommand}'"
         )));
     }
     if no_identity_conflict && password != PasswordSource::None {
         return Err(UsageError::new(
             "use either --identity or a password, not both",
+        ));
+    }
+    if !daemon.web
+        && (daemon.bind.is_some() || daemon.trust_proxy || !daemon.public_hosts.is_empty())
+    {
+        return Err(UsageError::new(
+            "--bind, --trust-proxy and --public-host need --web",
+        ));
+    }
+    if daemon.allow_root && subcommand != "service" {
+        return Err(UsageError::new(
+            "--allow-root only applies to 'service install'",
         ));
     }
     if let Some(flag) = daemon_flag {
@@ -578,9 +668,16 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
                 )))
             }
         },
-        "desktop" => match positionals.as_slice() {
-            ["install"] => Command::DesktopInstall,
-            _ => return Err(UsageError::new("usage: tunnel-pilot desktop install")),
+        "web" => match positionals.as_slice() {
+            ["set-password"] => Command::Web(WebAction::SetPassword {
+                stdin: password == PasswordSource::Stdin,
+            }),
+            ["status"] if password == PasswordSource::None => Command::Web(WebAction::Status),
+            _ => {
+                return Err(UsageError::new(
+                    "usage: web set-password [--password-stdin] | web status",
+                ))
+            }
         },
         other => {
             return Err(UsageError::new(format!("unknown command '{other}'")));
@@ -1075,8 +1172,8 @@ mod tests {
             "disconnect",
             "connect-all",
             "disconnect-all",
-            "install-cli",
-            "uninstall-cli",
+            "add",
+            "set-password",
             "version",
             "--json",
             "--socket",
@@ -1085,8 +1182,28 @@ mod tests {
             "--force",
             "TUNNEL_PILOT_SOCKET",
         ] {
-            assert!(HELP_TEXT.contains(word), "help must mention {word}");
+            assert!(help_text().contains(word), "help must mention {word}");
         }
+        // Each product documents only its own commands (spec 03 §22).
+        let desktop_only = ["install-cli", "uninstall-cli"];
+        let server_only = [
+            "\n    daemon ",
+            "service install",
+            "web set-password",
+            "1855",
+        ];
+        let (present, absent) = if cfg!(feature = "gui") {
+            (desktop_only.as_slice(), server_only.as_slice())
+        } else {
+            (server_only.as_slice(), desktop_only.as_slice())
+        };
+        for word in present {
+            assert!(help_text().contains(word), "help must mention {word}");
+        }
+        for word in absent {
+            assert!(!help_text().contains(word), "help must not mention {word}");
+        }
+        assert!(help_text().starts_with(PROGRAM));
     }
     // --- spec 03 §20/§21: CRUD, daemon, service, desktop ---
 
@@ -1101,7 +1218,7 @@ mod tests {
             "clear-password",
             "daemon",
             "service",
-            "desktop",
+            "web",
             "--version",
             "-V",
         ] {
@@ -1288,6 +1405,7 @@ mod tests {
             Command::Daemon(DaemonOptions {
                 connect_all: true,
                 connect: vec!["db".into(), "web".into()],
+                ..DaemonOptions::default()
             })
         );
         let inv = parse_str(&["service", "install", "--connect-all"]).expect("service install");
@@ -1306,11 +1424,30 @@ mod tests {
         );
         assert!(parse_str(&["service"]).is_err());
         assert!(parse_str(&["service", "restart"]).is_err());
-        assert_eq!(
-            parse_str(&["desktop", "install"]).expect("desktop").command,
-            Command::DesktopInstall
+        let inv = parse_str(&["daemon", "--web", "--bind", "0.0.0.0:1855"]).expect("web daemon");
+        assert!(matches!(
+            inv.command,
+            Command::Daemon(DaemonOptions { web: true, bind: Some(ref b), .. }) if b == "0.0.0.0:1855"
+        ));
+        assert!(
+            parse_str(&["daemon", "--bind", "0.0.0.0"]).is_err(),
+            "--bind needs --web"
         );
-        assert!(parse_str(&["desktop"]).is_err());
+        assert_eq!(
+            parse_str(&["web", "set-password", "--password-stdin"])
+                .expect("web set-password")
+                .command,
+            Command::Web(WebAction::SetPassword { stdin: true })
+        );
+        assert_eq!(
+            parse_str(&["web", "status"]).expect("web status").command,
+            Command::Web(WebAction::Status)
+        );
+        assert!(parse_str(&["web"]).is_err());
+        assert!(
+            parse_str(&["desktop", "install"]).is_err(),
+            "desktop install is gone"
+        );
         assert_eq!(
             parse_str(&["--version"]).expect("version").command,
             Command::LocalVersion

@@ -180,10 +180,13 @@ async fn authenticate_inner(
         // load_secret_key does synchronous file I/O — run it off the async path.
         // In russh 0.62 it returns an `ssh_key::PrivateKey`.
         let path = path.to_string();
-        let key = tokio::task::spawn_blocking(move || russh::keys::load_secret_key(&path, None))
-            .await
-            .map_err(|e| AppError::Ssh(format!("key load task failed: {e}")))?
-            .map_err(|e| AppError::Ssh(format!("failed to load identity file: {e}")))?;
+        let key = tokio::task::spawn_blocking(move || {
+            let text = read_identity_file(&path)?;
+            russh::keys::decode_secret_key(&text, None)
+                .map_err(|e| AppError::Ssh(format!("failed to load identity file: {e}")))
+        })
+        .await
+        .map_err(|e| AppError::Ssh(format!("key load task failed: {e}")))??;
         let key = Arc::new(key);
 
         // For RSA keys, pick the strongest signature hash the server advertised
@@ -225,6 +228,42 @@ async fn authenticate_inner(
         }
     }
     Ok(())
+}
+
+/// Largest identity file we will read. Private keys are a few KiB; the cap
+/// stops a configured path such as `/dev/zero` from exhausting memory.
+pub const MAX_IDENTITY_BYTES: u64 = 64 * 1024;
+
+/// Read an identity file, refusing anything that is not a regular file of a
+/// plausible size. The path is configurable from every UI (including the web
+/// UI of the server product), so it must not be able to name a device, a FIFO
+/// that blocks forever, or a huge file. Errors never include file contents.
+pub fn read_identity_file(path: &str) -> Result<String, AppError> {
+    use std::io::Read;
+
+    let meta =
+        std::fs::metadata(path).map_err(|e| AppError::Ssh(format!("identity file {path}: {e}")))?;
+    if !meta.is_file() {
+        return Err(AppError::Ssh(format!(
+            "identity file {path} is not a regular file"
+        )));
+    }
+    if meta.len() > MAX_IDENTITY_BYTES {
+        return Err(AppError::Ssh(format!(
+            "identity file {path} is larger than {} KiB — not a private key",
+            MAX_IDENTITY_BYTES / 1024
+        )));
+    }
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .and_then(|f| f.take(MAX_IDENTITY_BYTES + 1).read_to_string(&mut text))
+        .map_err(|e| AppError::Ssh(format!("identity file {path}: {e}")))?;
+    if text.len() as u64 > MAX_IDENTITY_BYTES {
+        return Err(AppError::Ssh(format!(
+            "identity file {path} grew while reading"
+        )));
+    }
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -299,5 +338,36 @@ mod tests {
             .preferred
             .key
             .contains(&russh::keys::Algorithm::Rsa { hash: None }));
+    }
+
+    #[test]
+    fn identity_file_must_be_a_small_regular_file() {
+        let dir = tempfile::tempdir().expect("tmp");
+        assert!(
+            read_identity_file(dir.path().to_str().expect("utf8")).is_err(),
+            "a directory"
+        );
+        let big = dir.path().join("big");
+        std::fs::write(&big, vec![b'a'; (MAX_IDENTITY_BYTES + 1) as usize]).expect("write");
+        assert!(
+            read_identity_file(big.to_str().expect("utf8")).is_err(),
+            "too large"
+        );
+        let small = dir.path().join("key");
+        std::fs::write(&small, "not really a key").expect("write");
+        assert_eq!(
+            read_identity_file(small.to_str().expect("utf8")).expect("read"),
+            "not really a key"
+        );
+        #[cfg(unix)]
+        assert!(
+            read_identity_file("/dev/zero").is_err(),
+            "a device is refused"
+        );
+        let err = read_identity_file("/nonexistent/key").expect_err("missing");
+        assert!(
+            !err.to_string().contains("really"),
+            "errors carry no contents"
+        );
     }
 }

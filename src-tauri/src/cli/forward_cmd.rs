@@ -195,7 +195,8 @@ fn finish_with_password(
         Err(code) => {
             eprintln!(
                 "note: '{name}' was saved WITHOUT a password; retry with: \
-                 tunnel-pilot set-password {id}"
+                 {} set-password {id}",
+                crate::cli::PROGRAM
             );
             Err(code)
         }

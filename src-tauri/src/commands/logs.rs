@@ -2,27 +2,24 @@
 //! (formatted lines for Copy All). Thin wrappers over the shared
 //! `state/log_buffer.rs` ring buffer (spec 03 §18).
 
-use std::sync::Arc;
-
-use tauri::State;
-
 use crate::state::models::LogEntry;
 use crate::state::AppState;
+use std::sync::Arc;
+use tauri::State;
 
-/// `get_logs` — snapshot of the ring buffer, newest-first.
+use crate::ops::logs as ops;
+
 #[tauri::command]
 pub fn get_logs(state: State<'_, Arc<AppState>>) -> Vec<LogEntry> {
-    state.log_buffer().snapshot()
+    ops::get_logs(state.inner())
 }
 
-/// `clear_logs` — empty the buffer and emit `log://cleared`.
 #[tauri::command]
 pub fn clear_logs(state: State<'_, Arc<AppState>>) {
-    state.log_buffer().clear();
+    ops::clear_logs(state.inner())
 }
 
-/// `get_logs_text` — the joined formatted lines for Copy All (spec 04 §6).
 #[tauri::command]
 pub fn get_logs_text(state: State<'_, Arc<AppState>>) -> String {
-    state.log_buffer().formatted_text()
+    ops::get_logs_text(state.inner())
 }

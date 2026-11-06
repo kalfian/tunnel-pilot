@@ -1,9 +1,9 @@
-//! `tunnel-pilot service install|uninstall|status` — keep the daemon running
+//! `tunnel-pilot-cli service install|uninstall|status` — keep the daemon running
 //! across logins and reboots (spec 03 §21).
 //!
 //! - **Linux**: a systemd unit. A normal user gets a *user* unit
-//!   (`~/.config/systemd/user/tunnel-pilot.service`, `systemctl --user`); root
-//!   gets a *system* unit (`/etc/systemd/system/tunnel-pilot.service`), which is
+//!   (`~/.config/systemd/user/tunnel-pilot-cli.service`, `systemctl --user`); root
+//!   gets a *system* unit (`/etc/systemd/system/tunnel-pilot-cli.service`), which is
 //!   what a server usually wants. A user unit only survives logout when
 //!   lingering is enabled — we check and print the one command that fixes it.
 //! - **macOS**: a launchd agent (`~/Library/LaunchAgents/<label>.plist`)
@@ -23,10 +23,9 @@ use crate::cli::args::{DaemonOptions, ServiceAction};
 use crate::cli::client::{EXIT_INTERNAL, EXIT_OK, EXIT_USAGE};
 
 /// systemd unit name.
-pub const UNIT_NAME: &str = "tunnel-pilot.service";
-/// launchd label (bundle id + `.daemon`, so it never collides with the app's
-/// own login item).
-pub const LAUNCHD_LABEL: &str = "com.kalfian.tunnelpilot.daemon";
+pub const UNIT_NAME: &str = "tunnel-pilot-cli.service";
+/// launchd label (the server product's id + `.daemon`).
+pub const LAUNCHD_LABEL: &str = "com.kalfian.tunnelpilot.cli.daemon";
 
 /// `service status` payload (`--json` prints it verbatim).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -119,6 +118,37 @@ fn install(options: &DaemonOptions) -> Result<(), i32> {
     for target in &options.connect {
         args.push("--connect".into());
         args.push(target.clone());
+    }
+    if options.web {
+        // A root (system) service would expose a network-facing web server with
+        // root's file access (any key under /root or /etc/ssh as an identity
+        // file). Refuse unless explicitly asked for.
+        if platform == Platform::SystemdSystem && !options.allow_root {
+            eprintln!(
+                "error: refusing to run the web UI as root. Install the service as a normal \
+                 user (recommended), or pass --allow-root to accept the risk."
+            );
+            return Err(EXIT_USAGE);
+        }
+        args.push("--web".into());
+        if let Some(bind) = &options.bind {
+            args.push("--bind".into());
+            args.push(bind.clone());
+        }
+        if options.trust_proxy {
+            args.push("--trust-proxy".into());
+        }
+        for host in &options.public_hosts {
+            args.push("--public-host".into());
+            args.push(host.clone());
+        }
+        // Fail at install time, not at the first boot of the service.
+        if !crate::web::admin::password_is_set(&config_dir) {
+            eprintln!(
+                "error: --web needs an admin password first: tunnel-pilot-cli web set-password"
+            );
+            return Err(EXIT_USAGE);
+        }
     }
     let mut env = vec![(
         crate::cli::CONFIG_DIR_ENV.to_string(),
@@ -235,7 +265,7 @@ fn home_dir() -> Option<PathBuf> {
 fn launchd_log_path() -> PathBuf {
     home_dir()
         .unwrap_or_default()
-        .join("Library/Logs/tunnel-pilot-daemon.log")
+        .join("Library/Logs/tunnel-pilot-cli.log")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,7 +360,7 @@ impl Platform {
                 eprintln!("error: {reason}");
                 eprintln!(
                     "The service file is in place; start it manually once the service \
-                     manager is available, or run 'tunnel-pilot daemon' in a terminal."
+                     manager is available, or run 'tunnel-pilot-cli daemon' in a terminal."
                 );
                 Err(EXIT_INTERNAL)
             }
@@ -386,9 +416,9 @@ impl Platform {
                         if user.is_empty() { "$USER" } else { &user }
                     );
                 }
-                println!("Logs: journalctl --user -u tunnel-pilot -f");
+                println!("Logs: journalctl --user -u tunnel-pilot-cli -f");
             }
-            Self::SystemdSystem => println!("Logs: journalctl -u tunnel-pilot -f"),
+            Self::SystemdSystem => println!("Logs: journalctl -u tunnel-pilot-cli -f"),
             Self::Launchd => println!("Logs: {}", launchd_log_path().display()),
         }
     }
@@ -438,11 +468,26 @@ pub fn systemd_unit(exe: &Path, args: &[String], env: &[(String, String)], syste
     } else {
         "default.target"
     };
+    // Defence in depth for a network-facing daemon. User units cannot set up
+    // mount namespaces everywhere, so they only get the directives that need none.
+    let hardening = if system {
+        "NoNewPrivileges=yes\n\
+         PrivateTmp=yes\n\
+         ProtectSystem=full\n\
+         ProtectKernelTunables=yes\n\
+         ProtectKernelModules=yes\n\
+         ProtectControlGroups=yes\n\
+         RestrictSUIDSGID=yes\n\
+         RestrictRealtime=yes\n\
+         LockPersonality=yes\n"
+    } else {
+        "NoNewPrivileges=yes\n"
+    };
     format!(
-        "# Managed by `tunnel-pilot service install` — re-run it to change, \
-         `tunnel-pilot service uninstall` to remove.\n\
+        "# Managed by `tunnel-pilot-cli service install` — re-run it to change, \
+         `tunnel-pilot-cli service uninstall` to remove.\n\
          [Unit]\n\
-         Description=Tunnel Pilot SSH port-forward daemon\n\
+         Description=Tunnel Pilot CLI (SSH port-forward daemon)\n\
          Documentation=https://github.com/kalfian/tunnel-pilot\n\
          Wants=network-online.target\n\
          After=network-online.target\n\
@@ -453,6 +498,7 @@ pub fn systemd_unit(exe: &Path, args: &[String], env: &[(String, String)], syste
          {environment}\
          Restart=on-failure\n\
          RestartSec=5\n\
+         {hardening}\
          \n\
          [Install]\n\
          WantedBy={wanted_by}\n"
@@ -490,7 +536,7 @@ pub fn launchd_plist(exe: &Path, args: &[String], env: &[(String, String)], log:
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
          \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
-         <!-- Managed by `tunnel-pilot service install`. -->\n\
+         <!-- Managed by `tunnel-pilot-cli service install`. -->\n\
          <plist version=\"1.0\">\n<dict>\n\
          \x20 <key>Label</key>\n  <string>{LAUNCHD_LABEL}</string>\n\
          \x20 <key>ProgramArguments</key>\n  <array>\n{program_args}  </array>\n\
@@ -521,7 +567,7 @@ mod tests {
     #[test]
     fn systemd_unit_pins_binary_args_and_config_dir() {
         let unit = systemd_unit(
-            Path::new("/home/me/.local/bin/tunnel-pilot"),
+            Path::new("/home/me/.local/bin/tunnel-pilot-cli"),
             &["daemon".into(), "--connect".into(), "prod db".into()],
             &[(
                 "TUNNEL_PILOT_CONFIG_DIR".into(),
@@ -530,16 +576,22 @@ mod tests {
             false,
         );
         assert!(unit.contains(
-            "ExecStart=\"/home/me/.local/bin/tunnel-pilot\" \"daemon\" \"--connect\" \"prod db\"\n"
+            "ExecStart=\"/home/me/.local/bin/tunnel-pilot-cli\" \"daemon\" \"--connect\" \"prod db\"\n"
         ));
         assert!(unit.contains(
             "Environment=\"TUNNEL_PILOT_CONFIG_DIR=/home/me/.config/com.kalfian.tunnelpilot\"\n"
         ));
         assert!(unit.contains("WantedBy=default.target"));
         assert!(unit.contains("Restart=on-failure"));
+        assert!(unit.contains("NoNewPrivileges=yes"));
+        assert!(
+            !unit.contains("ProtectSystem"),
+            "user units skip namespacing"
+        );
 
         let system = systemd_unit(Path::new("/usr/local/bin/tunnel-pilot"), &[], &[], true);
         assert!(system.contains("WantedBy=multi-user.target"));
+        assert!(system.contains("ProtectSystem=full") && system.contains("PrivateTmp=yes"));
     }
 
     #[test]
@@ -550,7 +602,7 @@ mod tests {
             &[("TUNNEL_PILOT_CONFIG_DIR".into(), "/Users/me/<cfg>".into())],
             Path::new("/Users/me/Library/Logs/tunnel-pilot-daemon.log"),
         );
-        assert!(plist.contains("<string>com.kalfian.tunnelpilot.daemon</string>"));
+        assert!(plist.contains("<string>com.kalfian.tunnelpilot.cli.daemon</string>"));
         assert!(plist.contains("<string>/Users/me/bin/tunnel-pilot</string>"));
         assert!(plist.contains("<string>a&amp;b</string>"));
         assert!(plist.contains("<string>/Users/me/&lt;cfg&gt;</string>"));

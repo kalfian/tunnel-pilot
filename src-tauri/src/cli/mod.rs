@@ -16,7 +16,6 @@
 
 pub mod args;
 pub mod client;
-pub mod desktop;
 pub mod forward_cmd;
 pub mod protocol;
 #[cfg(unix)]
@@ -40,13 +39,33 @@ pub const IDENTIFIER: &str = "com.kalfian.tunnelpilot";
 /// Sub-directory of the app config dir holding the control socket.
 pub const SOCKET_DIR: &str = "cli";
 
-/// Which build this binary is: the full desktop app (which also serves the
-/// CLI) or the lean headless CLI/daemon (spec 03 §21). Printed by
-/// `--version`; install scripts key off it.
+/// Bundle identifier of the server product `tunnel-pilot-cli`. A different id
+/// means a different config dir, secrets file and control socket, so the two
+/// products install and run side by side without touching each other's tunnels
+/// (spec 03 §22). Forwards move between them via backup export/import.
+pub const CLI_IDENTIFIER: &str = "com.kalfian.tunnelpilot.cli";
+
+/// Which product this binary is: the desktop app (`tunnel-pilot`, feature
+/// `gui`) or the server (`tunnel-pilot-cli`). Printed by `--version`; install
+/// scripts key off it.
 pub const EDITION: &str = if cfg!(feature = "gui") {
     "desktop"
 } else {
     "cli"
+};
+
+/// The command name of this product.
+pub const PROGRAM: &str = if cfg!(feature = "gui") {
+    "tunnel-pilot"
+} else {
+    "tunnel-pilot-cli"
+};
+
+/// The app identifier whose config dir this product uses.
+pub const APP_IDENTIFIER: &str = if cfg!(feature = "gui") {
+    IDENTIFIER
+} else {
+    CLI_IDENTIFIER
 };
 
 /// Config-dir override honored by the headless daemon and by the CLI's own
@@ -97,14 +116,14 @@ pub fn default_socket_path() -> Option<PathBuf> {
 }
 
 /// The app config dir without a Tauri context: [`CONFIG_DIR_ENV`] when set,
-/// else the platform config dir + [`IDENTIFIER`] — the same directory Tauri's
-/// `app_config_dir()` resolves, so the daemon, the desktop app and the CLI
-/// share one config, one secrets file and one socket.
+/// else the platform config dir + [`APP_IDENTIFIER`]. For the desktop product
+/// that is exactly what Tauri's `app_config_dir()` resolves; the server product
+/// has its own directory (`com.kalfian.tunnelpilot.cli`).
 pub fn default_config_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os(CONFIG_DIR_ENV).filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(dir));
     }
-    platform_config_dir().map(|d| d.join(IDENTIFIER))
+    platform_config_dir().map(|d| d.join(APP_IDENTIFIER))
 }
 
 /// `dirs::config_dir()` equivalent for the platforms we ship a CLI on. macOS:

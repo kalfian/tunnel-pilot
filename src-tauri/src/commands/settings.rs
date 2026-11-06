@@ -29,8 +29,9 @@ pub async fn update_settings(
     input: AppSettings,
 ) -> Result<AppSettings, AppError> {
     let state = state.inner();
-    state.set_settings(input.clone());
-    state.persist_settings().await?;
+    // Store + persist + emit `settings://changed` (shared with the web transport),
+    // then the desktop-only OS side effects below.
+    let input = crate::ops::settings::update_settings(state, input).await?;
 
     // Launch-at-login: drive the OS registration to match (idempotent).
     crate::platform::autostart::reconcile(&app, input.launch_at_login);
@@ -46,10 +47,6 @@ pub async fn update_settings(
         .and_then(|w| w.is_visible().ok())
         .unwrap_or(false);
     crate::platform::dock::apply_dock_policy(&app, window_visible, input.show_in_dock);
-
-    // Theme is applied on the frontend; notify it (and any other listener) that
-    // settings changed so it can re-render.
-    state.emit_settings_changed();
 
     Ok(input)
 }

@@ -156,7 +156,20 @@ pub async fn update(
         engine::disconnect_forward(state, &id, true).await?;
     }
 
-    let config = config_from_input(id, input, existing.has_stored_password);
+    // A stored password belongs to ONE login (user @ host : port). If the edit
+    // points the forward elsewhere, drop it: otherwise anyone who may edit
+    // forwards could aim one at an SSH server they control and have the old
+    // password sent there on the next connect (security review M4).
+    let endpoint_changed = existing.ssh_host != input.ssh_host
+        || existing.ssh_port != input.ssh_port
+        || existing.ssh_username != input.ssh_username;
+    let keep_password = existing.has_stored_password && !endpoint_changed;
+    if existing.has_stored_password && endpoint_changed {
+        state.delete_password_checked(&id).await?;
+        tracing::info!(forward_id = %id, "SSH endpoint changed; stored password cleared");
+    }
+
+    let config = config_from_input(id, input, keep_password);
     state.upsert_config(config.clone());
     state.persist_forwards().await?;
     state.emit_forwards_changed();
@@ -500,13 +513,48 @@ mod tests {
             !state.registry.contains("live"),
             "editing a connected forward force-disconnects it first (v1 parity)"
         );
-        // Config was replaced, id + stored-password flag preserved.
+        // Config was replaced, id kept. The SSH host changed, so the stored
+        // password (bound to the old login) is dropped (security review M4).
         assert_eq!(updated.id, "live");
         assert_eq!(updated.name, "After");
         assert_eq!(updated.ssh_host, "new.example.com");
         assert!(
-            updated.has_stored_password,
-            "the stored-password flag is preserved across an edit (secret untouched)"
+            !updated.has_stored_password,
+            "pointing a forward at another SSH host must drop its stored password"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_edit_that_keeps_the_login_keeps_the_password() {
+        use crate::state::AppState;
+
+        let state = Arc::new(AppState::new_headless());
+        state.upsert_config(ForwardConfig {
+            id: "f".into(),
+            has_stored_password: true,
+            ..base_config()
+        });
+        state
+            .set_password_checked("f", "s3cret".into())
+            .await
+            .expect("seed");
+        // Same user@host:port, different local port and name.
+        let mut input = input_from_config(&state.get_config("f").expect("cfg"));
+        input.name = "Renamed".into();
+        input.local_port = 6543;
+        let updated = update(&state, "f".into(), input).await.expect("update");
+        assert!(updated.has_stored_password);
+        assert_eq!(state.get_password("f").as_deref(), Some("s3cret"));
+
+        // Changing only the SSH user also invalidates it, and deletes the secret.
+        let mut input = input_from_config(&updated);
+        input.ssh_username = "someone-else".into();
+        let updated = update(&state, "f".into(), input).await.expect("update");
+        assert!(!updated.has_stored_password);
+        assert_eq!(
+            state.get_password("f"),
+            None,
+            "the secret itself is deleted"
         );
     }
 }

@@ -31,6 +31,8 @@ pub const LOG_CAP: usize = 500;
 #[derive(Default)]
 pub struct LogBuffer {
     entries: Mutex<VecDeque<LogEntry>>,
+    /// Fan-out to web clients (shared with `AppState`, see [`LogBuffer::bus`]).
+    bus: crate::events::EventBus,
     #[cfg(feature = "gui")]
     app: RwLock<Option<AppHandle>>,
 }
@@ -49,13 +51,20 @@ impl LogBuffer {
         }
     }
 
+    /// The event bus this buffer publishes to. `AppState` adopts the same bus so
+    /// log lines and state events reach web clients through one channel.
+    pub fn bus(&self) -> &crate::events::EventBus {
+        &self.bus
+    }
+
     #[cfg(feature = "gui")]
     fn app_handle(&self) -> Option<AppHandle> {
         self.app.read().ok().and_then(|g| g.clone())
     }
 
     /// Emit to the webview when one is attached; compiled out headless.
-    fn emit<P: serde::Serialize + Clone>(&self, event: &str, payload: P) {
+    fn emit<P: serde::Serialize + Clone>(&self, event: &'static str, payload: P) {
+        self.bus.publish(event, &payload);
         #[cfg(feature = "gui")]
         if let Some(app) = self.app_handle() {
             let _ = app.emit(event, payload);

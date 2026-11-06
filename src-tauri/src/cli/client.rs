@@ -41,9 +41,13 @@ pub const EXIT_TIMEOUT: i32 = 6;
 
 /// Printed when the socket is absent. We never auto-launch the GUI: an agent
 /// must not silently start a desktop process.
-pub const NOT_RUNNING_HINT: &str = "Tunnel Pilot is not running. Start the desktop app \
-     (macOS: open -a \"Tunnel Pilot\") or the headless daemon \
-     (tunnel-pilot daemon, or tunnel-pilot service install to keep it running).";
+pub const NOT_RUNNING_HINT: &str = if cfg!(feature = "gui") {
+    "Tunnel Pilot is not running. Start it with: open -a \"Tunnel Pilot\" \
+     (or launch it from your app menu)"
+} else {
+    "The tunnel-pilot-cli daemon is not running. Start it with: tunnel-pilot-cli daemon \
+     (or keep it running: tunnel-pilot-cli service install)"
+};
 
 /// Slack added to the wait budget when computing the socket read timeout, so
 /// the server's own answer always wins the race against our timeout.
@@ -88,13 +92,19 @@ pub fn run(args: &[String]) -> i32 {
     };
 
     if invocation.command == Command::Help {
-        print!("{}", args::HELP_TEXT);
+        print!("{}", args::help_text());
         return EXIT_OK;
     }
 
     // `install-cli`/`uninstall-cli` are LOCAL: they operate on the filesystem,
     // so they must work with the app closed (no socket, never exit 3).
     match &invocation.command {
+        Command::InstallCli { .. } | Command::UninstallCli if !cfg!(feature = "gui") => {
+            return edition_mismatch("tunnel-pilot (desktop)")
+        }
+        Command::Daemon(_) | Command::Service(_) | Command::Web(_) if !cfg!(feature = "server") => {
+            return edition_mismatch("tunnel-pilot-cli (server)")
+        }
         Command::InstallCli { target } => return run_shim(&invocation, shim::install(*target)),
         Command::UninstallCli => return run_shim(&invocation, shim::uninstall()),
         Command::LocalVersion => {
@@ -109,7 +119,7 @@ pub fn run(args: &[String]) -> i32 {
         // `desktop install` manage the machine, not a running instance.
         Command::Daemon(options) => return run_daemon(options),
         Command::Service(action) => return run_service(action, invocation.json),
-        Command::DesktopInstall => return crate::cli::desktop::install(),
+        Command::Web(action) => return run_web(*action),
         _ => {}
     }
 
@@ -186,7 +196,7 @@ fn build_request(command: &Command) -> CliRequest {
         | Command::LocalVersion
         | Command::Daemon(_)
         | Command::Service(_)
-        | Command::DesktopInstall
+        | Command::Web(_)
         | Command::Add { .. }
         | Command::Edit { .. }
         | Command::Remove { .. }
@@ -398,31 +408,53 @@ pub fn render_saved(forward: &ForwardView, change: SaveChange) -> String {
     )
 }
 
-/// `daemon`: run the headless engine in the foreground (Unix only — the
-/// control socket is a Unix domain socket).
+/// A command that belongs to the other product (spec 03 §22).
+fn edition_mismatch(product: &str) -> i32 {
+    eprintln!("error: this command is part of {product}; this binary is {PROGRAM_NAME}");
+    EXIT_USAGE
+}
+
+const PROGRAM_NAME: &str = crate::cli::PROGRAM;
+
+/// `daemon`: run the headless engine in the foreground (`tunnel-pilot-cli` on
+/// Unix only — the control socket is a Unix domain socket).
 fn run_daemon(options: &args::DaemonOptions) -> i32 {
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "server"))]
     {
         crate::daemon::run(options)
     }
-    #[cfg(not(unix))]
+    #[cfg(not(all(unix, feature = "server")))]
     {
         let _ = options;
-        eprintln!("error: the headless daemon is only available on macOS and Linux");
+        eprintln!("error: the daemon is part of tunnel-pilot-cli on macOS and Linux");
         EXIT_USAGE
     }
 }
 
 /// `service install|uninstall|status`.
 fn run_service(action: &args::ServiceAction, json: bool) -> i32 {
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "server"))]
     {
         crate::daemon::service::run(action, json)
     }
-    #[cfg(not(unix))]
+    #[cfg(not(all(unix, feature = "server")))]
     {
         let _ = (action, json);
-        eprintln!("error: the background service is only available on macOS and Linux");
+        eprintln!("error: the background service is part of tunnel-pilot-cli on macOS and Linux");
+        EXIT_USAGE
+    }
+}
+
+/// `web set-password|status`.
+fn run_web(action: args::WebAction) -> i32 {
+    #[cfg(feature = "server")]
+    {
+        crate::web::admin::run(action)
+    }
+    #[cfg(not(feature = "server"))]
+    {
+        let _ = action;
+        eprintln!("error: the web UI is part of tunnel-pilot-cli");
         EXIT_USAGE
     }
 }
@@ -856,10 +888,12 @@ mod tests {
             path.to_str().expect("utf-8 temp path"),
         ]));
         assert_eq!(code, EXIT_NOT_RUNNING);
-        assert!(
-            NOT_RUNNING_HINT.contains("open -a"),
-            "hint must be actionable"
-        );
+        let action = if cfg!(feature = "gui") {
+            "open -a"
+        } else {
+            "tunnel-pilot-cli daemon"
+        };
+        assert!(NOT_RUNNING_HINT.contains(action), "hint must be actionable");
     }
 
     #[test]
