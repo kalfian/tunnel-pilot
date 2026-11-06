@@ -109,7 +109,8 @@ pub fn run(args: &[String]) -> i32 {
         Command::UninstallCli => return run_shim(&invocation, shim::uninstall()),
         Command::LocalVersion => {
             println!(
-                "tunnel-pilot {} ({})",
+                "{} {} ({})",
+                crate::cli::PROGRAM,
                 env!("CARGO_PKG_VERSION"),
                 crate::cli::EDITION
             );
