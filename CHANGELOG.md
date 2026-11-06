@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **SSH host-key pinning** — Both products now verify every SSH server's host key, the way OpenSSH's `known_hosts` does.
+  - The first successful connection pins the key, and your `~/.ssh/known_hosts` is honoured (read-only, never modified).
+  - If the key later changes, the connection is refused and not retried automatically, and the tunnel shows the pinned and the presented fingerprints. Verify the new fingerprint with the server's administrator, then choose **Trust new key** (desktop / web) or run `trust-host-key <name>` (CLI). `forget-host-key` drops a pin.
+  - Existing tunnels pin their key on their next connection.
+
+### Changed
+- Changing a tunnel's SSH host or port clears its pinned host key; the new server is pinned on its first connection.
+
+### Fixed
+- `tunnel-pilot-cli --version` printed the desktop's command name.
+- The README described the no-keychain password fallback as encrypted. It is an owner-only (`0600`) plaintext file.
+
 ## [2.3.0] - 2026-11-06
 
 ### Added

@@ -253,6 +253,8 @@ All commands return `Result<T, AppError>` where `AppError` is serde-serializable
 | `copy_ssh_command` | `(id: String) -> String` | "Copy SSH command" action |
 | `set_forward_password` | `(id: String, password: String) -> ()` | form save when password entered (writes to keychain/fallback) |
 | `clear_forward_password` | `(id: String) -> ()` | form clears password |
+| `trust_host_key` | `(id: String) -> ForwardConfig` | pin the key the server presented on its last refused connect (03 §23); `notFound` if none pending; the caller then `retry_forward`s |
+| `forget_host_key` | `(id: String) -> ForwardConfig` | drop the pinned key; the next connect pins afresh |
 
 `ForwardInput` = editable subset of `ForwardConfig` (no `id`, no live state); password is
 **never** part of it — passwords flow only through `set_forward_password` /
@@ -353,7 +355,7 @@ Names are constants in `events.rs`. Payloads are serde structs. Frontend subscri
 
 | Event name | Payload | Meaning |
 |------------|---------|---------|
-| `tunnel://status` | `{ id: String, status: ForwardStatus, lastError: Option<String> }` | status transition |
+| `tunnel://status` | `{ id: String, status: ForwardStatus, lastError: Option<String>, hostKeyMismatch: Option<HostKeyMismatch> }` | status transition (mismatch set while parked on a refused host key, 03 §23) |
 | `tunnel://stats` | `{ id: String, stats: TunnelStats }` | stats update on the single 3s sampler tick ([03 §6/F4](03-TECH-SPEC.md#stats)) |
 | `log://line` | `LogEntry` | new log line appended |
 | `log://cleared` | `()` | logs cleared |

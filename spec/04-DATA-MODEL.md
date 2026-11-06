@@ -67,8 +67,28 @@ export interface ForwardConfig {
   keepAliveMaxCount: number;
   groupId: string | null;
   tags: string[];
+  hostKey: HostKeyPin | null;      // pinned on first successful connect (03 §23)
+}
+
+/** A pinned SSH host key — public, never a secret. */
+export interface HostKeyPin {
+  algorithm: string;               // "ssh-ed25519", "ecdsa-sha2-nistp256", "rsa-sha2-512", …
+  fingerprint: string;             // "SHA256:…" as OpenSSH prints it
+  pinnedAt: string | null;         // RFC 3339
+}
+export type HostKeySource = "pinned" | "knownHosts";
+/** The server presented a different key than expected (03 §23). */
+export interface HostKeyMismatch {
+  expected: HostKeyPin | null;     // null when the conflict is with ~/.ssh/known_hosts
+  presented: HostKeyPin;
+  source: HostKeySource;
 }
 ```
+
+`hostKey` is `#[serde(default)]` (older files and backups load with `null` and pin on the
+next connection). It is never part of `ForwardInput`: only the engine (first use), the
+`trust_host_key` / `forget_host_key` commands, and an edit of `sshHost`/`sshPort` (which
+clears it) change it. Backups carry it (it is public), so a restored forward keeps its pin.
 
 **`ForwardInput`** (create/update payload — no `id`, no live state, no secret):
 ```rust
@@ -91,7 +111,7 @@ pub struct ForwardInput {
 }
 ```
 ```typescript
-export type ForwardInput = Omit<ForwardConfig, "id" | "hasStoredPassword">;
+export type ForwardInput = Omit<ForwardConfig, "id" | "hasStoredPassword" | "hostKey">;
 ```
 Passwords are set/cleared only via `set_forward_password` / `clear_forward_password`
 (see [02 §6.1](02-ARCHITECTURE.md)).
@@ -214,10 +234,16 @@ Note: byte counters as JS `number` are safe up to 2^53 bytes (~9 PB) — accepta
 **`ForwardRuntime`** (returned by `get_forward_runtime`, and in `AppSnapshot`):
 ```rust
 #[serde(rename_all = "camelCase")]
-pub struct ForwardRuntime { pub status: ForwardStatus, pub stats: TunnelStats, pub last_error: Option<String> }
+pub struct ForwardRuntime {
+    pub status: ForwardStatus, pub stats: TunnelStats, pub last_error: Option<String>,
+    #[serde(default)] pub host_key_mismatch: Option<HostKeyMismatch>, // while parked on a refused key
+}
 ```
 ```typescript
-export interface ForwardRuntime { status: ForwardStatus; stats: TunnelStats; lastError: string | null; }
+export interface ForwardRuntime {
+  status: ForwardStatus; stats: TunnelStats; lastError: string | null;
+  hostKeyMismatch: HostKeyMismatch | null;
+}
 ```
 
 ---

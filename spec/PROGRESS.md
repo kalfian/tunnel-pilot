@@ -608,6 +608,17 @@ Superseded design (2026-11-06, Kalfian): the first cut (`0bf03aa`, pushed to mas
 - [ ] **Not verified**: macOS builds, aarch64 musl, real systemd/launchd install, CI runs,
       the desktop app at runtime after the transport refactor (`pnpm tauri dev`).
 
+## M11 — SSH host-key pinning (03 §23), both products
+- [x] `HostKeyVerifier` + pure `decide()`: pin authoritative → known_hosts (read-only) → TOFU
+      pinned after auth; `AppError::HostKeyMismatch`; never auto-retried (`TeardownCtx.fatal`).
+- [x] Every attempt re-reads the current pin (a stale spawn-time copy let reconnects accept
+      any key — found by the new integration test before it shipped).
+- [x] `trust_host_key` / `forget_host_key` (Tauri, web dispatcher, socket, CLI
+      `trust-host-key` / `forget-host-key`); edit of host/port clears the pin.
+- [x] Verified: unit + embedded-server integration test; E2E against real OpenSSH in Docker
+      (pin == `ssh-keygen -lf`, reinstall refused w/o retry loop, trust, known_hosts wrong/right).
+- Closes the backlog item "Host-key verification (MITM)" below.
+
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).
 Defensive follow-ups (non-blocking — do in a pre-cutover hardening pass):

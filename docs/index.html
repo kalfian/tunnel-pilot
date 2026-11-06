@@ -57,6 +57,7 @@
       "Auto-reconnect with exponential backoff and SSH keep-alive liveness",
       "Groups, tags, and a Cmd/Ctrl+K command palette for keyboard-driven control",
       "Passwords stored in the OS keychain",
+      "SSH host-key pinning (trust on first use, honours known_hosts)",
       "Cryptographically signed automatic updates (minisign)",
       "Terminal CLI on macOS and Linux that drives the running app: list, status, connect, disconnect, add, edit, remove, set-password, with --json output",
       "Runs on macOS, Windows, and Linux"
@@ -744,8 +745,8 @@
           </article>
           <article class="fcard reveal">
             <div class="ic"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></div>
-            <h3>Keychain for passwords</h3>
-            <p>Passwords live in your OS keychain (macOS Keychain, Windows Credential Manager, Secret Service), not in a plaintext file. Backups never export secrets.</p>
+            <h3>Keychain &amp; pinned host keys</h3>
+            <p>Passwords live in your OS keychain (macOS Keychain, Windows Credential Manager, Secret Service), and backups never export them. Each SSH server&rsquo;s host key is pinned on first connect, so an impostor server is refused instead of receiving your password.</p>
           </article>
           <article class="fcard reveal">
             <div class="ic"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></div>

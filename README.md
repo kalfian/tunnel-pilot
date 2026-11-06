@@ -38,7 +38,8 @@ Manage your SSH tunnels (`ssh -L`) with ease — toggle connections on/off direc
 - **Full CRUD** — Add / edit / duplicate / delete tunnel configurations; drag to reorder or drag a tunnel between groups; edit from each row's actions.
 - **Command Palette (⌘K)** — Fuzzy-search every action: connect/disconnect, jump to a view, toggle theme, check for updates, and more.
 - **Groups & Tags** — Organize tunnels into collapsible groups and filter by tag; start/stop a whole group at once.
-- **Password & Identity File Auth** — SSH password or identity file. Passwords are stored in your **OS keychain** (Keychain / Windows Credential Manager / Secret Service), with an encrypted local fallback when no keychain is available.
+- **Password & Identity File Auth** — SSH password or identity file. Passwords are stored in your **OS keychain** (Keychain / Windows Credential Manager / Secret Service), with an owner-only (`0600`) local file as the fallback when no keychain is available (that file is plaintext — prefer identity files on such machines).
+- **Host-Key Pinning** — Each tunnel pins its SSH server's host key on the first connection (and honours your `~/.ssh/known_hosts`, read-only). A changed key is refused — never retried automatically — and shown with both fingerprints until you verify and trust it, so an impostor server cannot receive your password or traffic.
 - **Auto-Reconnect & Keep-Alive** — Configurable backoff, SSH keep-alive liveness, and wake-from-sleep recovery.
 - **Backup & Restore** — Export/import configurations as JSON (passwords excluded for security; identity file paths included). Non-destructive **merge** or **replace** import.
 - **Launch at Login** — Start Tunnel Pilot automatically when you log in.
@@ -135,6 +136,7 @@ Both run locally — they do not need the app to be running.
 | `tunnel-pilot edit <id\|name> [--name …] [--ssh …] [--forward …] [--identity …] [--password] …` | Change a forward (a live one is disconnected first) |
 | `tunnel-pilot remove <id\|name>` | Delete a forward and its stored password |
 | `tunnel-pilot set-password <id\|name> [--password-stdin]` / `clear-password <id\|name>` | Store (prompted, echo off) or delete the password |
+| `tunnel-pilot trust-host-key <id\|name>` / `forget-host-key <id\|name>` | Accept a server's changed host key (after verifying it) / drop the pinned key |
 | `tunnel-pilot install-cli` / `uninstall-cli` | Add/remove the `tunnel-pilot` symlink on your PATH (local; works with the app closed) |
 | `tunnel-pilot version` / `--version` / `help` | CLI + running app versions / this binary's version and edition / usage |
 
@@ -240,9 +242,8 @@ tunnel-pilot-cli service install --web --public-host tunnels.example.com --trust
 the WebSocket `Upgrade`/`Connection` headers. Without a proxy, an SSH tunnel
 (`ssh -L 1855:127.0.0.1:1855 server`) works too.
 
-Known limits: SSH host keys are not pinned yet (both products accept the server's key, as
-the desktop app always has), and the CLI release archives are protected by a published
-SHA-256, not a signature.
+Known limit: the CLI release archives are protected by a published SHA-256, not a
+signature.
 
 - **Passwords on a headless Linux box** live in `tunnel_pilot_secrets.json` (`0600`) in the
   config dir because there is no keychain — prefer `--identity` keys on servers. The macOS

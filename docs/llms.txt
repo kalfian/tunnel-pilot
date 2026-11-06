@@ -13,6 +13,7 @@ Tunnel Pilot replaces repeated `ssh -L` commands with saved forwards that can be
 - Backup export and import (backups never contain passwords)
 - Cmd/Ctrl+K command palette
 - Passwords stored in the OS keychain, or a separate 0600 file when no keychain is available
+- SSH host-key pinning: each forward pins its server's host key on the first connection and honours ~/.ssh/known_hosts (read-only); a changed key is refused, never retried automatically, until the user verifies and trusts it (`trust-host-key` in the CLI)
 - License: MIT; source: https://github.com/kalfian/tunnel-pilot
 
 ## Tunnel Pilot (desktop)
@@ -41,7 +42,7 @@ Tunnel Pilot replaces repeated `ssh -L` commands with saved forwards that can be
 - Quick start: `tunnel-pilot-cli web set-password`, then `tunnel-pilot-cli service install --web` (web UI on http://127.0.0.1:1855) or `tunnel-pilot-cli service install --web --bind 0.0.0.0` (reachable at http://<server-ip>:1855)
 - Terminal: `tunnel-pilot-cli add prod-db --ssh deploy@bastion.example.com --forward 5432:db.internal:5432 --identity ~/.ssh/id_ed25519`; also `list`, `connect`, `disconnect`, `status`, all with `--json`
 - Runs as: a systemd service (user unit, or system unit as root) or a launchd agent; tunnels auto-reconnect
-- Web UI security: login always required (admin password hashed with argon2id), HttpOnly SameSite=Strict session cookie, CSRF protection, per-IP login rate limiting, strict Content-Security-Policy; binds 127.0.0.1 by default and 0.0.0.0 only when chosen with `--bind`
+- Web UI security: login always required (admin password hashed with argon2id), HttpOnly SameSite=Strict session cookie, CSRF protection, Host allowlist against DNS rebinding (`--public-host`), per-client login rate limiting with a cap on concurrent password checks, connection timeouts, strict Content-Security-Policy; binds 127.0.0.1 by default and 0.0.0.0 only when chosen with `--bind`; behind a reverse proxy use `--trust-proxy`
 - No built-in TLS: when exposing beyond localhost, put an HTTPS reverse proxy in front (Caddy: `reverse_proxy 127.0.0.1:1855`; nginx: also `proxy_set_header Host $host;` plus WebSocket `Upgrade`/`Connection` headers) or reach it through an SSH tunnel. The UI warns when it is reached over plain HTTP from a non-loopback host
 
 ## Choosing Between Them

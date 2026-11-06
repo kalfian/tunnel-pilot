@@ -1515,9 +1515,8 @@ IPC contract (02 §10): `POST /api/invoke/<command>` → `ops::dispatch::invoke`
 - Editing a forward's SSH host, port or user deletes its stored password (both products):
   a forward cannot be re-aimed at another server to send an existing password there.
 - The server product uses its own keychain service (`tunnel-pilot-cli`).
-- Known gaps (documented, not fixed here): SSH host keys are not pinned
-  (`check_server_key` accepts any key — pre-existing in the desktop app); CLI release
-  archives carry a SHA-256, not a signature.
+- Known gap: CLI release archives carry a SHA-256, not a signature. (SSH host keys are
+  pinned since §23.)
 - Headers on every response: strict CSP (`script-src 'self'`, `connect-src 'self'`,
   `frame-ancestors 'none'`, …), `X-Frame-Options: DENY`, `nosniff`, `no-referrer`,
   `Cross-Origin-Resource-Policy: same-origin`; COOP only behind TLS (browsers ignore it, and
@@ -1550,3 +1549,62 @@ IPC contract (02 §10): `POST /api/invoke/<command>` → `ops::dispatch::invoke`
 - [ ] Live attack re-tests: 40 parallel wrong logins verify ≤ 2 passwords and keep memory
       flat; 50 half-open connections are closed within the header timeout; a rebound `Host`
       gets `421`; a `--public-host` name works.
+
+## 23. SSH host-key pinning (`ssh/client.rs`, both products)
+
+### Behavior
+Every SSH connection verifies the server's host key, like OpenSSH's `known_hosts`, so a
+server swapped in by DNS spoofing, a hostile network or a compromised hop cannot receive a
+password or the tunnel's traffic.
+
+1. **Pinned key is authoritative.** A forward with `hostKey` set accepts only that exact
+   key (algorithm + SHA-256 fingerprint).
+2. **Otherwise `~/.ssh/known_hosts` is consulted, read-only** (hashed entries and
+   `[host]:port` supported; `TUNNEL_PILOT_KNOWN_HOSTS` overrides the path, empty disables
+   it). An entry for the host with a different key of the same type refuses. The file is
+   never written.
+3. **Otherwise trust on first use:** the key is accepted, and pinned only AFTER
+   authentication succeeds (a typo'd host that cannot be logged into is never pinned).
+   Existing forwards pin on their first connection after the update.
+
+A refused key: the attempt fails with `AppError::HostKeyMismatch` (CLI exit 5, web `409`),
+the tunnel parks in `error` and is **never retried automatically** (auto-reconnect is
+skipped), and the runtime / `tunnel://status` carry `hostKeyMismatch` (pinned or
+known_hosts source, both fingerprints). `lastError` names both fingerprints and says to
+verify with the server's administrator. The user then either trusts the presented key
+(`trust_host_key` — pins exactly the fingerprint that was shown, never "whatever the next
+connection sees") and retries, or investigates. `forget_host_key` drops a pin. Editing
+`sshHost` or `sshPort` clears the pin (a different server); editing the user does not.
+
+**Every attempt re-reads the current pin.** The supervisor captures the config once, but
+the pin can change during its life (first-use pin, trust, forget), so each attempt —
+automatic reconnects and wake-probe recoveries included — verifies against the CURRENT pin.
+(Without this, a reconnect after a first-use pin would accept any key: caught by the
+integration test.)
+
+Surfaces: desktop and web UI show a "Host key changed" state with both fingerprints and a
+confirmed "Trust new key…" action, and the pin (with "Forget…") in the edit form;
+`tunnel-pilot[-cli] status` prints the pin and, when refused, the presented key and the
+exact `trust-host-key` command; `trust-host-key` / `forget-host-key` subcommands map to the
+socket commands `host-key-trust` / `host-key-forget`.
+
+### Rust approach
+- `HostKeyVerifier` (per attempt) holds the expected pin, host, port and known_hosts path;
+  `check_server_key` computes the presented pin and applies the pure `decide()`; the
+  verdict lands in a shared slot because russh only takes yes/no. `connect` returns
+  `ConnectError::HostKey(Box<HostKeyMismatch>)` or the session + presented key.
+- `bind_connect_auth` records the mismatch on the registry handle (cleared on
+  `connecting`/`connected`) and pins after auth via `ops::forwards::pin_host_key` (a no-op
+  if already pinned or the forward was re-pointed meanwhile).
+- `TeardownCtx.fatal` parks without auto-reconnect.
+
+### Acceptance criteria
+- [ ] Unit: `decide()` matrix (pin match / pin mismatch incl. algorithm change / known_hosts
+      match, changed, unknown), known_hosts read-only, OpenSSH-format fingerprints.
+- [ ] Integration (embedded server): pin on first use; the SAME supervisor's automatic
+      reconnect to a server with another key is refused and not retried; trust + retry
+      connects; trust with nothing pending is refused; editing the host clears the pin.
+- [ ] E2E (real OpenSSH): the pin equals `ssh-keygen -lf` of the server's ed25519 key;
+      reinstall → one refused attempt, no retry loop, exit 5; `trust-host-key` → connected
+      with the new pin; a wrong known_hosts entry refuses and the file is unchanged; a right
+      one is accepted and pinned.
