@@ -15,7 +15,7 @@ use russh::client::{self, Handle};
 use tokio::time::timeout;
 
 use crate::error::AppError;
-use crate::state::models::ForwardConfig;
+use crate::state::models::{ForwardConfig, HostKeyMismatch, HostKeyPin, HostKeySource};
 use crate::state::AppState;
 
 /// Connect timeout (spec 03 §1).
@@ -27,21 +27,186 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 /// the generic `ClientHandler` everywhere.
 pub type Session = Handle<ClientHandler>;
 
-/// Client-side session handler.
-///
-/// Host-key policy: accept any server key (TOFU/no-verify), matching v1's
-/// `dartssh2` behavior which did not verify host keys. Revisit if host-key
-/// pinning is ever specced.
-pub struct ClientHandler;
+/// Client-side session handler. Its only job is the host-key check
+/// (spec 03 §23): see [`decide`] for the policy.
+pub struct ClientHandler {
+    verifier: HostKeyVerifier,
+}
 
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKey,
+        server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        Ok(self.verifier.check(server_public_key))
+    }
+}
+
+/// Host-key verification for one connection attempt (spec 03 §23).
+///
+/// Policy, in order:
+/// 1. A key pinned on the forward is authoritative: it must match exactly.
+/// 2. Otherwise `~/.ssh/known_hosts` is consulted READ-ONLY (never written):
+///    an entry for this host with a different key of the same type refuses.
+/// 3. Otherwise the key is accepted, and the engine pins it once
+///    authentication succeeds (trust on first use, like OpenSSH).
+///
+/// The verdict is left in a shared slot because russh only lets the handler
+/// answer yes/no; `connect` turns a refusal into a [`ConnectError::HostKey`].
+pub struct HostKeyVerifier {
+    host: String,
+    port: u16,
+    expected: Option<HostKeyPin>,
+    known_hosts: Option<std::path::PathBuf>,
+    outcome: Arc<std::sync::Mutex<Option<HostKeyOutcome>>>,
+}
+
+/// What the host-key check concluded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostKeyOutcome {
+    /// Accepted; carries the presented key (for pinning on first use).
+    Accepted(HostKeyPin),
+    /// Refused: the server presented a different key.
+    Refused(HostKeyMismatch),
+}
+
+/// The `known_hosts` lookup result fed into [`decide`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KnownHostsVerdict {
+    /// An entry for this host holds exactly this key.
+    Match,
+    /// An entry for this host holds a different key of the same type.
+    Changed,
+    /// No usable entry (no file, no line for the host, other key types).
+    Unknown,
+}
+
+/// The pin form of a public key: algorithm + SHA-256 fingerprint as OpenSSH
+/// prints them. Pure.
+pub fn key_pin(key: &russh::keys::PublicKey) -> HostKeyPin {
+    HostKeyPin {
+        algorithm: key.algorithm().as_str().to_string(),
+        fingerprint: key.fingerprint(russh::keys::HashAlg::Sha256).to_string(),
+        pinned_at: None,
+    }
+}
+
+/// The host-key policy as a pure function (unit-tested). See [`HostKeyVerifier`].
+pub fn decide(
+    expected: Option<&HostKeyPin>,
+    presented: HostKeyPin,
+    known_hosts: KnownHostsVerdict,
+) -> HostKeyOutcome {
+    match expected {
+        Some(pin) => {
+            if pin.algorithm == presented.algorithm && pin.fingerprint == presented.fingerprint {
+                HostKeyOutcome::Accepted(presented)
+            } else {
+                HostKeyOutcome::Refused(HostKeyMismatch {
+                    expected: Some(pin.clone()),
+                    presented,
+                    source: HostKeySource::Pinned,
+                })
+            }
+        }
+        None => match known_hosts {
+            KnownHostsVerdict::Changed => HostKeyOutcome::Refused(HostKeyMismatch {
+                expected: None,
+                presented,
+                source: HostKeySource::KnownHosts,
+            }),
+            KnownHostsVerdict::Match | KnownHostsVerdict::Unknown => {
+                HostKeyOutcome::Accepted(presented)
+            }
+        },
+    }
+}
+
+/// `TUNNEL_PILOT_KNOWN_HOSTS` (empty = do not consult one), else
+/// `~/.ssh/known_hosts`.
+pub fn default_known_hosts_path() -> Option<std::path::PathBuf> {
+    if let Some(v) = std::env::var_os("TUNNEL_PILOT_KNOWN_HOSTS") {
+        return (!v.is_empty()).then(|| std::path::PathBuf::from(v));
+    }
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(|h| std::path::PathBuf::from(h).join(".ssh").join("known_hosts"))
+}
+
+impl HostKeyVerifier {
+    pub fn new(cfg: &ForwardConfig, known_hosts: Option<std::path::PathBuf>) -> Self {
+        Self {
+            host: cfg.ssh_host.clone(),
+            port: cfg.ssh_port,
+            expected: cfg.host_key.clone(),
+            known_hosts,
+            outcome: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    /// The shared verdict slot (read by `connect` after the handshake).
+    pub fn outcome_slot(&self) -> Arc<std::sync::Mutex<Option<HostKeyOutcome>>> {
+        self.outcome.clone()
+    }
+
+    fn known_hosts_verdict(&self, key: &russh::keys::PublicKey) -> KnownHostsVerdict {
+        let Some(path) = &self.known_hosts else {
+            return KnownHostsVerdict::Unknown;
+        };
+        // A tiny, local, read-only file; russh's parser handles hashed hosts
+        // and the `[host]:port` form.
+        match russh::keys::check_known_hosts_path(&self.host, self.port, key, path) {
+            Ok(true) => KnownHostsVerdict::Match,
+            Err(russh::keys::Error::KeyChanged { .. }) => KnownHostsVerdict::Changed,
+            _ => KnownHostsVerdict::Unknown,
+        }
+    }
+
+    /// Decide for the presented key; `true` lets the handshake continue.
+    pub fn check(&self, key: &russh::keys::PublicKey) -> bool {
+        let presented = key_pin(key);
+        let known = if self.expected.is_none() {
+            self.known_hosts_verdict(key)
+        } else {
+            KnownHostsVerdict::Unknown // a pin is authoritative
+        };
+        let outcome = decide(self.expected.as_ref(), presented, known);
+        let accepted = matches!(outcome, HostKeyOutcome::Accepted(_));
+        if let Ok(mut slot) = self.outcome.lock() {
+            *slot = Some(outcome);
+        }
+        accepted
+    }
+}
+
+/// Why `connect` failed.
+#[derive(Debug)]
+pub enum ConnectError {
+    /// The host-key check refused the server (never retried automatically).
+    HostKey(Box<HostKeyMismatch>),
+    /// Anything else (network, KEX, timeout).
+    Other(AppError),
+}
+
+/// The user-facing explanation of a refused host key. Names both fingerprints
+/// so the user can compare them out of band. Pure.
+pub fn describe_mismatch(host: &str, port: u16, m: &HostKeyMismatch) -> String {
+    let presented = format!("{} {}", m.presented.algorithm, m.presented.fingerprint);
+    match (&m.source, &m.expected) {
+        (HostKeySource::Pinned, Some(pin)) => format!(
+            "host key changed for {host}:{port}: the server now presents {presented}, but \
+             {} {} is pinned. If the server was reinstalled, verify the new fingerprint with \
+             its administrator and trust it; otherwise someone may be intercepting the \
+             connection",
+            pin.algorithm, pin.fingerprint
+        ),
+        _ => format!(
+            "host key for {host}:{port} does not match your ~/.ssh/known_hosts: the server \
+             presents {presented}. Verify it with the server's administrator; if the server \
+             legitimately changed, trust the new key here (known_hosts is never modified)"
+        ),
     }
 }
 
@@ -133,22 +298,34 @@ pub fn build_config(cfg: &ForwardConfig) -> client::Config {
     }
 }
 
-/// SSH-connect with a 15s timeout (spec 03 §1 step 2). Returns the session
-/// handle; the caller authenticates next.
-pub async fn connect(cfg: &ForwardConfig) -> Result<Session, AppError> {
+/// SSH-connect with a 15s timeout (spec 03 §1 step 2), verifying the server's
+/// host key (§23). Returns the session handle and the key the server presented
+/// (for trust-on-first-use pinning); the caller authenticates next.
+pub async fn connect(cfg: &ForwardConfig) -> Result<(Session, HostKeyPin), ConnectError> {
     let config = Arc::new(build_config(cfg));
     let addr = (cfg.ssh_host.as_str(), cfg.ssh_port);
-    match timeout(
+    let verifier = HostKeyVerifier::new(cfg, default_known_hosts_path());
+    let outcome = verifier.outcome_slot();
+    let result = timeout(
         CONNECT_TIMEOUT,
-        client::connect(config, addr, ClientHandler),
+        client::connect(config, addr, ClientHandler { verifier }),
     )
-    .await
-    {
-        Ok(Ok(session)) => Ok(session),
-        Ok(Err(e)) => Err(AppError::Ssh(format!("connect failed: {e}"))),
-        Err(_) => Err(AppError::Connection(
+    .await;
+    let verdict = outcome.lock().ok().and_then(|g| g.clone());
+    match (result, verdict) {
+        (Ok(Ok(session)), Some(HostKeyOutcome::Accepted(presented))) => Ok((session, presented)),
+        (Ok(Ok(_)), _) => Err(ConnectError::Other(AppError::Ssh(
+            "connect succeeded without a host-key check".into(),
+        ))),
+        (_, Some(HostKeyOutcome::Refused(mismatch))) => {
+            Err(ConnectError::HostKey(Box::new(mismatch)))
+        }
+        (Ok(Err(e)), _) => Err(ConnectError::Other(AppError::Ssh(format!(
+            "connect failed: {e}"
+        )))),
+        (Err(_), _) => Err(ConnectError::Other(AppError::Connection(
             "SSH connect timed out after 15s".into(),
-        )),
+        ))),
     }
 }
 
@@ -271,6 +448,10 @@ mod tests {
     use super::*;
     use crate::state::models::ForwardConfig;
 
+    fn test_cfg() -> ForwardConfig {
+        cfg_with_keepalive(30, 5)
+    }
+
     fn cfg_with_keepalive(interval: u32, max: u32) -> ForwardConfig {
         ForwardConfig {
             id: "t".into(),
@@ -288,6 +469,7 @@ mod tests {
             keep_alive_max_count: max,
             group_id: None,
             tags: vec![],
+            host_key: None,
         }
     }
 
@@ -369,5 +551,119 @@ mod tests {
             !err.to_string().contains("really"),
             "errors carry no contents"
         );
+    }
+
+    // --- host-key policy (spec 03 §23) ---
+
+    fn pin(alg: &str, fp: &str) -> HostKeyPin {
+        HostKeyPin {
+            algorithm: alg.into(),
+            fingerprint: fp.into(),
+            pinned_at: None,
+        }
+    }
+
+    #[test]
+    fn a_pinned_key_must_match_exactly_and_overrides_known_hosts() {
+        let pinned = pin("ssh-ed25519", "SHA256:aaa");
+        assert!(matches!(
+            decide(
+                Some(&pinned),
+                pin("ssh-ed25519", "SHA256:aaa"),
+                KnownHostsVerdict::Changed
+            ),
+            HostKeyOutcome::Accepted(_)
+        ));
+        for other in [
+            pin("ssh-ed25519", "SHA256:bbb"),
+            pin("ecdsa-sha2-nistp256", "SHA256:aaa"),
+        ] {
+            match decide(Some(&pinned), other.clone(), KnownHostsVerdict::Match) {
+                HostKeyOutcome::Refused(m) => {
+                    assert_eq!(m.source, HostKeySource::Pinned);
+                    assert_eq!(m.expected.as_ref(), Some(&pinned));
+                    assert_eq!(m.presented, other);
+                }
+                accepted => panic!("{other:?} must be refused, got {accepted:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn without_a_pin_known_hosts_decides_then_first_use_is_trusted() {
+        let key = pin("ssh-ed25519", "SHA256:aaa");
+        assert!(matches!(
+            decide(None, key.clone(), KnownHostsVerdict::Unknown),
+            HostKeyOutcome::Accepted(_)
+        ));
+        assert!(matches!(
+            decide(None, key.clone(), KnownHostsVerdict::Match),
+            HostKeyOutcome::Accepted(_)
+        ));
+        match decide(None, key, KnownHostsVerdict::Changed) {
+            HostKeyOutcome::Refused(m) => {
+                assert_eq!(m.source, HostKeySource::KnownHosts);
+                assert!(m.expected.is_none());
+            }
+            accepted => panic!("a known_hosts conflict must refuse, got {accepted:?}"),
+        }
+    }
+
+    #[test]
+    fn known_hosts_file_is_consulted_read_only() {
+        use russh::keys::ssh_key::private::Ed25519Keypair;
+        let ours = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(&[1u8; 32]));
+        let other = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(&[2u8; 32]));
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("known_hosts");
+        let line = format!(
+            "[bastion.example.com]:2222 {}\n",
+            ours.public_key().to_openssh().expect("openssh")
+        );
+        std::fs::write(&path, &line).expect("write");
+        let mut cfg = test_cfg();
+        cfg.ssh_host = "bastion.example.com".into();
+        cfg.ssh_port = 2222;
+
+        let v = HostKeyVerifier::new(&cfg, Some(path.clone()));
+        assert!(v.check(ours.public_key()), "the recorded key is accepted");
+        assert!(!v.check(other.public_key()), "a different key is refused");
+        assert!(matches!(
+            v.outcome_slot().lock().expect("slot").clone(),
+            Some(HostKeyOutcome::Refused(HostKeyMismatch {
+                source: HostKeySource::KnownHosts,
+                ..
+            }))
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            line,
+            "never written"
+        );
+
+        // Another host is unknown → first use is trusted.
+        cfg.ssh_host = "elsewhere.example.com".into();
+        assert!(HostKeyVerifier::new(&cfg, Some(path)).check(other.public_key()));
+    }
+
+    #[test]
+    fn key_pin_uses_openssh_names_and_sha256() {
+        use russh::keys::ssh_key::private::Ed25519Keypair;
+        let key = russh::keys::PrivateKey::from(Ed25519Keypair::from_seed(&[3u8; 32]));
+        let p = key_pin(key.public_key());
+        assert_eq!(p.algorithm, "ssh-ed25519");
+        assert!(p.fingerprint.starts_with("SHA256:"), "{}", p.fingerprint);
+    }
+
+    #[test]
+    fn mismatch_message_names_both_fingerprints() {
+        let m = HostKeyMismatch {
+            expected: Some(pin("ssh-ed25519", "SHA256:old")),
+            presented: pin("ssh-ed25519", "SHA256:new"),
+            source: HostKeySource::Pinned,
+        };
+        let msg = describe_mismatch("bastion", 22, &m);
+        assert!(msg.contains("SHA256:old") && msg.contains("SHA256:new"));
+        assert!(msg.contains("intercepting"));
     }
 }

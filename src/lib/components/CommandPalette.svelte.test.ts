@@ -45,6 +45,7 @@ function mk(id: string, name: string): ForwardConfig {
     keepAliveMaxCount: 5,
     groupId: null,
     tags: [],
+    hostKey: null,
   };
 }
 

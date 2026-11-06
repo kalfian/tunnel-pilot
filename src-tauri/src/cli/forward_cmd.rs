@@ -37,6 +37,8 @@ pub fn run(invocation: &Invocation, path: &Path) -> i32 {
         Command::Remove { target } => simple(path, CliCommand::Remove, target),
         Command::SetPassword { target, source } => set_password(path, target, *source),
         Command::ClearPassword { target } => simple(path, CliCommand::PasswordClear, target),
+        Command::TrustHostKey { target } => simple(path, CliCommand::HostKeyTrust, target),
+        Command::ForgetHostKey { target } => simple(path, CliCommand::HostKeyForget, target),
         _ => Err(EXIT_INTERNAL),
     };
     match outcome {
@@ -351,6 +353,7 @@ mod tests {
                 status: ForwardStatus::Disconnected,
                 stats: TunnelStats::default(),
                 last_error: None,
+                host_key_mismatch: None,
             },
         );
         let res = CliResponse::ok(CliData::Saved {

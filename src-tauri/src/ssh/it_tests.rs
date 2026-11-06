@@ -171,22 +171,36 @@ struct StartOpts {
     reject_channels: bool,
     hang_session_channel: bool,
     fixed_port: Option<u16>,
+    /// Seed of the server's Ed25519 host key (default 7). A different seed is
+    /// "the same server reinstalled" (or an impostor) for host-key tests.
+    host_key_seed: Option<u8>,
 }
 
 /// Start the SSH server. `fixed_port` lets the retry test rebind the same port.
 async fn start_ssh_server(opts: StartOpts) -> TestSsh {
     // russh 0.62 host keys are `ssh_key::PrivateKey`. A deterministic seed keeps
     // the in-process test server reproducible (no RNG plumbing needed).
-    let host_key = russh::keys::PrivateKey::from(
-        russh::keys::ssh_key::private::Ed25519Keypair::from_seed(&[7u8; 32]),
-    );
+    let host_key =
+        russh::keys::PrivateKey::from(russh::keys::ssh_key::private::Ed25519Keypair::from_seed(
+            &[opts.host_key_seed.unwrap_or(7); 32],
+        ));
     let config = Arc::new(russh::server::Config {
         keys: vec![host_key],
         inactivity_timeout: Some(Duration::from_secs(3600)),
         ..Default::default()
     });
     let addr = format!("127.0.0.1:{}", opts.fixed_port.unwrap_or(0));
-    let listener = TcpListener::bind(&addr).await.expect("bind ssh");
+    // A fixed port may still be held for a moment by a server that was just
+    // killed (its accept loop exits asynchronously): retry briefly.
+    let mut listener = TcpListener::bind(&addr).await;
+    for _ in 0..100 {
+        if listener.is_ok() || opts.fixed_port.is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        listener = TcpListener::bind(&addr).await;
+    }
+    let listener = listener.expect("bind ssh");
     let port = listener.local_addr().unwrap().port();
     let reject = Arc::new(AtomicBool::new(opts.reject_channels));
     let hang = Arc::new(AtomicBool::new(opts.hang_session_channel));
@@ -326,6 +340,7 @@ fn base_config(id: &str, local_port: u16, ssh_port: u16, remote_port: u16) -> Fo
         keep_alive_max_count: 2,
         group_id: None,
         tags: vec![],
+        host_key: None,
     }
 }
 
@@ -1226,4 +1241,135 @@ async fn session_signal_recovers_without_any_wake_nudge() {
         .await
         .unwrap();
     ssh.kill().await;
+}
+
+/// Spec 03 §23 end to end: the first connection pins the server's host key; a
+/// server on the same address with a different key is refused, parked in
+/// `error` WITHOUT auto-reconnect, and exposes both fingerprints; trusting the
+/// presented key and retrying connects; editing the host clears the pin.
+#[tokio::test]
+async fn host_key_is_pinned_refused_when_changed_and_trustable() {
+    use crate::state::models::{ForwardStatus, HostKeySource};
+
+    let echo = start_echo_target().await;
+    let original = start_ssh_server(StartOpts::default()).await;
+    let ssh_port = original.port;
+    let local_port = free_port().await;
+
+    // Auto-reconnect ON: a refused host key must still NOT be retried.
+    let state = make_state(true, 5);
+    let cfg = base_config("hk", local_port, ssh_port, echo.port);
+    state.upsert_config(cfg);
+    state.set_password("hk", "pw".into());
+
+    // 1. First use: connects and pins.
+    engine::connect_forward(&state, "hk").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "hk",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+    let pinned = state
+        .get_config("hk")
+        .and_then(|c| c.host_key)
+        .expect("first connection pins the host key");
+    assert!(pinned.fingerprint.starts_with("SHA256:") && pinned.pinned_at.is_some());
+
+    // 2. While connected, the server is swapped for one with another key on the
+    //    same address. The SAME supervisor's automatic reconnect must refuse it
+    //    — the dangerous path, since the pin was set after this supervisor
+    //    started.
+    original.kill().await;
+    let impostor = start_ssh_server(StartOpts {
+        fixed_port: Some(ssh_port),
+        host_key_seed: Some(9),
+        ..StartOpts::default()
+    })
+    .await;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while state.registry.host_key_mismatch("hk").is_none() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        state.registry.current_status("hk"),
+        Some(ForwardStatus::Error)
+    );
+    let rt = state.registry.runtime("hk").expect("runtime");
+    let mismatch = rt
+        .host_key_mismatch
+        .clone()
+        .expect("mismatch exposed on the runtime");
+    assert_eq!(mismatch.source, HostKeySource::Pinned);
+    assert_eq!(mismatch.expected.as_ref(), Some(&pinned));
+    assert_ne!(mismatch.presented.fingerprint, pinned.fingerprint);
+    let err = rt.last_error.unwrap_or_default();
+    assert!(
+        err.contains("host key") && err.contains(&pinned.fingerprint),
+        "{err}"
+    );
+
+    // Parked: no automatic retry even though auto-reconnect is on (a retry
+    // would clear the mismatch when it re-entered `connecting`).
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        state.registry.current_status("hk"),
+        Some(ForwardStatus::Error)
+    );
+    assert!(
+        state.registry.host_key_mismatch("hk").is_some(),
+        "never retried on its own"
+    );
+    assert_eq!(
+        state.get_config("hk").and_then(|c| c.host_key).as_ref(),
+        Some(&pinned),
+        "a refused key never replaces the pin by itself"
+    );
+
+    // 3. Trust exactly the presented key, then retry → connected.
+    let trusted = crate::ops::forwards::trust_host_key(&state, "hk")
+        .await
+        .expect("trust");
+    assert_eq!(
+        trusted.host_key.as_ref().map(|p| p.fingerprint.as_str()),
+        Some(mismatch.presented.fingerprint.as_str())
+    );
+    engine::retry_forward(&state, "hk").await.unwrap();
+    assert!(
+        wait_status(
+            &state,
+            "hk",
+            ForwardStatus::Connected,
+            Duration::from_secs(10)
+        )
+        .await
+    );
+    assert!(state.registry.host_key_mismatch("hk").is_none());
+    engine::disconnect_forward(&state, "hk", true)
+        .await
+        .unwrap();
+
+    // Trusting with nothing pending is refused.
+    assert!(crate::ops::forwards::trust_host_key(&state, "hk")
+        .await
+        .is_err());
+
+    // 4. Pointing the forward at another host clears the pin.
+    let mut input = crate::ops::forwards::input_from_config(&state.get_config("hk").unwrap());
+    input.ssh_host = "localhost".into();
+    let edited = crate::ops::forwards::update(&state, "hk".into(), input)
+        .await
+        .unwrap();
+    assert!(edited.host_key.is_none(), "a new server is pinned afresh");
+
+    // 5. Forget is idempotent.
+    let forgotten = crate::ops::forwards::forget_host_key(&state, "hk")
+        .await
+        .unwrap();
+    assert!(forgotten.host_key.is_none());
+
+    impostor.kill().await;
 }

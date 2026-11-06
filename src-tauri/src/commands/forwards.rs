@@ -138,6 +138,27 @@ pub async fn clear_forward_password(
     ops::clear_password(state.inner(), &id).await
 }
 
+// --- Host keys (spec 03 §23) ---
+
+/// `trust_host_key` — accept the changed host key the server presented on the
+/// last refused connection (it becomes the pin). The caller retries afterwards.
+#[tauri::command]
+pub async fn trust_host_key(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<ForwardConfig, AppError> {
+    ops::trust_host_key(state.inner(), &id).await
+}
+
+/// `forget_host_key` — drop the pinned key; the next connection pins afresh.
+#[tauri::command]
+pub async fn forget_host_key(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<ForwardConfig, AppError> {
+    ops::forget_host_key(state.inner(), &id).await
+}
+
 // --- Global bulk (F3) — distinct from per-group start/stop (AGENTS §1) ---
 
 /// `start_all` command (spec 02 §6.1) — global bulk connect.

@@ -91,6 +91,14 @@ pub enum Command {
     ClearPassword {
         target: String,
     },
+    /// Trust the changed host key a forward's server last presented.
+    TrustHostKey {
+        target: String,
+    },
+    /// Forget a forward's pinned host key.
+    ForgetHostKey {
+        target: String,
+    },
     /// Run the headless engine + control socket in the foreground.
     Daemon(DaemonOptions),
     /// Manage the background service that runs `daemon` at login/boot.
@@ -199,6 +207,8 @@ pub fn is_cli_subcommand(word: &str) -> bool {
             | "rm"
             | "set-password"
             | "clear-password"
+            | "trust-host-key"
+            | "forget-host-key"
             | "daemon"
             | "service"
             | "web"
@@ -231,6 +241,11 @@ FORWARDS:
     set-password <id|name> [--password-stdin]
                                Store a password (prompted with echo off)
     clear-password <id|name>   Delete the stored password
+
+HOST KEYS (pinned on first connect; a changed key is refused):
+    trust-host-key <id|name>   Accept the changed key the server last presented
+                               (verify its fingerprint first — see 'status')
+    forget-host-key <id|name>  Drop the pinned key; the next connect pins afresh
 ";
 
 const HELP_SERVER: &str = "
@@ -648,6 +663,12 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
         }
         "clear-password" => Command::ClearPassword {
             target: one_target("clear-password", &positionals)?,
+        },
+        "trust-host-key" => Command::TrustHostKey {
+            target: one_target("trust-host-key", &positionals)?,
+        },
+        "forget-host-key" => Command::ForgetHostKey {
+            target: one_target("forget-host-key", &positionals)?,
         },
         "daemon" => {
             no_positionals("daemon", &positionals)?;
@@ -1216,6 +1237,8 @@ mod tests {
             "rm",
             "set-password",
             "clear-password",
+            "trust-host-key",
+            "forget-host-key",
             "daemon",
             "service",
             "web",

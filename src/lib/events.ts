@@ -18,6 +18,7 @@ import type {
   AppSettings,
   ForwardConfig,
   ForwardStatus,
+  HostKeyMismatch,
   LogEntry,
   TunnelGroup,
   TunnelStats,
@@ -45,6 +46,8 @@ export interface TunnelStatusEvent {
   id: string;
   status: ForwardStatus;
   lastError: string | null;
+  /** Set while parked on a refused host key (spec 03 §23). */
+  hostKeyMismatch: HostKeyMismatch | null;
 }
 
 export interface TunnelStatsEvent {

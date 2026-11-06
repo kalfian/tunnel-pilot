@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::ssh::stats::StatsInner;
-use crate::state::models::{ForwardRuntime, ForwardStatus, TunnelId, TunnelStats};
+use crate::state::models::{ForwardRuntime, ForwardStatus, HostKeyMismatch, TunnelId, TunnelStats};
 
 /// Whether `(from → to)` is an allowed status transition (spec 03 §1 table).
 ///
@@ -60,6 +60,8 @@ pub struct TunnelHandle {
     pub status: watch::Sender<ForwardStatus>,
     /// Last error message surfaced (for `ForwardRuntime.lastError`).
     pub last_error: Option<String>,
+    /// The refused host key, while parked on a mismatch (spec 03 §23).
+    pub host_key_mismatch: Option<HostKeyMismatch>,
     /// Pending-retry SOURCE OF TRUTH — guarded by the registry lock (F29).
     pub retry_requested: bool,
     /// WAKEUP ONLY (never the truth): `retry_forward` pokes it after setting the
@@ -83,6 +85,7 @@ impl TunnelHandle {
             status: *self.status.borrow(),
             stats: self.stats.snapshot(),
             last_error: self.last_error.clone(),
+            host_key_mismatch: self.host_key_mismatch.clone(),
         }
     }
 }
@@ -299,13 +302,33 @@ impl TunnelRegistry {
         }
         match new {
             ForwardStatus::Error => h.last_error = last_error,
-            ForwardStatus::Connected => h.last_error = None,
+            ForwardStatus::Connected => {
+                h.last_error = None;
+                h.host_key_mismatch = None;
+            }
+            // A fresh attempt starts clean; a repeat mismatch sets it again.
+            ForwardStatus::Connecting => h.host_key_mismatch = None,
             _ => {}
         }
         // send_replace updates the value regardless of whether any receiver is
         // alive (plain `send` would fail-and-not-update with zero receivers).
         h.status.send_replace(new);
         StatusOutcome { applied: true, new }
+    }
+
+    /// Record (or clear) the refused host key of a tunnel (spec 03 §23).
+    pub fn set_host_key_mismatch(&self, id: &str, mismatch: Option<HostKeyMismatch>) {
+        let mut g = self.lock();
+        if let Some(h) = g.get_mut(id) {
+            h.host_key_mismatch = mismatch;
+        }
+    }
+
+    /// The refused host key of a tunnel, if it is parked on one.
+    pub fn host_key_mismatch(&self, id: &str) -> Option<HostKeyMismatch> {
+        self.lock()
+            .get(id)
+            .and_then(|h| h.host_key_mismatch.clone())
     }
 
     /// Enter terminal `error` AND check-and-clear the retry flag in the SAME
@@ -402,6 +425,7 @@ pub(crate) fn fake_handle(id: &str, status: ForwardStatus) -> TunnelHandle {
         join: tokio::spawn(async {}),
         status: status_tx,
         last_error: None,
+        host_key_mismatch: None,
         retry_requested: false,
         retry_notify: Arc::new(Notify::new()),
         wake_notify: Arc::new(Notify::new()),

@@ -215,6 +215,7 @@ fn status_for(error: &AppError) -> StatusCode {
         AppError::NotFound(_) => StatusCode::NOT_FOUND,
         AppError::InvalidInput(_) => StatusCode::BAD_REQUEST,
         AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+        AppError::HostKeyMismatch(_) => StatusCode::CONFLICT,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

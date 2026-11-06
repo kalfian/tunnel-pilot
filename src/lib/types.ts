@@ -9,6 +9,31 @@
 
 // --- Forwards (spec 04 §1) ---
 
+/**
+ * A pinned SSH server host key (spec 03 §23). Public, not a secret: the key's
+ * algorithm and SHA-256 fingerprint as OpenSSH prints them.
+ */
+export interface HostKeyPin {
+  algorithm: string; // e.g. "ssh-ed25519"
+  fingerprint: string; // e.g. "SHA256:…"
+  /** When it was pinned (RFC3339); null for a key only seen, not pinned. */
+  pinnedAt: string | null;
+}
+
+/** What a refused key was checked against. */
+export type HostKeySource = "pinned" | "knownHosts";
+
+/**
+ * The server presented a key that does not match the expected one. Lives on
+ * the tunnel's runtime while it is parked in `error`; never auto-retried.
+ */
+export interface HostKeyMismatch {
+  /** The pin; null when the conflict came from `~/.ssh/known_hosts`. */
+  expected: HostKeyPin | null;
+  presented: HostKeyPin;
+  source: HostKeySource;
+}
+
 export interface ForwardConfig {
   id: string;
   name: string;
@@ -25,10 +50,18 @@ export interface ForwardConfig {
   keepAliveMaxCount: number;
   groupId: string | null;
   tags: string[];
+  /**
+   * Pinned on the first successful connection (trust on first use); cleared
+   * by the backend when the SSH host or port changes. Never sent by the UI.
+   */
+  hostKey: HostKeyPin | null;
 }
 
-/** Create/update payload — no `id`, no live state, no secret. */
-export type ForwardInput = Omit<ForwardConfig, "id" | "hasStoredPassword">;
+/** Create/update payload — no `id`, no live state, no secret, no pin. */
+export type ForwardInput = Omit<
+  ForwardConfig,
+  "id" | "hasStoredPassword" | "hostKey"
+>;
 
 // --- Groups & tags (spec 04 §2) ---
 
@@ -83,6 +116,8 @@ export interface ForwardRuntime {
   status: ForwardStatus;
   stats: TunnelStats;
   lastError: string | null;
+  /** Set while parked in `error` on a refused host key. */
+  hostKeyMismatch: HostKeyMismatch | null;
 }
 
 // --- Logs (spec 04 §6) ---
@@ -206,7 +241,8 @@ export type AppErrorKind =
   | "serialization"
   | "io"
   | "internal"
-  | "unauthorized";
+  | "unauthorized"
+  | "hostKeyMismatch";
 
 /** Every command rejects with this shape, over Tauri IPC and over HTTP alike. */
 export interface AppError {

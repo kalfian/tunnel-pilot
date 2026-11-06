@@ -1,35 +1,45 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import Dialog from "./ui/Dialog.svelte";
   import Button from "./ui/Button.svelte";
 
+  /**
+   * Confirm a consequential action (spec §9). The body is the caller's; this
+   * owns the footer so every confirm behaves the same: Cancel is the default
+   * focus (never auto-arm the risky action), Esc / scrim cancel, and the
+   * confirm button shows a spinner while the action runs.
+   */
   interface Props {
-    /** The tunnel being removed. */
-    name: string;
-    /** Warn that a live tunnel will be dropped. */
-    connected: boolean;
+    title: string;
+    /** Visible text of the confirm button. */
+    confirmLabel: string;
+    /** `danger` for destruction, `primary` for a deliberate, non-destructive commit. */
+    confirmVariant?: "danger" | "primary";
     busy?: boolean;
     onConfirm: () => void;
     onClose: () => void;
+    children: Snippet;
   }
 
-  const { name, connected, busy = false, onConfirm, onClose }: Props = $props();
+  const {
+    title,
+    confirmLabel,
+    confirmVariant = "danger",
+    busy = false,
+    onConfirm,
+    onClose,
+    children,
+  }: Props = $props();
 
   let cancelBtn: HTMLButtonElement | undefined = $state();
   $effect(() => {
-    // Default focus on the SAFE action (spec §9) — never auto-arm destruction.
+    // Default focus on the SAFE action (spec §9) — never auto-arm the risk.
     cancelBtn?.focus();
   });
 </script>
 
-<Dialog title="Delete tunnel?" size="sm" showClose={false} {onClose}>
-  <p class="body">
-    <strong>{name}</strong> will be permanently removed. This can't be undone.
-  </p>
-  {#if connected}
-    <p class="warn">
-      This tunnel is currently connected and will be disconnected.
-    </p>
-  {/if}
+<Dialog {title} size="sm" showClose={false} {onClose}>
+  <div class="confirm-body">{@render children()}</div>
 
   {#snippet footer()}
     <button
@@ -40,19 +50,31 @@
     >
       Cancel
     </button>
-    <Button variant="danger" loading={busy} onclick={onConfirm}>Delete</Button>
+    <Button variant={confirmVariant} loading={busy} onclick={onConfirm}>
+      {confirmLabel}
+    </Button>
   {/snippet}
 </Dialog>
 
 <style>
-  .body {
-    margin: 0 0 var(--sp-3);
+  .confirm-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding-bottom: var(--sp-1);
+  }
+  .confirm-body :global(p) {
+    margin: 0;
     font-size: var(--fs-body);
     line-height: var(--lh-body);
     color: var(--text);
   }
-  .warn {
-    margin: 0 0 var(--sp-2);
+  .confirm-body :global(p.muted) {
+    font-size: var(--fs-body-sm);
+    line-height: var(--lh-body-sm);
+    color: var(--text-2);
+  }
+  .confirm-body :global(p.warn) {
     font-size: var(--fs-body-sm);
     line-height: var(--lh-body-sm);
     color: var(--status-pending-fg);
@@ -73,5 +95,8 @@
   .btn-cancel:hover {
     background: var(--hover);
     border-color: var(--border-strong);
+  }
+  .btn-cancel:active {
+    background: var(--active);
   }
 </style>

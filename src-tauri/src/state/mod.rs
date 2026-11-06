@@ -25,8 +25,8 @@ use crate::error::AppError;
 use crate::events;
 use crate::state::log_buffer::LogBuffer;
 use crate::state::models::{
-    AppSettings, AppSnapshot, ForwardConfig, ForwardStatus, TunnelGroup, TunnelId, TunnelStats,
-    UpdateStatus,
+    AppSettings, AppSnapshot, ForwardConfig, ForwardStatus, HostKeyMismatch, TunnelGroup, TunnelId,
+    TunnelStats, UpdateStatus,
 };
 use crate::state::tunnel_registry::TunnelRegistry;
 use crate::storage::config_file::{ConfigDocument, ConfigStore};
@@ -38,6 +38,8 @@ pub struct StatusPayload {
     pub id: TunnelId,
     pub status: ForwardStatus,
     pub last_error: Option<String>,
+    /// Set while parked on a refused host key (spec 03 §23).
+    pub host_key_mismatch: Option<HostKeyMismatch>,
 }
 
 /// Payload for `tunnel://stats` (spec 02 §7, events.rs).
@@ -296,6 +298,7 @@ impl AppState {
                 id: id.to_string(),
                 status,
                 last_error,
+                host_key_mismatch: self.registry.host_key_mismatch(id),
             },
         );
     }
@@ -589,6 +592,7 @@ mod tests {
             keep_alive_max_count: 5,
             group_id: None,
             tags: vec![],
+            host_key: None,
         }
     }
 

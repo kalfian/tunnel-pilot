@@ -2,6 +2,7 @@
   import type {
     ForwardConfig,
     ForwardStatus,
+    HostKeyMismatch,
     TunnelGroup,
     TunnelStats,
   } from "../types";
@@ -25,6 +26,8 @@
     statusById: Record<string, ForwardStatus>;
     statsById: Record<string, TunnelStats>;
     lastErrorById: Record<string, string | null>;
+    /** Refused host key per id (spec 03 §23); absent/null = none. */
+    hostKeyMismatchById?: Record<string, HostKeyMismatch | null>;
     selectedId: string | null;
     /** In-view search query (empty = no search filter). */
     filterQuery: string;
@@ -34,6 +37,8 @@
     onEdit: (forward: ForwardConfig) => void;
     onDelete: (forward: ForwardConfig) => void;
     onViewLog: () => void;
+    /** A row asked to trust its changed host key (opens the view's confirm). */
+    onTrustHostKey?: (forward: ForwardConfig) => void;
     /** Rename/recolor a group (opens the group form). */
     onEditGroup: (group: TunnelGroup) => void;
     /** Delete a group (tunnels fall back to Ungrouped). */
@@ -46,6 +51,7 @@
     statusById,
     statsById,
     lastErrorById,
+    hostKeyMismatchById = {},
     selectedId,
     filterQuery,
     activeTag,
@@ -53,6 +59,7 @@
     onEdit,
     onDelete,
     onViewLog,
+    onTrustHostKey,
     onEditGroup,
     onDeleteGroup,
   }: Props = $props();
@@ -373,12 +380,14 @@
                 status={statusById[forward.id] ?? "disconnected"}
                 stats={statsById[forward.id] ?? EMPTY_STATS}
                 lastError={lastErrorById[forward.id] ?? null}
+                hostKeyMismatch={hostKeyMismatchById[forward.id] ?? null}
                 selected={selectedId === forward.id}
                 {reorderable}
                 onSelect={() => onSelect(forward.id)}
                 onEdit={() => onEdit(forward)}
                 onDelete={() => onDelete(forward)}
                 {onViewLog}
+                onTrustHostKey={() => onTrustHostKey?.(forward)}
                 onNav={(dir) => navFrom(forward.id, dir)}
                 onReorder={(dir) => keyboardReorder(forward.id, dir)}
               />

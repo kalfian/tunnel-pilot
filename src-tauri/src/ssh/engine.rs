@@ -128,6 +128,7 @@ pub async fn connect_forward(state: &Arc<AppState>, id: &str) -> Result<(), AppE
         join,
         status: status_tx,
         last_error: None,
+        host_key_mismatch: None,
         retry_requested: false,
         retry_notify,
         wake_notify,
@@ -242,7 +243,7 @@ async fn supervise(
     // Wait until the registry entry exists (go-gate).
     let _ = go_rx.await;
 
-    let cfg = match state.get_config(&id) {
+    let base_cfg = match state.get_config(&id) {
         Some(c) => Arc::new(c),
         None => {
             let out = state.registry.set_status(
@@ -285,6 +286,18 @@ async fn supervise(
         // Fresh per-attempt failure signal (counter + notify) — F27a/F30.
         let fail = ForwardFailSignal::new();
 
+        // The host-key pin changes while this supervisor lives (first-use pin,
+        // trust, forget), so every attempt — reconnects included — verifies
+        // against the CURRENT pin, never the one captured at spawn (spec 03 §23).
+        // Other fields cannot change underneath: an edit restarts the tunnel.
+        let cfg = Arc::new(ForwardConfig {
+            host_key: state
+                .get_config(&id)
+                .map(|c| c.host_key)
+                .unwrap_or_else(|| base_cfg.host_key.clone()),
+            ..(*base_cfg).clone()
+        });
+
         // ---- status → connecting ----
         let out = state
             .registry
@@ -321,6 +334,9 @@ async fn supervise(
                 // negotiation, bind, or auth) — otherwise only the later
                 // "disconnected" line is logged and the real cause is hidden.
                 tracing::warn!(tunnel = %id, error = %e, "connect attempt failed");
+                // A refused host key is never retried automatically: retrying
+                // cannot fix it and would hammer a possibly hostile server.
+                let fatal = matches!(e, AppError::HostKeyMismatch(_));
                 match handle_teardown(
                     TeardownCtx {
                         state: &state,
@@ -328,6 +344,7 @@ async fn supervise(
                         parent: &parent,
                         retry_notify: &retry_notify,
                         settings: &settings,
+                        fatal,
                     },
                     &mut reconnect_attempt,
                     e.to_string(),
@@ -409,6 +426,7 @@ async fn supervise(
                         parent: &parent,
                         retry_notify: &retry_notify,
                         settings: &settings,
+                        fatal: false,
                     },
                     &mut reconnect_attempt,
                     "connection lost".to_string(),
@@ -433,6 +451,7 @@ async fn supervise(
                         parent: &parent,
                         retry_notify: &retry_notify,
                         settings: &settings,
+                        fatal: false,
                     },
                     &mut reconnect_attempt,
                     "connection lost (wake probe)".to_string(),
@@ -459,8 +478,40 @@ async fn bind_connect_auth(
 ) -> Result<(TcpListener, Session), AppError> {
     let addr = format!("{}:{}", cfg.local_bind_address, cfg.local_port);
     let listener = bind_local(&addr).await?;
-    let mut session = client::connect(cfg).await?;
+    let (mut session, presented) = match client::connect(cfg).await {
+        Ok(pair) => pair,
+        Err(client::ConnectError::HostKey(mismatch)) => {
+            // Keep the refused key on the tunnel so the UI can show both
+            // fingerprints and offer "trust" (spec 03 §23).
+            let message = client::describe_mismatch(&cfg.ssh_host, cfg.ssh_port, &mismatch);
+            tracing::warn!(
+                tunnel = %cfg.id,
+                presented = %mismatch.presented.fingerprint,
+                "host key refused"
+            );
+            state
+                .registry
+                .set_host_key_mismatch(&cfg.id, Some(*mismatch));
+            return Err(AppError::HostKeyMismatch(message));
+        }
+        Err(client::ConnectError::Other(e)) => return Err(e),
+    };
     client::authenticate(&mut session, cfg, state).await?;
+    // Trust on first use: pin the key only after authentication succeeded, so a
+    // typo'd host that we could not even log into is never pinned.
+    if cfg.host_key.is_none() {
+        if let Err(e) = crate::ops::forwards::pin_host_key(
+            state,
+            &cfg.id,
+            &cfg.ssh_host,
+            cfg.ssh_port,
+            presented,
+        )
+        .await
+        {
+            tracing::warn!(tunnel = %cfg.id, error = %e, "could not persist the pinned host key");
+        }
+    }
     Ok((listener, session))
 }
 
@@ -680,6 +731,8 @@ struct TeardownCtx<'a> {
     parent: &'a CancellationToken,
     retry_notify: &'a Notify,
     settings: &'a crate::state::models::AppSettings,
+    /// Park in `error` regardless of auto-reconnect (e.g. a refused host key).
+    fatal: bool,
 }
 
 async fn handle_teardown(
@@ -694,6 +747,7 @@ async fn handle_teardown(
         parent,
         retry_notify,
         settings,
+        fatal,
     } = ctx;
 
     // A concurrent user disconnect already cancelled the parent → just exit; the
@@ -703,8 +757,9 @@ async fn handle_teardown(
         return Flow::Exit;
     }
 
-    let eligible =
-        settings.auto_reconnect && *reconnect_attempt < settings.auto_reconnect_max_retries;
+    let eligible = !fatal
+        && settings.auto_reconnect
+        && *reconnect_attempt < settings.auto_reconnect_max_retries;
 
     if eligible {
         // Transient error between attempts; status stays error only until the

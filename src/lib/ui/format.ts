@@ -45,3 +45,25 @@ export function formatRoute(
 ): string {
   return `${localBindAddress}:${localPort} → ${remoteHost}:${remotePort}`;
 }
+
+/** `host:port`, bracketing a bare IPv6 address (`[::1]:22`). */
+export function formatHostPort(host: string, port: number): string {
+  const h = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return `${h}:${port}`;
+}
+
+/**
+ * A pin's RFC3339 timestamp as a short local date + time ("6 Nov 2026, 14:03").
+ * Falls back to the raw string when it does not parse.
+ */
+export function formatPinnedAt(rfc3339: string): string {
+  const d = new Date(rfc3339);
+  if (Number.isNaN(d.getTime())) return rfc3339;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

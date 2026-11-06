@@ -67,6 +67,7 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<AppErrorKind>([
   "io",
   "internal",
   "unauthorized",
+  "hostKeyMismatch",
 ]);
 
 /**

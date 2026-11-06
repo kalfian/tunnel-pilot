@@ -119,6 +119,8 @@ pub fn run() {
             crate::commands::forwards::copy_ssh_command,
             crate::commands::forwards::set_forward_password,
             crate::commands::forwards::clear_forward_password,
+            crate::commands::forwards::trust_host_key,
+            crate::commands::forwards::forget_host_key,
             // Groups & tags (§6.2)
             crate::commands::groups::list_groups,
             crate::commands::groups::create_group,

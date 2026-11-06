@@ -77,6 +77,18 @@ export const setForwardPassword = (
 export const clearForwardPassword = (id: string): Promise<void> =>
   invoke("clear_forward_password", { id });
 
+/**
+ * Pin exactly the key the server presented on its last refusal (spec 03 §23).
+ * Rejects with `notFound` when nothing is pending. Does not reconnect — call
+ * {@link retryForward} afterwards.
+ */
+export const trustHostKey = (id: string): Promise<ForwardConfig> =>
+  invoke("trust_host_key", { id });
+
+/** Drop the pinned host key; the next connection pins afresh. */
+export const forgetHostKey = (id: string): Promise<ForwardConfig> =>
+  invoke("forget_host_key", { id });
+
 // --- Groups & tags (spec 02 §6.2) ---
 
 export const listGroups = (): Promise<TunnelGroup[]> => invoke("list_groups");

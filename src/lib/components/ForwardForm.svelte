@@ -1,7 +1,7 @@
 <script lang="ts">
   import { pickIdentityFile } from "../platform";
   import { isWeb } from "../runtime";
-  import type { ForwardConfig, ForwardInput } from "../types";
+  import type { ForwardConfig, ForwardInput, HostKeyPin } from "../types";
   import {
     validateForwardForm,
     isFormValid,
@@ -13,17 +13,21 @@
     updateForward,
     setForwardPassword,
     clearForwardPassword,
+    forgetHostKey,
   } from "../ipc";
   import { keychainUnavailable } from "../stores/settings";
   import { groups } from "../stores/groups";
   import { forwards } from "../stores/forwards";
   import { pushToast } from "../ui/toast";
+  import { formatPinnedAt } from "../ui/format";
   import Dialog from "./ui/Dialog.svelte";
   import Button from "./ui/Button.svelte";
   import Input from "./ui/Input.svelte";
   import Select from "./ui/Select.svelte";
   import SegmentedControl from "./ui/SegmentedControl.svelte";
   import TagPill from "./ui/TagPill.svelte";
+  import HostKeyFingerprint from "./HostKeyFingerprint.svelte";
+  import { tick } from "svelte";
 
   interface Props {
     mode: "add" | "edit";
@@ -67,6 +71,78 @@
   let tagDraft = $state("");
 
   const hadStoredPassword = c?.hasStoredPassword ?? false;
+
+  // --- Host key pin (edit mode only, read-only; spec 03 §23) ---
+  // The store follows `forwards://changed`, so a pin that lands (first
+  // connection) or goes (forget) while the form is open shows up live. The
+  // override covers the gap between `forget_host_key` resolving and that
+  // event; it stops applying as soon as the store's copy changes.
+  const liveForward = $derived(
+    c ? $forwards.find((f) => f.id === c.id) : undefined,
+  );
+  // Raw: a deep $state would proxy `base`, and the identity check below
+  // would never match the store's object again.
+  let pinOverride = $state.raw<{
+    pin: HostKeyPin | null;
+    base: ForwardConfig | undefined;
+  } | null>(null);
+  const pin = $derived.by((): HostKeyPin | null => {
+    if (pinOverride && pinOverride.base === liveForward) return pinOverride.pin;
+    // A `null` pin in the store is an answer ("not pinned"), not a miss: only
+    // fall back to the mount-time copy when the store has no such forward.
+    if (liveForward) return liveForward.hostKey ?? null;
+    return c?.hostKey ?? null;
+  });
+  let confirmForget = $state(false);
+  let forgetting = $state(false);
+  let hkSection: HTMLDivElement | undefined = $state();
+  let forgetBtnWrap: HTMLSpanElement | undefined = $state();
+  let keepKeyBtn: HTMLButtonElement | undefined = $state();
+  // Editing host/port means the backend drops the pin on save.
+  const serverChanged = $derived(
+    !!c &&
+      (sshHost.trim() !== c.sshHost || sshPort.trim() !== String(c.sshPort)),
+  );
+
+  async function openForget(): Promise<void> {
+    confirmForget = true;
+    await tick();
+    keepKeyBtn?.focus(); // safe default, like every confirm (spec §9)
+  }
+
+  async function cancelForget(): Promise<void> {
+    confirmForget = false;
+    await tick();
+    forgetBtnWrap?.querySelector("button")?.focus();
+  }
+
+  async function forget(): Promise<void> {
+    if (!c || forgetting) return;
+    forgetting = true;
+    try {
+      const updated = await forgetHostKey(c.id);
+      pinOverride = { pin: updated.hostKey ?? null, base: liveForward };
+      confirmForget = false;
+      pushToast("Host key forgotten", { tone: "success" });
+      await tick();
+      hkSection?.focus(); // the button that had focus is gone
+    } catch (err) {
+      pushToast(`Couldn't forget the host key: ${String(err)}`, {
+        tone: "error",
+      });
+    } finally {
+      forgetting = false;
+    }
+  }
+
+  function onForgetKeydown(e: KeyboardEvent): void {
+    // Esc backs out of the inline confirm only — not the whole form.
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      void cancelForget();
+    }
+  }
 
   const groupOptions = $derived([
     { value: "", label: "Ungrouped" },
@@ -387,6 +463,88 @@
         </div>
       </div>
 
+      {#if mode === "edit" && c}
+        <p class="overline group-head" id="f-hostkey-head">Host key</p>
+        <div
+          class="row hostkey"
+          role="group"
+          aria-labelledby="f-hostkey-head"
+          tabindex="-1"
+          bind:this={hkSection}
+        >
+          {#if pin}
+            <dl class="hk-dl">
+              <HostKeyFingerprint
+                label="Fingerprint"
+                {pin}
+                copyLabel="Copy the pinned fingerprint for {c.name}"
+              />
+            </dl>
+            {#if confirmForget}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="hk-confirm" onkeydown={onForgetKeydown}>
+                <p class="hk-confirm-text" id="f-forget-q">
+                  Forget this key? The next connection pins whatever key the
+                  server presents, so only do this when you know the server's
+                  key changed.
+                </p>
+                <div class="hk-confirm-actions">
+                  <button
+                    bind:this={keepKeyBtn}
+                    type="button"
+                    class="btn-quiet"
+                    onclick={() => void cancelForget()}
+                  >
+                    Keep key
+                  </button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    loading={forgetting}
+                    ariaLabel="Forget host key for {c.name}"
+                    onclick={() => void forget()}
+                  >
+                    Forget key
+                  </Button>
+                </div>
+              </div>
+            {:else}
+              <div class="hk-meta">
+                <span class="hint">
+                  {#if pin.pinnedAt}
+                    Pinned on <time datetime={pin.pinnedAt}
+                      >{formatPinnedAt(pin.pinnedAt)}</time
+                    >
+                  {:else}
+                    Pinned
+                  {/if}
+                </span>
+                <span bind:this={forgetBtnWrap}>
+                  <Button
+                    size="sm"
+                    ariaLabel="Forget pinned host key for {c.name}"
+                    onclick={() => void openForget()}
+                  >
+                    Forget…
+                  </Button>
+                </span>
+              </div>
+            {/if}
+          {:else}
+            <p class="hint hk-empty">
+              Not pinned yet — pinned on the first successful connection.
+            </p>
+          {/if}
+          {#if pin && serverChanged}
+            <p class="hint warn">
+              You changed the host or port, so saving clears this pin.
+            </p>
+          {:else}
+            <p class="hint">Changing the SSH host or port clears the pin.</p>
+          {/if}
+        </div>
+      {/if}
+
       <p class="overline group-head">Authentication</p>
       <SegmentedControl
         value={authMode}
@@ -696,6 +854,68 @@
   }
   .hint.warn {
     color: var(--status-pending-fg);
+  }
+  .hostkey:focus {
+    outline: none;
+  }
+  .hostkey:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  .hk-dl {
+    margin: 0;
+  }
+  .hk-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+  }
+  .hk-empty {
+    color: var(--text);
+  }
+  .hk-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    border: var(--border-w) solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+  }
+  .hk-confirm-text {
+    margin: 0;
+    font-size: var(--fs-body-sm);
+    line-height: var(--lh-body-sm);
+    color: var(--text);
+  }
+  .hk-confirm-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+  }
+  /* Secondary-sm look for the safe choice, kept as a raw button so it can
+     take initial focus (Button does not forward a ref). */
+  .btn-quiet {
+    height: var(--btn-h-sm);
+    padding: 0 var(--sp-3);
+    border-radius: var(--radius-sm);
+    border: var(--border-w) solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: var(--fs-body-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color var(--dur-fast) var(--ease-standard);
+  }
+  .btn-quiet:hover {
+    background: var(--hover);
+    border-color: var(--border-strong);
+  }
+  .btn-quiet:active {
+    background: var(--active);
   }
   .discard-note {
     margin-right: auto;

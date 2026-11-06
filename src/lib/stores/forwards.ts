@@ -6,7 +6,7 @@
  *
  * Reconciled from:
  *   - `forwards://changed`  → {@link applyForwards} (full list re-set)
- *   - `tunnel://status`     → {@link applyStatus}
+ *   - `tunnel://status`     → {@link applyStatus} (status, error, host-key mismatch)
  *   - `tunnel://stats`      → {@link applyStats}
  *   - `app_hydrate` snapshot runtimes → {@link applyRuntimes}
  */
@@ -16,6 +16,7 @@ import type {
   ForwardConfig,
   ForwardRuntime,
   ForwardStatus,
+  HostKeyMismatch,
   TunnelStats,
 } from "../types";
 import type { TunnelStatsEvent, TunnelStatusEvent } from "../events";
@@ -31,6 +32,14 @@ export const statsById = writable<Record<string, TunnelStats>>({});
 
 /** Last error message per forward id (null when none). */
 export const lastErrorById = writable<Record<string, string | null>>({});
+
+/**
+ * Refused host key per forward id (null when none). Set while a tunnel is
+ * parked in `error` because the server's key changed (spec 03 §23).
+ */
+export const hostKeyMismatchById = writable<
+  Record<string, HostKeyMismatch | null>
+>({});
 
 /** Neutral stats used to seed a forward that has no live runtime yet. */
 export const EMPTY_STATS: TunnelStats = {
@@ -55,12 +64,28 @@ export function applyForwards(list: ForwardConfig[]): void {
   statusById.update((prev) => reconcile(ids, prev, "disconnected"));
   statsById.update((prev) => reconcile(ids, prev, EMPTY_STATS));
   lastErrorById.update((prev) => reconcile(ids, prev, null));
+  hostKeyMismatchById.update((prev) => reconcile(ids, prev, null));
 }
 
 /** Apply a `tunnel://status` transition to a single tunnel. */
 export function applyStatus(e: TunnelStatusEvent): void {
   statusById.update((m) => ({ ...m, [e.id]: e.status }));
   lastErrorById.update((m) => ({ ...m, [e.id]: e.lastError }));
+  // `?? null` tolerates an older backend that does not send the field.
+  hostKeyMismatchById.update((m) => ({
+    ...m,
+    [e.id]: e.hostKeyMismatch ?? null,
+  }));
+}
+
+/**
+ * Mirror a successful `trust_host_key`: the backend clears the pending
+ * mismatch but emits no status event for it, so drop it here too. The
+ * reconnect that follows reports its own status (and re-sets a mismatch if
+ * the key is refused again).
+ */
+export function clearHostKeyMismatch(id: string): void {
+  hostKeyMismatchById.update((m) => (id in m ? { ...m, [id]: null } : m));
 }
 
 /** Apply a `tunnel://stats` update to a single tunnel. */
@@ -77,14 +102,17 @@ export function applyRuntimes(runtimes: [string, ForwardRuntime][]): void {
   const status: Record<string, ForwardStatus> = {};
   const stats: Record<string, TunnelStats> = {};
   const errors: Record<string, string | null> = {};
+  const mismatches: Record<string, HostKeyMismatch | null> = {};
   for (const [id, rt] of runtimes) {
     status[id] = rt.status;
     stats[id] = rt.stats;
     errors[id] = rt.lastError;
+    mismatches[id] = rt.hostKeyMismatch ?? null;
   }
   statusById.update((m) => ({ ...m, ...status }));
   statsById.update((m) => ({ ...m, ...stats }));
   lastErrorById.update((m) => ({ ...m, ...errors }));
+  hostKeyMismatchById.update((m) => ({ ...m, ...mismatches }));
 }
 
 /** Number of tunnels currently `connected` — feeds the tray/UI count. */

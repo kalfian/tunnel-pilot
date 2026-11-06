@@ -52,6 +52,7 @@ function mk(
     keepAliveMaxCount: 5,
     groupId,
     tags: [],
+    hostKey: null,
   };
 }
 

@@ -5,6 +5,7 @@
     statusById,
     statsById,
     lastErrorById,
+    hostKeyMismatchById,
     connectedCount,
   } from "../stores/forwards";
   import { settings } from "../stores/settings";
@@ -25,6 +26,7 @@
   import TagFilterBar from "../components/TagFilterBar.svelte";
   import ForwardForm from "../components/ForwardForm.svelte";
   import ConfirmDialog from "../components/ConfirmDialog.svelte";
+  import TrustHostKeyDialog from "../components/TrustHostKeyDialog.svelte";
   import GroupFormDialog from "../components/GroupFormDialog.svelte";
   import Dialog from "../components/ui/Dialog.svelte";
   import Button from "../components/ui/Button.svelte";
@@ -32,6 +34,7 @@
   import Menu, { type MenuItem } from "../components/ui/Menu.svelte";
   import EmptyState from "../components/ui/EmptyState.svelte";
   import Skeleton from "../components/ui/Skeleton.svelte";
+  import { tick } from "svelte";
 
   let selectedId = $state<string | null>(null);
   let filter = $state("");
@@ -41,6 +44,33 @@
   );
   let confirmTarget = $state<ForwardConfig | null>(null);
   let deleting = $state(false);
+  // "Trust new key…" (spec 03 §23): the id whose changed host key is being
+  // reviewed. The dialog always renders the LIVE refusal from the store, so it
+  // can never show one key and pin another.
+  let trustId = $state<string | null>(null);
+  const trustForward = $derived(
+    trustId ? ($forwards.find((f) => f.id === trustId) ?? null) : null,
+  );
+  const trustMismatch = $derived(
+    trustId && $statusById[trustId] === "error"
+      ? ($hostKeyMismatchById[trustId] ?? null)
+      : null,
+  );
+  // The refusal went away underneath the dialog (tunnel removed, stopped or
+  // reconnected elsewhere, e.g. from the CLI): close rather than linger.
+  $effect(() => {
+    if (trustId && (!trustForward || !trustMismatch)) trustId = null;
+  });
+
+  /** Put focus back on a row once its host-key panel (and button) is gone. */
+  async function focusRow(id: string): Promise<void> {
+    await tick();
+    document
+      .querySelector<HTMLElement>(
+        `[data-testid="row-body"][data-row-id="${CSS.escape(id)}"]`,
+      )
+      ?.focus();
+  }
   let overflowOpen = $state(false);
   // Group management (Feature A): create/rename dialog + delete confirm.
   let groupForm = $state<{ mode: "add" | "edit"; group?: TunnelGroup } | null>(
@@ -378,6 +408,7 @@
           statusById={$statusById}
           statsById={$statsById}
           lastErrorById={$lastErrorById}
+          hostKeyMismatchById={$hostKeyMismatchById}
           {selectedId}
           filterQuery={filter}
           activeTag={$activeTag}
@@ -385,6 +416,7 @@
           onEdit={(f) => (form = { mode: "edit", forward: f })}
           onDelete={(f) => (confirmTarget = f)}
           onViewLog={() => activeView.set("activity")}
+          onTrustHostKey={(f) => (trustId = f.id)}
           onEditGroup={(g) => (groupForm = { mode: "edit", group: g })}
           onDeleteGroup={(g) => (groupDeleteTarget = g)}
         />
@@ -403,12 +435,33 @@
 
 {#if confirmTarget}
   <ConfirmDialog
-    name={confirmTarget.name}
-    connected={($statusById[confirmTarget.id] ?? "disconnected") ===
-      "connected"}
+    title="Delete tunnel?"
+    confirmLabel="Delete"
     busy={deleting}
     onConfirm={() => void confirmDelete()}
     onClose={() => (confirmTarget = null)}
+  >
+    <p>
+      <strong>{confirmTarget.name}</strong> will be permanently removed. This can't
+      be undone.
+    </p>
+    {#if ($statusById[confirmTarget.id] ?? "disconnected") === "connected"}
+      <p class="warn">
+        This tunnel is currently connected and will be disconnected.
+      </p>
+    {/if}
+  </ConfirmDialog>
+{/if}
+
+{#if trustForward && trustMismatch}
+  <TrustHostKeyDialog
+    forward={trustForward}
+    mismatch={trustMismatch}
+    onClose={() => (trustId = null)}
+    onTrusted={(id) => {
+      trustId = null;
+      void focusRow(id);
+    }}
   />
 {/if}
 

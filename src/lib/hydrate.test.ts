@@ -34,12 +34,17 @@ vi.mock("./events", () => {
 
 import { appHydrate } from "./ipc";
 import { hydrateAll, startSync, subscribeEvents } from "./hydrate";
-import { forwards, statusById, statsById } from "./stores/forwards";
+import {
+  forwards,
+  hostKeyMismatchById,
+  statusById,
+  statsById,
+} from "./stores/forwards";
 import { groups } from "./stores/groups";
 import { logs } from "./stores/logs";
 import { keychainUnavailable, settings } from "./stores/settings";
 import { updateProgress, updateStatus } from "./stores/updater";
-import type { AppSnapshot, AppSettings } from "./types";
+import type { AppSnapshot, AppSettings, HostKeyMismatch } from "./types";
 
 const SETTINGS: AppSettings = {
   launchAtLogin: false,
@@ -73,6 +78,7 @@ const SNAPSHOT: AppSnapshot = {
       keepAliveMaxCount: 0,
       groupId: null,
       tags: [],
+      hostKey: null,
     },
   ],
   groups: [{ id: "g1", name: "prod", color: null, order: 0, collapsed: false }],
@@ -93,6 +99,7 @@ const SNAPSHOT: AppSnapshot = {
           connectedSince: "2026-07-25T00:00:00Z",
         },
         lastError: null,
+        hostKeyMismatch: null,
       },
     ],
   ],
@@ -135,6 +142,46 @@ describe("hydrateAll", () => {
 });
 
 describe("subscribeEvents", () => {
+  it("carries a refused host key from tunnel://status into the store, and clears it", async () => {
+    vi.mocked(appHydrate).mockResolvedValue(SNAPSHOT);
+    await subscribeEvents();
+    handlers.onForwardsChanged({ payload: SNAPSHOT.forwards });
+
+    const mismatch: HostKeyMismatch = {
+      expected: {
+        algorithm: "ssh-ed25519",
+        fingerprint: "SHA256:old",
+        pinnedAt: "2026-10-01T09:00:00Z",
+      },
+      presented: {
+        algorithm: "ssh-ed25519",
+        fingerprint: "SHA256:new",
+        pinnedAt: null,
+      },
+      source: "pinned",
+    };
+    handlers.onTunnelStatus({
+      payload: {
+        id: "a",
+        status: "error",
+        lastError: "host key changed for bastion:22 …",
+        hostKeyMismatch: mismatch,
+      },
+    });
+    expect(get(hostKeyMismatchById).a).toEqual(mismatch);
+
+    // A new attempt starts clean.
+    handlers.onTunnelStatus({
+      payload: {
+        id: "a",
+        status: "connecting",
+        lastError: null,
+        hostKeyMismatch: null,
+      },
+    });
+    expect(get(hostKeyMismatchById).a).toBeNull();
+  });
+
   it("wires every event to its store reconcile function", async () => {
     vi.mocked(appHydrate).mockResolvedValue(SNAPSHOT);
     await subscribeEvents();
@@ -143,7 +190,12 @@ describe("subscribeEvents", () => {
     expect(get(forwards)).toHaveLength(1);
 
     handlers.onTunnelStatus({
-      payload: { id: "a", status: "error", lastError: "boom" },
+      payload: {
+        id: "a",
+        status: "error",
+        lastError: "boom",
+        hostKeyMismatch: null,
+      },
     });
     expect(get(statusById).a).toBe("error");
 

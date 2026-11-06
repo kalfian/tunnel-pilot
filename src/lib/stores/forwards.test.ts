@@ -7,13 +7,15 @@ import {
   applyRuntimes,
   applyStats,
   applyStatus,
+  clearHostKeyMismatch,
   connectedCount,
   forwards,
+  hostKeyMismatchById,
   lastErrorById,
   statsById,
   statusById,
 } from "./forwards";
-import type { ForwardConfig, TunnelStats } from "../types";
+import type { ForwardConfig, HostKeyMismatch, TunnelStats } from "../types";
 
 function makeForward(id: string, name = id): ForwardConfig {
   return {
@@ -32,6 +34,7 @@ function makeForward(id: string, name = id): ForwardConfig {
     keepAliveMaxCount: 0,
     groupId: null,
     tags: [],
+    hostKey: null,
   };
 }
 
@@ -45,7 +48,18 @@ beforeEach(() => {
   statusById.set({});
   statsById.set({});
   lastErrorById.set({});
+  hostKeyMismatchById.set({});
 });
+
+const MISMATCH: HostKeyMismatch = {
+  expected: null,
+  presented: {
+    algorithm: "ssh-ed25519",
+    fingerprint: "SHA256:presented",
+    pinnedAt: null,
+  },
+  source: "knownHosts",
+};
 
 describe("applyForwards", () => {
   it("seeds neutral defaults for every id", () => {
@@ -57,7 +71,12 @@ describe("applyForwards", () => {
 
   it("preserves live status for surviving ids on re-set (reorder/rename)", () => {
     applyForwards([makeForward("a"), makeForward("b")]);
-    applyStatus({ id: "a", status: "connected", lastError: null });
+    applyStatus({
+      id: "a",
+      status: "connected",
+      lastError: null,
+      hostKeyMismatch: null,
+    });
 
     // Reorder: same ids, different order — must not clobber a's status.
     applyForwards([makeForward("b"), makeForward("a")]);
@@ -79,7 +98,12 @@ describe("applyForwards", () => {
 describe("applyStatus", () => {
   it("updates only the targeted tunnel and its error", () => {
     applyForwards([makeForward("a"), makeForward("b")]);
-    applyStatus({ id: "b", status: "error", lastError: "connection refused" });
+    applyStatus({
+      id: "b",
+      status: "error",
+      lastError: "connection refused",
+      hostKeyMismatch: null,
+    });
 
     expect(get(statusById)).toEqual({ a: "disconnected", b: "error" });
     expect(get(lastErrorById).b).toBe("connection refused");
@@ -107,6 +131,7 @@ describe("applyRuntimes", () => {
           status: "connected",
           stats: statsWith(99),
           lastError: null,
+          hostKeyMismatch: null,
         },
       ],
     ]);
@@ -122,11 +147,81 @@ describe("connectedCount", () => {
     applyForwards([makeForward("a"), makeForward("b"), makeForward("c")]);
     expect(get(connectedCount)).toBe(0);
 
-    applyStatus({ id: "a", status: "connected", lastError: null });
-    applyStatus({ id: "b", status: "connecting", lastError: null });
+    applyStatus({
+      id: "a",
+      status: "connected",
+      lastError: null,
+      hostKeyMismatch: null,
+    });
+    applyStatus({
+      id: "b",
+      status: "connecting",
+      lastError: null,
+      hostKeyMismatch: null,
+    });
     expect(get(connectedCount)).toBe(1);
 
-    applyStatus({ id: "b", status: "connected", lastError: null });
+    applyStatus({
+      id: "b",
+      status: "connected",
+      lastError: null,
+      hostKeyMismatch: null,
+    });
     expect(get(connectedCount)).toBe(2);
+  });
+});
+
+describe("host key mismatch", () => {
+  it("is seeded null, set by a status event, and pruned with its forward", () => {
+    applyForwards([makeForward("a"), makeForward("b")]);
+    expect(get(hostKeyMismatchById)).toEqual({ a: null, b: null });
+
+    applyStatus({
+      id: "a",
+      status: "error",
+      lastError: "host key for bastion:22 does not match …",
+      hostKeyMismatch: MISMATCH,
+    });
+    expect(get(hostKeyMismatchById)).toEqual({ a: MISMATCH, b: null });
+
+    applyForwards([makeForward("b")]);
+    expect(get(hostKeyMismatchById)).toEqual({ b: null });
+  });
+
+  it("tolerates a status payload without the field (older backend)", () => {
+    applyForwards([makeForward("a")]);
+    applyStatus({
+      id: "a",
+      status: "error",
+      lastError: "boom",
+    } as unknown as Parameters<typeof applyStatus>[0]);
+    expect(get(hostKeyMismatchById).a).toBeNull();
+  });
+
+  it("comes from hydrate runtimes and survives a forwards re-set", () => {
+    applyForwards([makeForward("a")]);
+    applyRuntimes([
+      [
+        "a",
+        {
+          status: "error",
+          stats: EMPTY_STATS,
+          lastError: "host key changed",
+          hostKeyMismatch: MISMATCH,
+        },
+      ],
+    ]);
+    applyForwards([makeForward("a", "renamed")]);
+    expect(get(hostKeyMismatchById).a).toEqual(MISMATCH);
+  });
+
+  it("clearHostKeyMismatch drops only that tunnel's refusal", () => {
+    applyForwards([makeForward("a"), makeForward("b")]);
+    hostKeyMismatchById.set({ a: MISMATCH, b: MISMATCH });
+    clearHostKeyMismatch("a");
+    expect(get(hostKeyMismatchById)).toEqual({ a: null, b: MISMATCH });
+    // Unknown ids are a no-op, not a new entry.
+    clearHostKeyMismatch("zzz");
+    expect(get(hostKeyMismatchById)).not.toHaveProperty("zzz");
   });
 });

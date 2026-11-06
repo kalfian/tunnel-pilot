@@ -110,6 +110,7 @@ mod tests {
             wake_notify: Arc::new(Notify::new()),
             stats_cell: stats_rx,
             stats: Arc::new(StatsInner::default()),
+            host_key_mismatch: None,
         }
     }
 

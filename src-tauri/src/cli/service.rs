@@ -92,6 +92,16 @@ async fn dispatch(state: &Arc<AppState>, req: CliRequest) -> Result<CliData, App
         CliCommand::PasswordClear => {
             password_flag(state, &require_target(req.target)?, false).await
         }
+        CliCommand::HostKeyTrust => {
+            let cfg = resolve_target(state, &require_target(req.target)?)?;
+            let cfg = ops::trust_host_key(state, &cfg.id).await?;
+            Ok(saved(state, &cfg, SaveChange::HostKeyTrusted))
+        }
+        CliCommand::HostKeyForget => {
+            let cfg = resolve_target(state, &require_target(req.target)?)?;
+            let cfg = ops::forget_host_key(state, &cfg.id).await?;
+            Ok(saved(state, &cfg, SaveChange::HostKeyForgotten))
+        }
     }
 }
 

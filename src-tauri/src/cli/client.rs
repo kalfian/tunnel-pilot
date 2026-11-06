@@ -136,6 +136,8 @@ pub fn run(args: &[String]) -> i32 {
             | Command::Remove { .. }
             | Command::SetPassword { .. }
             | Command::ClearPassword { .. }
+            | Command::TrustHostKey { .. }
+            | Command::ForgetHostKey { .. }
     ) {
         return crate::cli::forward_cmd::run(&invocation, &path);
     }
@@ -202,7 +204,9 @@ fn build_request(command: &Command) -> CliRequest {
         | Command::Edit { .. }
         | Command::Remove { .. }
         | Command::SetPassword { .. }
-        | Command::ClearPassword { .. } => CliRequest::new(CliCommand::Version),
+        | Command::ClearPassword { .. }
+        | Command::TrustHostKey { .. }
+        | Command::ForgetHostKey { .. } => CliRequest::new(CliCommand::Version),
         Command::List => CliRequest::new(CliCommand::List),
         Command::Version => CliRequest::new(CliCommand::Version),
         Command::Status { target } => CliRequest {
@@ -393,6 +397,8 @@ pub fn render_saved(forward: &ForwardView, change: SaveChange) -> String {
         SaveChange::Removed => "removed",
         SaveChange::PasswordSet => "password stored for",
         SaveChange::PasswordCleared => "password cleared for",
+        SaveChange::HostKeyTrusted => "host key trusted for",
+        SaveChange::HostKeyForgotten => "host key forgotten for",
     };
     let auth = match forward.identity_file_path.as_deref() {
         Some(key) if !key.is_empty() => format!("key {key}"),
@@ -538,8 +544,27 @@ pub fn render_status(forward: &ForwardView, stats: &TunnelStats) -> String {
     if let Some(since) = &stats.connected_since {
         field("since", since.clone());
     }
+    match &forward.host_key {
+        Some(pin) => field("host key", format!("{} {}", pin.algorithm, pin.fingerprint)),
+        None => field(
+            "host key",
+            "not pinned yet (pinned on the next connection)".into(),
+        ),
+    }
     if let Some(error) = &forward.last_error {
         field("error", error.clone());
+    }
+    if let Some(m) = &forward.host_key_mismatch {
+        field(
+            "presented",
+            format!("{} {}", m.presented.algorithm, m.presented.fingerprint),
+        );
+        out.push_str(&format!(
+            "\nThe server's host key CHANGED. Confirm the presented fingerprint with the \
+             server's administrator; only if it is genuine, run:\n  {} trust-host-key {}\n",
+            crate::cli::PROGRAM,
+            forward.id
+        ));
     }
     out
 }
@@ -660,7 +685,9 @@ pub fn exit_code_for_error(error: &AppError) -> i32 {
         // Resolution failures: not found, or ambiguous (an `invalidInput`).
         AppError::NotFound(_) | AppError::InvalidInput(_) => EXIT_NOT_FOUND,
         // The operation reached the engine and failed there.
-        AppError::Ssh(_) | AppError::Connection(_) => EXIT_OPERATION_FAILED,
+        AppError::Ssh(_) | AppError::Connection(_) | AppError::HostKeyMismatch(_) => {
+            EXIT_OPERATION_FAILED
+        }
         _ => EXIT_INTERNAL,
     }
 }
@@ -815,6 +842,7 @@ mod tests {
                 status,
                 stats: TunnelStats::default(),
                 last_error: last_error.map(|e| e.to_string()),
+                host_key_mismatch: None,
             },
         )
     }

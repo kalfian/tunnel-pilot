@@ -254,6 +254,7 @@ mod tests {
             keep_alive_max_count: 5,
             group_id: None,
             tags: vec![],
+            host_key: None,
         }
     }
 
@@ -338,6 +339,7 @@ mod tests {
             keep_alive_max_count: 5,
             group_id: None,
             tags: vec![],
+            host_key: None,
         };
         let backup = BackupFile::export(&[f], &[], "now".into());
         assert_eq!(backup.version, BACKUP_VERSION);

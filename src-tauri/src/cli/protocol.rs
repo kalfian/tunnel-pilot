@@ -17,7 +17,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::state::models::{ForwardConfig, ForwardRuntime, ForwardStatus, TunnelStats};
+use crate::state::models::{
+    ForwardConfig, ForwardRuntime, ForwardStatus, HostKeyMismatch, HostKeyPin, TunnelStats,
+};
 
 /// Wire protocol version. Bumped only on a breaking schema change; the server
 /// rejects any other value with `invalidInput`.
@@ -107,6 +109,10 @@ pub enum CliCommand {
     PasswordSet,
     /// Delete the `target` forward's stored password and clear the flag.
     PasswordClear,
+    /// Trust the changed host key the `target`'s server last presented.
+    HostKeyTrust,
+    /// Forget the `target`'s pinned host key.
+    HostKeyForget,
 }
 
 /// The editable fields of a forward for `add` / `edit`. Every field is
@@ -159,6 +165,8 @@ pub enum SaveChange {
     Removed,
     PasswordSet,
     PasswordCleared,
+    HostKeyTrusted,
+    HostKeyForgotten,
 }
 
 /// One response line. Exactly one of `data` / `error` is present.
@@ -257,6 +265,12 @@ pub struct ForwardView {
     pub group_id: Option<String>,
     pub tags: Vec<String>,
     pub has_stored_password: bool,
+    /// The pinned SSH host key (public; spec 03 §23).
+    #[serde(default)]
+    pub host_key: Option<HostKeyPin>,
+    /// Set while parked on a refused (changed) host key.
+    #[serde(default)]
+    pub host_key_mismatch: Option<HostKeyMismatch>,
 }
 
 impl ForwardView {
@@ -278,6 +292,8 @@ impl ForwardView {
             group_id: cfg.group_id.clone(),
             tags: cfg.tags.clone(),
             has_stored_password: cfg.has_stored_password,
+            host_key: cfg.host_key.clone(),
+            host_key_mismatch: runtime.host_key_mismatch.clone(),
         }
     }
 
@@ -353,6 +369,7 @@ pub(crate) fn sample_config(id: &str, name: &str) -> ForwardConfig {
         keep_alive_max_count: 5,
         group_id: None,
         tags: vec!["prod".into()],
+        host_key: None,
     }
 }
 
@@ -386,6 +403,7 @@ mod tests {
             status,
             stats: TunnelStats::default(),
             last_error: None,
+            host_key_mismatch: None,
         }
     }
 

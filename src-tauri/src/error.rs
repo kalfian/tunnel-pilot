@@ -63,6 +63,12 @@ pub enum AppError {
     #[error("I/O error: {0}")]
     Io(String),
 
+    /// The SSH server presented a host key that does not match the pinned one
+    /// (or `known_hosts`) — possible interception (spec 03 §23). Never retried
+    /// automatically; the user must verify and trust the new key.
+    #[error("host key mismatch: {0}")]
+    HostKeyMismatch(String),
+
     /// Not signed in to the web UI, or the session ended (spec 02 §10).
     #[error("unauthorized: {0}")]
     Unauthorized(String),

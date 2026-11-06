@@ -10,6 +10,42 @@ use serde::{Deserialize, Serialize};
 /// A tunnel identifier (uuid v4) — spec 03 Conventions.
 pub type TunnelId = String;
 
+/// A pinned SSH server host key (spec 03 §23, 04 §1). Public information, not
+/// a secret: the key's algorithm and its SHA-256 fingerprint, as OpenSSH prints
+/// them (`ssh-ed25519`, `SHA256:…`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostKeyPin {
+    pub algorithm: String,
+    pub fingerprint: String,
+    /// When it was pinned (RFC 3339); `None` for a key only seen, not pinned.
+    #[serde(default)]
+    pub pinned_at: Option<String>,
+}
+
+/// What the presented key was checked against when it was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HostKeySource {
+    /// The key pinned on this forward.
+    Pinned,
+    /// An entry in the user's `~/.ssh/known_hosts` (read-only).
+    KnownHosts,
+}
+
+/// The server presented a key that does not match the expected one — possible
+/// interception, or a reinstalled server (spec 03 §23). Kept on the tunnel's
+/// runtime until the user trusts the new key or the tunnel is torn down.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostKeyMismatch {
+    /// The pinned key (`None` when the conflict came from `known_hosts`).
+    pub expected: Option<HostKeyPin>,
+    /// What the server offered this time.
+    pub presented: HostKeyPin,
+    pub source: HostKeySource,
+}
+
 /// SSH local-forward configuration (spec 04 §1).
 ///
 /// The plaintext password is NOT part of this model — secrets live in the
@@ -41,6 +77,11 @@ pub struct ForwardConfig {
     pub group_id: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// The server's host key, pinned on the first successful connection
+    /// (trust-on-first-use) and verified on every later one (spec 03 §23).
+    /// Cleared when the SSH host or port changes. Never set from user input.
+    #[serde(default)]
+    pub host_key: Option<HostKeyPin>,
 }
 
 fn default_ssh_port() -> u16 {
@@ -161,6 +202,9 @@ pub struct ForwardRuntime {
     pub status: ForwardStatus,
     pub stats: TunnelStats,
     pub last_error: Option<String>,
+    /// Set while the tunnel is parked because the server's host key changed.
+    #[serde(default)]
+    pub host_key_mismatch: Option<HostKeyMismatch>,
 }
 
 /// Application settings (spec 04 §3). Only the fields the M1 engine reads

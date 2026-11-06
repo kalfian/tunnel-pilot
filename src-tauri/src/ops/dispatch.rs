@@ -44,6 +44,8 @@ pub const WEB_COMMANDS: &[&str] = &[
     "copy_ssh_command",
     "set_forward_password",
     "clear_forward_password",
+    "trust_host_key",
+    "forget_host_key",
     // Groups & tags (§6.2)
     "list_groups",
     "create_group",
@@ -205,6 +207,14 @@ pub async fn invoke(state: &Arc<AppState>, command: &str, raw: Value) -> Result<
         "clear_forward_password" => {
             let a: IdArgs = args(command, raw)?;
             json(forwards::clear_password(state, &a.id).await?)
+        }
+        "trust_host_key" => {
+            let a: IdArgs = args(command, raw)?;
+            json(forwards::trust_host_key(state, &a.id).await?)
+        }
+        "forget_host_key" => {
+            let a: IdArgs = args(command, raw)?;
+            json(forwards::forget_host_key(state, &a.id).await?)
         }
         // --- Groups & tags ---
         "list_groups" => json(groups::list_groups(state)),

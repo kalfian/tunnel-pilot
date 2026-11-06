@@ -18,14 +18,19 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::ssh::engine;
 use crate::state::models::{
-    ForwardConfig, ForwardInput, ForwardRuntime, ForwardStatus, TunnelStats,
+    ForwardConfig, ForwardInput, ForwardRuntime, ForwardStatus, HostKeyPin, TunnelStats,
 };
 use crate::state::AppState;
 
 /// Build a `ForwardConfig` from an input payload + an id. `has_stored_password`
 /// is always seeded from the caller (never derived from the input, which never
 /// carries a secret).
-fn config_from_input(id: String, input: ForwardInput, has_stored_password: bool) -> ForwardConfig {
+fn config_from_input(
+    id: String,
+    input: ForwardInput,
+    has_stored_password: bool,
+    host_key: Option<HostKeyPin>,
+) -> ForwardConfig {
     ForwardConfig {
         id,
         name: input.name,
@@ -42,6 +47,7 @@ fn config_from_input(id: String, input: ForwardInput, has_stored_password: bool)
         keep_alive_max_count: input.keep_alive_max_count,
         group_id: input.group_id,
         tags: input.tags,
+        host_key,
     }
 }
 
@@ -122,6 +128,7 @@ pub fn runtime_or_default(state: &Arc<AppState>, id: &str) -> ForwardRuntime {
             status: ForwardStatus::Disconnected,
             stats: TunnelStats::default(),
             last_error: None,
+            host_key_mismatch: None,
         })
 }
 
@@ -130,7 +137,7 @@ pub fn runtime_or_default(state: &Arc<AppState>, id: &str) -> ForwardRuntime {
 /// Append a new forward (fresh uuid, no stored password) and persist. The
 /// password (if any) is a separate [`set_password`] call.
 pub async fn create(state: &Arc<AppState>, input: ForwardInput) -> Result<ForwardConfig, AppError> {
-    let config = config_from_input(Uuid::new_v4().to_string(), input, false);
+    let config = config_from_input(Uuid::new_v4().to_string(), input, false, None);
     state.upsert_config(config.clone());
     state.persist_forwards().await?;
     state.emit_forwards_changed();
@@ -169,7 +176,16 @@ pub async fn update(
         tracing::info!(forward_id = %id, "SSH endpoint changed; stored password cleared");
     }
 
-    let config = config_from_input(id, input, keep_password);
+    // The pinned host key belongs to host:port; a different server must be
+    // pinned afresh on its first connection (spec 03 §23).
+    let same_server = existing.ssh_host == input.ssh_host && existing.ssh_port == input.ssh_port;
+    let host_key = if same_server {
+        existing.host_key.clone()
+    } else {
+        None
+    };
+
+    let config = config_from_input(id, input, keep_password, host_key);
     state.upsert_config(config.clone());
     state.persist_forwards().await?;
     state.emit_forwards_changed();
@@ -294,6 +310,97 @@ pub async fn mark_password_stored(
     Ok(())
 }
 
+// --- Host keys (spec 03 §23) ---
+
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+/// Pin the key a server presented on the first successful connection (trust
+/// on first use). A no-op when the forward already has a pin or was pointed at
+/// another server in the meantime (the edit wins).
+pub async fn pin_host_key(
+    state: &Arc<AppState>,
+    id: &str,
+    ssh_host: &str,
+    ssh_port: u16,
+    presented: HostKeyPin,
+) -> Result<(), AppError> {
+    let Some(mut cfg) = state.get_config(id) else {
+        return Ok(());
+    };
+    if cfg.host_key.is_some() || cfg.ssh_host != ssh_host || cfg.ssh_port != ssh_port {
+        return Ok(());
+    }
+    tracing::info!(
+        forward_id = %id,
+        algorithm = %presented.algorithm,
+        fingerprint = %presented.fingerprint,
+        "pinned SSH host key (first use)"
+    );
+    cfg.host_key = Some(HostKeyPin {
+        pinned_at: Some(now_rfc3339()),
+        ..presented
+    });
+    state.upsert_config(cfg);
+    state.persist_forwards().await?;
+    state.emit_forwards_changed();
+    Ok(())
+}
+
+/// Trust the key the server presented when it was last refused: it replaces the
+/// pin, exactly as shown to the user (never "whatever the next connection
+/// sees"). The caller reconnects afterwards.
+pub async fn trust_host_key(state: &Arc<AppState>, id: &str) -> Result<ForwardConfig, AppError> {
+    let mut cfg = state
+        .get_config(id)
+        .ok_or_else(|| AppError::NotFound(format!("forward {id}")))?;
+    let mismatch = state.registry.host_key_mismatch(id).ok_or_else(|| {
+        AppError::NotFound(format!(
+            "forward {id} has no changed host key waiting to be trusted"
+        ))
+    })?;
+    tracing::warn!(
+        forward_id = %id,
+        previous = %mismatch
+            .expected
+            .as_ref()
+            .map(|p| p.fingerprint.as_str())
+            .unwrap_or("known_hosts entry"),
+        trusted = %mismatch.presented.fingerprint,
+        "user trusted a changed SSH host key"
+    );
+    cfg.host_key = Some(HostKeyPin {
+        pinned_at: Some(now_rfc3339()),
+        ..mismatch.presented
+    });
+    state.upsert_config(cfg.clone());
+    state.persist_forwards().await?;
+    state.registry.set_host_key_mismatch(id, None);
+    state.emit_forwards_changed();
+    // Tell every client (other windows / browser tabs) that the refusal is
+    // resolved: re-emit the unchanged status with the mismatch now cleared.
+    if let Some(rt) = state.registry.runtime(id) {
+        state.emit_status(id, rt.status, rt.last_error);
+    }
+    Ok(cfg)
+}
+
+/// Forget the pinned key: the next connection pins whatever the server presents
+/// (after `known_hosts`). For a server that is known to have changed.
+pub async fn forget_host_key(state: &Arc<AppState>, id: &str) -> Result<ForwardConfig, AppError> {
+    let mut cfg = state
+        .get_config(id)
+        .ok_or_else(|| AppError::NotFound(format!("forward {id}")))?;
+    if cfg.host_key.take().is_some() {
+        tracing::warn!(forward_id = %id, "pinned SSH host key forgotten");
+        state.upsert_config(cfg.clone());
+        state.persist_forwards().await?;
+        state.emit_forwards_changed();
+    }
+    Ok(cfg)
+}
+
 // --- Global bulk (F3) — distinct from per-group start/stop (AGENTS §1) ---
 
 /// Global bulk connect (v1 `connectAll`, F3): connect every configured forward
@@ -358,6 +465,7 @@ mod tests {
             keep_alive_max_count: 5,
             group_id: None,
             tags: vec![],
+            host_key: None,
         }
     }
 

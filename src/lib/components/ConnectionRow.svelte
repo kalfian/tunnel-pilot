@@ -3,6 +3,7 @@
   import type {
     ForwardConfig,
     ForwardStatus,
+    HostKeyMismatch,
     TunnelGroup,
     TunnelStats,
   } from "../types";
@@ -15,19 +16,23 @@
     assignForwardGroup,
   } from "../ipc";
   import { pushToast } from "../ui/toast";
-  import { formatRoute } from "../ui/format";
+  import { formatHostPort, formatRoute } from "../ui/format";
   import StatusDot from "./ui/StatusDot.svelte";
   import Toggle from "./ui/Toggle.svelte";
   import StatChips from "./StatChips.svelte";
   import TagPill from "./ui/TagPill.svelte";
   import Menu, { type MenuItem } from "./ui/Menu.svelte";
   import Icon from "./ui/Icon.svelte";
+  import Button from "./ui/Button.svelte";
+  import HostKeyFingerprint from "./HostKeyFingerprint.svelte";
 
   interface Props {
     forward: ForwardConfig;
     status: ForwardStatus;
     stats: TunnelStats;
     lastError: string | null;
+    /** Refused host key (spec 03 §23). Shown only while `status` is `error`. */
+    hostKeyMismatch?: HostKeyMismatch | null;
     selected: boolean;
     /** All groups — powers the "Assign group ▸" menu. Empty = no group UI. */
     groups?: TunnelGroup[];
@@ -38,6 +43,8 @@
     onEdit: () => void;
     onDelete: () => void;
     onViewLog: () => void;
+    /** Open the "trust the new host key" confirm (owned by the view). */
+    onTrustHostKey?: () => void;
     /** Arrow-key selection move (delegated to the list). */
     onNav?: (dir: -1 | 1) => void;
     /** Alt+Arrow keyboard reorder (delegated to the list). */
@@ -49,6 +56,7 @@
     status,
     stats,
     lastError,
+    hostKeyMismatch = null,
     selected,
     groups = [],
     reorderable = true,
@@ -56,6 +64,7 @@
     onEdit,
     onDelete,
     onViewLog,
+    onTrustHostKey,
     onNav,
     onReorder,
   }: Props = $props();
@@ -78,6 +87,12 @@
       forward.remotePort,
     ),
   );
+
+  // A refused host key replaces the routine error strip: it is never
+  // auto-retried, and "Retry" would only be refused again.
+  const mismatch = $derived(status === "error" ? hostKeyMismatch : null);
+  const hostPort = $derived(formatHostPort(forward.sshHost, forward.sshPort));
+  const hkTitleId = $derived(`hk-title-${forward.id}`);
 
   const SUBTITLE: Partial<Record<ForwardStatus, string>> = {
     connecting: "Connecting…",
@@ -272,7 +287,70 @@
     />
   </div>
 
-  {#if status === "error"}
+  {#if mismatch}
+    <section class="hk" aria-labelledby={hkTitleId}>
+      <!-- Announced once, when the refusal lands; the fingerprints below are
+           for reading at the user's pace, not for the live region. -->
+      <div class="hk-summary" role="alert">
+        <p class="hk-title" id={hkTitleId}>
+          <span class="hk-icon"><Icon name="shield-alert" size={16} /></span>
+          <span
+            >Host key changed <span class="sr-only">for {forward.name}</span
+            ></span
+          >
+        </p>
+        <p class="hk-desc">
+          {#if mismatch.source === "knownHosts"}
+            <span class="mono">{hostPort}</span> presented a key that conflicts
+            with your <span class="mono">~/.ssh/known_hosts</span>, which Tunnel
+            Pilot never modifies. It won't connect until you review the key.
+          {:else}
+            <span class="mono">{hostPort}</span> presented a different key than the
+            one pinned for this tunnel. It won't connect until you review the key.
+          {/if}
+        </p>
+      </div>
+      <dl class="hk-keys">
+        {#if mismatch.source === "knownHosts"}
+          <HostKeyFingerprint
+            label="known_hosts entry"
+            pin={mismatch.expected}
+            missingText="A different key is on record for this host."
+          />
+        {:else}
+          <HostKeyFingerprint
+            label="Pinned"
+            pin={mismatch.expected}
+            missingText="No pinned key."
+            copyLabel="Copy the pinned fingerprint for {forward.name}"
+          />
+        {/if}
+        <HostKeyFingerprint
+          label="Server now presents"
+          pin={mismatch.presented}
+          copyLabel="Copy the fingerprint {forward.name} now presents"
+        />
+      </dl>
+      <div class="hk-actions">
+        <Button
+          size="sm"
+          iconLeft="key-round"
+          ariaLabel="Trust new key for {forward.name}"
+          onclick={() => onTrustHostKey?.()}
+        >
+          Trust new key…
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          ariaLabel="View log for {forward.name}"
+          onclick={onViewLog}
+        >
+          View log
+        </Button>
+      </div>
+    </section>
+  {:else if status === "error"}
     <div class="err-strip" role="alert">
       <Icon name="alert-triangle" size={14} />
       <span class="err-msg">{lastError ?? "Connection failed"}</span>
@@ -480,5 +558,77 @@
   }
   .err-action:hover {
     text-decoration: underline;
+  }
+
+  /* --- Host key changed (spec 03 §23) ---
+     Deliberately NOT the red strip: a neutral panel with a hairline error
+     border and one tinted headline reads "stop and look", not "something
+     flaked, hit Retry". */
+  .hk {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    min-width: 0;
+    margin-top: var(--sp-1);
+    padding: var(--sp-3) var(--sp-4) var(--sp-4);
+    border: var(--border-w) solid var(--status-error);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    cursor: auto;
+  }
+  .hk-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    min-width: 0;
+  }
+  .hk-title {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin: 0;
+    font-size: var(--fs-title-sm);
+    line-height: var(--lh-title-sm);
+    font-weight: var(--fw-title-sm);
+    color: var(--text);
+  }
+  .hk-icon {
+    display: flex;
+    flex: none;
+    color: var(--status-error-fg);
+  }
+  .hk-desc {
+    margin: 0;
+    font-size: var(--fs-body-sm);
+    line-height: var(--lh-body-sm);
+    color: var(--text-2);
+  }
+  .hk-desc .mono {
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+  .hk-keys {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    margin: 0;
+  }
+  .hk-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 </style>
