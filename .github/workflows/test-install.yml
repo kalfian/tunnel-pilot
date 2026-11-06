@@ -40,7 +40,10 @@ jobs:
       # jq pre-installed on Ubuntu; Windows Git Bash falls back to grep/sed
       - name: Run unit tests
         shell: bash
-        run: bash docs/install_test.sh
+        run: |
+          bash docs/install_test.sh
+          bash docs/uninstall_test.sh
+          bash docs/cli/install_test.sh
 
   # ── Job 2: Real install on Linux — download AppImage, install, verify ────────
   e2e-linux:

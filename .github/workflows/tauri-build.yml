@@ -105,18 +105,18 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  # The CLI-only edition (spec 03 §21): `--no-default-features` drops Tauri,
-  # WebKit and GTK, so it needs no system packages at all. Checked separately
-  # because the `build` job above only ever compiles the default (`gui`)
-  # feature set — a cfg mistake in the headless path would otherwise ship.
-  # macOS adds `keychain` (the shipped macOS CLI keeps the OS keychain).
+  # The server product `tunnel-pilot-cli` (spec 03 §22): `--no-default-features
+  # --features server` drops Tauri, WebKit and GTK and adds the web UI server.
+  # Checked separately because the `build` job above only compiles the desktop
+  # (`gui`) feature set — a cfg mistake in the server path would otherwise ship.
+  # macOS adds `keychain` (the shipped macOS server build keeps the OS keychain).
   cli-headless:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, features: "" }
-          - { os: macos-latest, features: "--features keychain" }
+          - { os: ubuntu-latest, features: "server" }
+          - { os: macos-latest, features: "server,keychain" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -132,16 +132,32 @@ jobs:
           workspaces: ./src-tauri -> target
           key: cli-headless
 
-      - name: fmt + clippy + test (headless)
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Build the web UI (embedded into tunnel-pilot-cli)
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:web
+
+      - name: fmt + clippy + test (server)
         working-directory: src-tauri
         run: |
           cargo fmt --check
-          cargo clippy --no-default-features ${{ matrix.features }} --all-targets -- -D warnings
-          cargo test --no-default-features ${{ matrix.features }}
+          cargo clippy --no-default-features --features ${{ matrix.features }} --all-targets -- -D warnings
+          cargo test --no-default-features --features ${{ matrix.features }}
 
       - name: Smoke-test the binary
         working-directory: src-tauri
         run: |
-          cargo build --release --no-default-features ${{ matrix.features }}
-          ./target/release/tunnel-pilot --version | grep -q '(cli)'
-          ls -l target/release/tunnel-pilot
+          cargo build --release --no-default-features --features ${{ matrix.features }} --bin tunnel-pilot-cli
+          ./target/release/tunnel-pilot-cli --version | grep -q '(cli)'
+          ls -l target/release/tunnel-pilot-cli

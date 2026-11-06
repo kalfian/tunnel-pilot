@@ -116,12 +116,15 @@ jobs:
           includeUpdaterJson: true
           args: ${{ matrix.args }}
 
-  # CLI-only edition (spec 03 §21): a small binary with no Tauri/WebKit/GTK for
-  # servers and headless boxes, installed by `install.sh --cli`. Linux builds
-  # are static musl (run on any distro, no glibc floor); macOS is a universal
-  # binary that keeps the OS keychain (`--features keychain`). Each archive gets
-  # a `.sha256` sidecar that install.sh verifies. Uploaded to the same draft
-  # release the desktop job created, hence `needs: release`.
+  # The server product `tunnel-pilot-cli` (spec 03 §22): same features as the
+  # desktop app, delivered as one binary (daemon + CLI + embedded web UI) for
+  # servers and headless boxes, installed by docs/cli/install.sh. Shipped in the
+  # SAME `v*` release as the desktop bundles — one version for both products,
+  # and the desktop updater's `releases/latest` endpoint stays correct. Linux
+  # builds are static musl (any distro, no glibc floor); macOS is a universal
+  # binary that keeps the OS keychain. Each archive gets a `.sha256` sidecar
+  # that the installer REQUIRES. Uploaded to the draft release the desktop job
+  # created, hence `needs: release`.
   cli:
     needs: release
     permissions:
@@ -130,9 +133,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, asset: linux-x86_64, target: x86_64-unknown-linux-musl }
-          - { os: ubuntu-24.04-arm, asset: linux-aarch64, target: aarch64-unknown-linux-musl }
-          - { os: macos-latest, asset: macos-universal, target: universal }
+          - { os: ubuntu-latest, asset: linux-x86_64, target: x86_64-unknown-linux-musl, features: "server" }
+          - { os: ubuntu-24.04-arm, asset: linux-aarch64, target: aarch64-unknown-linux-musl, features: "server" }
+          - { os: macos-latest, asset: macos-universal, target: universal, features: "server,keychain" }
     runs-on: ${{ matrix.os }}
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -158,6 +161,23 @@ jobs:
           workspaces: ./src-tauri -> target
           key: cli-${{ matrix.asset }}
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Build the web UI (embedded at compile time)
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:web
+          test -f dist-web/index.html
+
       - name: Build (Linux, static musl)
         if: runner.os == 'Linux'
         working-directory: src-tauri
@@ -169,29 +189,31 @@ jobs:
           CC_x86_64_unknown_linux_musl: musl-gcc
           CC_aarch64_unknown_linux_musl: musl-gcc
         run: |
-          cargo build --release --locked --no-default-features --target ${{ matrix.target }}
-          mkdir -p ../dist
-          cp target/${{ matrix.target }}/release/tunnel-pilot ../dist/tunnel-pilot
-          strip ../dist/tunnel-pilot
+          cargo build --release --locked --no-default-features --features ${{ matrix.features }} \
+            --bin tunnel-pilot-cli --target ${{ matrix.target }}
+          mkdir -p ../dist-cli
+          cp target/${{ matrix.target }}/release/tunnel-pilot-cli ../dist-cli/tunnel-pilot-cli
+          strip ../dist-cli/tunnel-pilot-cli
 
       - name: Build (macOS, universal + keychain)
         if: runner.os == 'macOS'
         working-directory: src-tauri
         run: |
           for t in aarch64-apple-darwin x86_64-apple-darwin; do
-            cargo build --release --locked --no-default-features --features keychain --target "$t"
+            cargo build --release --locked --no-default-features --features ${{ matrix.features }} \
+              --bin tunnel-pilot-cli --target "$t"
           done
-          mkdir -p ../dist
-          lipo -create -output ../dist/tunnel-pilot \
-            target/aarch64-apple-darwin/release/tunnel-pilot \
-            target/x86_64-apple-darwin/release/tunnel-pilot
-          strip -x ../dist/tunnel-pilot
+          mkdir -p ../dist-cli
+          lipo -create -output ../dist-cli/tunnel-pilot-cli \
+            target/aarch64-apple-darwin/release/tunnel-pilot-cli \
+            target/x86_64-apple-darwin/release/tunnel-pilot-cli
+          strip -x ../dist-cli/tunnel-pilot-cli
 
       - name: Package + checksum
         run: |
-          ./dist/tunnel-pilot --version | grep -q '(cli)'
+          ./dist-cli/tunnel-pilot-cli --version | grep -q '(cli)'
           name="tunnel-pilot-cli-${{ matrix.asset }}.tar.gz"
-          tar -czf "$name" -C dist tunnel-pilot
+          tar -czf "$name" -C dist-cli tunnel-pilot-cli
           if command -v sha256sum >/dev/null; then sha256sum "$name" > "$name.sha256"; else shasum -a 256 "$name" > "$name.sha256"; fi
           cat "$name.sha256"
           ls -l "$name"
