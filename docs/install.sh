@@ -6,10 +6,22 @@ set -euo pipefail
 #  https://github.com/kalfian/tunnel-pilot
 #
 #  Fetches the latest v2 release from the GitHub Releases "latest" endpoint and
-#  installs the platform-native bundle:
+#  installs one of two editions:
+#
+#  Desktop (default, or --desktop) — the tray app; its binary is also the CLI:
 #    macOS   → .dmg          (mount, copy .app to /Applications)
 #    Linux   → .AppImage     (chmod +x, launcher + .desktop) — falls back to .deb
 #    Windows → NSIS setup.exe (run the installer)   [Git Bash / MSYS / Cygwin]
+#
+#  CLI only (--cli) — one small static binary for servers and headless boxes:
+#    no window, no WebKit/GTK; runs tunnels via `tunnel-pilot daemon` /
+#    `tunnel-pilot service install`. Linux x86_64/aarch64 + macOS universal.
+#    Installs to ~/.local/bin (or /usr/local/bin with --system or as root).
+#    Upgrade later with `tunnel-pilot desktop install` (same config).
+#
+#  Usage:
+#    curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash
+#    curl -fsSL https://kalfian.github.io/tunnel-pilot/install.sh | bash -s -- --cli
 #
 #  Bundles are UNSIGNED (open-source / unfunded — no paid OS-signing certs). The
 #  self-update path IS cryptographically signed (minisign). Gatekeeper /
@@ -20,6 +32,12 @@ REPO="kalfian/tunnel-pilot"
 APP_NAME="Tunnel Pilot"
 INSTALL_DIR="/Applications"
 BINARY_NAME="tunnel-pilot"
+
+# Options (set by parse_args).
+MODE="desktop"        # desktop | cli
+CLI_SYSTEM=false      # --system: /usr/local/bin instead of ~/.local/bin
+ASSUME_YES=false      # -y / --yes: reinstall without asking
+FORCE=false           # --force: CLI install may replace a desktop launcher
 
 # ── Colors & styles ───────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -100,6 +118,40 @@ print_divider() {
   echo -e "  ${DIM}─────────────────────────────────────${NC}"
 }
 
+# ── Arguments ─────────────────────────────────────────────────────────────────
+print_usage() {
+  cat << USAGE_EOF
+Tunnel Pilot installer
+
+  install.sh [--desktop | --cli] [--system] [--yes] [--force]
+
+  --desktop   Install the desktop app (default). Its binary is also the CLI.
+  --cli       Install only the command-line edition (servers / headless).
+  --system    --cli only: install to /usr/local/bin (default ~/.local/bin;
+              automatic when run as root).
+  --yes, -y   Reinstall without asking when already on the latest version.
+  --force     --cli only: replace an existing desktop launcher on PATH.
+USAGE_EOF
+}
+
+parse_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --cli)      MODE="cli" ;;
+      --desktop)  MODE="desktop" ;;
+      --system)   CLI_SYSTEM=true ;;
+      --yes|-y)   ASSUME_YES=true ;;
+      --force)    FORCE=true ;;
+      --help|-h)  print_usage; exit 0 ;;
+      *)          print_usage; print_error "Unknown option: $1" ;;
+    esac
+    shift
+  done
+  if [ "$MODE" != "cli" ] && { $CLI_SYSTEM || $FORCE; }; then
+    print_error "--system and --force only apply together with --cli."
+  fi
+}
+
 # ── Platform & architecture ───────────────────────────────────────────────────
 #
 # Asset filenames are matched by PATTERN (extension/arch), never a hardcoded
@@ -131,6 +183,32 @@ detect_platform() {
       ;;
     *)
       print_error "Unsupported platform: $(uname -s)\nThis installer supports macOS, Linux, and Windows (Git Bash)."
+      ;;
+  esac
+  if [ "$MODE" = "cli" ]; then
+    cli_asset_pattern
+  fi
+}
+
+# CLI-only assets are published by CI as
+#   tunnel-pilot-cli-linux-x86_64.tar.gz / -linux-aarch64 / -macos-universal
+# each with a `.sha256` sidecar (anchored with '$' so the sidecar never matches).
+cli_asset_pattern() {
+  LINUX_FALLBACK_PATTERN=""
+  case "$PLATFORM" in
+    linux)
+      case "$ARCH" in
+        x86_64|amd64)  CLI_ARCH="x86_64" ;;
+        aarch64|arm64) CLI_ARCH="aarch64" ;;
+        *) print_error "No CLI-only build for Linux/$ARCH yet.\n  Supported: x86_64, aarch64." ;;
+      esac
+      ASSET_PATTERN="tunnel-pilot-cli-linux-${CLI_ARCH}\\.tar\\.gz$"
+      ;;
+    macos)
+      ASSET_PATTERN="tunnel-pilot-cli-macos-universal\\.tar\\.gz$"
+      ;;
+    windows)
+      print_error "The CLI-only edition is not available on Windows.\n  Install the desktop app instead (its binary includes the CLI)."
       ;;
   esac
 }
@@ -176,6 +254,16 @@ json_asset_url() {
 # ── Version comparison ─────────────────────────────────────────────────────────
 get_installed_version() {
   INSTALLED_VERSION=""
+  if [ "$MODE" = "cli" ]; then
+    # Only ever execute a plain binary here: a desktop launcher (script or
+    # symlink into the .app) from an older release would open the GUI.
+    local bin
+    bin="$(cli_bin_dir)/$BINARY_NAME"
+    if is_cli_binary "$bin"; then
+      INSTALLED_VERSION=$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+    fi
+    return
+  fi
   if [ "$PLATFORM" = "macos" ]; then
     local plist="$INSTALL_DIR/$APP_NAME.app/Contents/Info.plist"
     if [ -f "$plist" ]; then
@@ -223,7 +311,13 @@ fetch_latest() {
       spinner_stop
       print_success "Already on latest version ${BOLD}$VERSION${NC}"
       echo ""
-      read -r -p "  Reinstall anyway? [y/N] " answer
+      local answer="n"
+      if $ASSUME_YES; then
+        answer="y"
+      elif [ -r /dev/tty ]; then
+        # `curl | bash` makes stdin the script itself — ask the terminal.
+        read -r -p "  Reinstall anyway? [y/N] " answer < /dev/tty || answer="n"
+      fi
       echo ""
       [[ "$answer" =~ ^[Yy]$ ]] || { echo -e "  ${DIM}Nothing to do.${NC}"; echo ""; exit 0; }
     else
@@ -429,6 +523,105 @@ install_windows() {
   print_success "Installer finished (per-user NSIS install)"
 }
 
+# ── Install: CLI only ─────────────────────────────────────────────────────────
+cli_bin_dir() {
+  if $CLI_SYSTEM || [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; then
+    echo "/usr/local/bin"
+  else
+    echo "$HOME/.local/bin"
+  fi
+}
+
+# True for a regular, non-script executable — i.e. a CLI-only binary, not a
+# desktop launcher script (Linux AppImage wrapper) or a symlink into the .app.
+is_cli_binary() {
+  local f="$1"
+  [ -f "$f" ] && [ ! -L "$f" ] && [ -x "$f" ] || return 1
+  [ "$(head -c 2 "$f" 2>/dev/null)" != "#!" ]
+}
+
+# Verify the download against the `.sha256` sidecar CI publishes next to it.
+verify_checksum() {
+  local sum_url="${ASSET_URL}.sha256" expected actual
+  expected=$(curl -fsSL "$sum_url" 2>/dev/null | awk '{print $1}' | head -1 || true)
+  if [ -z "$expected" ]; then
+    print_warn "No checksum published for $ASSET_NAME — skipping verification"
+    return
+  fi
+  if command -v sha256sum &>/dev/null; then
+    actual=$(sha256sum "$TMP_FILE" | awk '{print $1}')
+  elif command -v shasum &>/dev/null; then
+    actual=$(shasum -a 256 "$TMP_FILE" | awk '{print $1}')
+  else
+    print_warn "No sha256sum/shasum available — skipping checksum verification"
+    return
+  fi
+  [ "$expected" = "$actual" ] || print_error "Checksum mismatch for $ASSET_NAME.\n  expected $expected\n  got      $actual"
+  print_success "Checksum verified (sha256)"
+}
+
+install_cli() {
+  local bin_dir dest
+  bin_dir="$(cli_bin_dir)"
+  dest="$bin_dir/$BINARY_NAME"
+
+  # A desktop install already ships the CLI (same binary). Do not silently
+  # replace its launcher with the CLI-only edition.
+  if { [ -L "$dest" ] || [ -e "$dest" ]; } && ! is_cli_binary "$dest" && ! $FORCE; then
+    print_success "The desktop edition is already on PATH at ${DIM}$dest${NC} — it includes the CLI."
+    print_info "Nothing to do. Re-run with --force to replace it with the CLI-only edition."
+    CLI_SKIPPED=true
+    return
+  fi
+
+  verify_checksum
+
+  spinner_start "Unpacking"
+  tar -xzf "$TMP_FILE" -C "$TMP_DIR" || { spinner_stop; print_error "Could not unpack $ASSET_NAME."; }
+  spinner_stop
+  [ -f "$TMP_DIR/$BINARY_NAME" ] || print_error "$ASSET_NAME does not contain '$BINARY_NAME'."
+
+  local sudo_cmd=""
+  if ! mkdir -p "$bin_dir" 2>/dev/null || [ ! -w "$bin_dir" ]; then
+    if command -v sudo &>/dev/null; then
+      print_step "$bin_dir is not writable — using sudo"
+      sudo_cmd="sudo"
+      $sudo_cmd mkdir -p "$bin_dir"
+    else
+      print_error "$bin_dir is not writable and sudo is unavailable.\n  Re-run without --system to install into ~/.local/bin."
+    fi
+  fi
+  # Replace atomically-ish: drop a symlink/launcher first so `install` never
+  # writes THROUGH a symlink into the desktop .app (only reachable with --force).
+  $sudo_cmd rm -f "$dest"
+  $sudo_cmd install -m 0755 "$TMP_DIR/$BINARY_NAME" "$dest" \
+    || print_error "Could not install to $dest."
+  print_success "Installed to ${DIM}$dest${NC}"
+
+  if ! echo ":$PATH:" | grep -q ":$bin_dir:"; then
+    print_warn "$bin_dir is not in your PATH"
+    print_info "Add this to your ~/.bashrc or ~/.zshrc:"
+    echo ""
+    echo -e "    ${CYAN}export PATH=\"$bin_dir:\$PATH\"${NC}"
+    echo ""
+  fi
+}
+
+# Desktop install on top of a CLI-only one: the desktop binary is a superset,
+# so point the CLI-only binary's PATH entries at the app (macOS) and tell the
+# user what happened. Linux's AppImage launcher already replaces ~/.local/bin.
+adopt_cli_after_desktop() {
+  [ "$PLATFORM" = "macos" ] || return 0
+  local app_bin="$INSTALL_DIR/$APP_NAME.app/Contents/MacOS/$BINARY_NAME"
+  [ -x "$app_bin" ] || return 0
+  local f
+  for f in "$HOME/.local/bin/$BINARY_NAME" "/usr/local/bin/$BINARY_NAME"; do
+    if is_cli_binary "$f" && [ -w "$(dirname "$f")" ]; then
+      ln -sf "$app_bin" "$f" && print_success "Pointed ${DIM}$f${NC} at the desktop app (it includes the CLI)"
+    fi
+  done
+}
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
   spinner_stop
@@ -460,7 +653,34 @@ print_unsigned_note() {
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
+print_cli_summary() {
+  echo ""
+  print_divider
+  echo ""
+  if ${CLI_SKIPPED:-false}; then
+    echo -e "  ${GREEN}${BOLD}✓  Tunnel Pilot is already installed (desktop edition)${NC}"
+    echo ""
+    return
+  fi
+  echo -e "  ${GREEN}${BOLD}✓  Tunnel Pilot CLI $VERSION installed!${NC}"
+  echo ""
+  print_info "Add a forward:"
+  echo -e "    ${CYAN}$BINARY_NAME add prod-db --ssh deploy@bastion.example.com \\${NC}"
+  echo -e "    ${CYAN}    --forward 5432:db.internal:5432 --identity ~/.ssh/id_ed25519${NC}"
+  print_info "Keep tunnels up in the background (systemd / launchd):"
+  echo -e "    ${CYAN}$BINARY_NAME service install --connect-all${NC}"
+  print_info "Check them:  ${CYAN}$BINARY_NAME list${NC}"
+  print_info "Want the tray app later?  ${CYAN}$BINARY_NAME desktop install${NC}"
+  echo ""
+  print_info "Docs & support → https://github.com/$REPO"
+  echo ""
+}
+
 print_summary() {
+  if [ "$MODE" = "cli" ]; then
+    print_cli_summary
+    return
+  fi
   echo ""
   print_divider
   echo ""
@@ -490,6 +710,7 @@ print_summary() {
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 main() {
+  parse_args "$@"
   print_header
   detect_platform
   check_deps
@@ -505,11 +726,15 @@ main() {
   print_divider
   echo ""
 
-  case "$PLATFORM" in
-    macos)   install_macos   ;;
-    linux)   install_linux   ;;
-    windows) install_windows ;;
-  esac
+  if [ "$MODE" = "cli" ]; then
+    install_cli
+  else
+    case "$PLATFORM" in
+      macos)   install_macos; adopt_cli_after_desktop ;;
+      linux)   install_linux   ;;
+      windows) install_windows ;;
+    esac
+  fi
 
   cleanup
   print_summary
@@ -518,5 +743,5 @@ main() {
 # Allow sourcing for tests without running main
 if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
   trap cleanup EXIT
-  main
+  main "$@"
 fi

@@ -9,7 +9,10 @@
 //! without a second error vocabulary.
 //!
 //! **No field here ever carries a secret** (AGENTS §8): [`ForwardView`] exposes
-//! `hasStoredPassword` (a boolean) and there is no password command.
+//! `hasStoredPassword` (a boolean), and the two password commands carry only a
+//! target — `password-set` flips the flag after the CLI process itself wrote
+//! the secret into the credential store, `password-clear` asks the owner to
+//! delete it (spec 03 §20).
 
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +55,9 @@ pub struct CliRequest {
     /// tunnel is reported as-is and its TCP sessions are left alone.
     #[serde(default)]
     pub force: bool,
+    /// `add`/`edit` only: the fields to set. Never carries a password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward: Option<ForwardFields>,
 }
 
 impl CliRequest {
@@ -64,6 +70,7 @@ impl CliRequest {
             timeout_ms: None,
             wait: false,
             force: false,
+            forward: None,
         }
     }
 
@@ -76,8 +83,9 @@ impl CliRequest {
     }
 }
 
-/// The command surface exposed over the socket. Deliberately read + connection
-/// control only: no CRUD, no credentials, no settings.
+/// The command surface exposed over the socket: read, connection control, and
+/// forward CRUD (so a headless host can be configured without a window). No
+/// settings, and no command that carries a secret.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CliCommand {
@@ -88,6 +96,69 @@ pub enum CliCommand {
     ConnectAll,
     DisconnectAll,
     Version,
+    /// Create a forward from `forward` (required fields enforced server-side).
+    Add,
+    /// Overlay `forward` onto the `target` forward.
+    Edit,
+    /// Delete the `target` forward (disconnects it and drops its secret).
+    Remove,
+    /// Mark the `target` forward as having a stored password. The CLI process
+    /// already wrote the secret into the credential store; only the flag moves.
+    PasswordSet,
+    /// Delete the `target` forward's stored password and clear the flag.
+    PasswordClear,
+}
+
+/// The editable fields of a forward for `add` / `edit`. Every field is
+/// optional: `edit` changes only what is present, `add` fills the rest from the
+/// same defaults the desktop form uses. **There is no password field.**
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardFields {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_username: Option<String>,
+    /// `Some("")` clears the identity file (password auth); `None` leaves it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_file_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_bind_address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_alive_interval_sec: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_alive_max_count: Option<u32>,
+    /// `Some(vec![])` clears the tags; `None` leaves them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+}
+
+impl ForwardFields {
+    /// True when no field is set (an `edit` with nothing to change).
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// What a `Saved` response did to the forward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SaveChange {
+    Created,
+    Updated,
+    Removed,
+    PasswordSet,
+    PasswordCleared,
 }
 
 /// One response line. Exactly one of `data` / `error` is present.
@@ -145,6 +216,13 @@ pub enum CliData {
         /// Whether the wait budget elapsed first (status is non-terminal).
         timed_out: bool,
     },
+    /// `add` / `edit` / `remove` / `password-*`. `change` is a required
+    /// field no earlier variant has, which keeps untagged decoding unambiguous.
+    #[serde(rename_all = "camelCase")]
+    Saved {
+        forward: ForwardView,
+        change: SaveChange,
+    },
     #[serde(rename_all = "camelCase")]
     Bulk {
         results: Vec<BulkResult>,
@@ -171,6 +249,9 @@ pub struct ForwardView {
     pub ssh_username: String,
     pub ssh_host: String,
     pub ssh_port: u16,
+    /// Private-key path when the forward uses key auth (a path, not a secret).
+    #[serde(default)]
+    pub identity_file_path: Option<String>,
     pub status: ForwardStatus,
     pub last_error: Option<String>,
     pub group_id: Option<String>,
@@ -191,6 +272,7 @@ impl ForwardView {
             ssh_username: cfg.ssh_username.clone(),
             ssh_host: cfg.ssh_host.clone(),
             ssh_port: cfg.ssh_port,
+            identity_file_path: cfg.identity_file_path.clone(),
             status: runtime.status,
             last_error: runtime.last_error.clone(),
             group_id: cfg.group_id.clone(),
@@ -201,12 +283,31 @@ impl ForwardView {
 
     /// `local_bind_address:local_port` — the address a user actually dials.
     pub fn local_endpoint(&self) -> String {
-        format!("{}:{}", self.local_bind_address, self.local_port)
+        host_port(&self.local_bind_address, self.local_port)
     }
 
     /// `remote_host:remote_port` as seen from the SSH host.
     pub fn remote_endpoint(&self) -> String {
-        format!("{}:{}", self.remote_host, self.remote_port)
+        host_port(&self.remote_host, self.remote_port)
+    }
+
+    /// `ssh_username@ssh_host:ssh_port`.
+    pub fn ssh_endpoint(&self) -> String {
+        format!(
+            "{}@{}",
+            self.ssh_username,
+            host_port(&self.ssh_host, self.ssh_port)
+        )
+    }
+}
+
+/// `host:port`, bracketing an IPv6 literal (`[::1]:22`) so the port stays
+/// unambiguous. Pure.
+pub fn host_port(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
     }
 }
 
@@ -297,6 +398,7 @@ mod tests {
             timeout_ms: Some(45_000),
             wait: true,
             force: false,
+            forward: None,
         };
         let line = serde_json::to_string(&req).expect("serialize");
         assert!(
@@ -358,6 +460,9 @@ mod tests {
         assert_eq!(view.name, "prod-db");
         assert_eq!(view.local_endpoint(), "127.0.0.1:5432");
         assert_eq!(view.remote_endpoint(), "db.internal:5432");
+        assert_eq!(view.ssh_endpoint(), "deploy@bastion.example.com:22");
+        assert_eq!(host_port("::1", 2200), "[::1]:2200");
+        assert_eq!(host_port("[::1]", 2200), "[::1]:2200");
         assert_eq!(view.status, ForwardStatus::Connected);
         assert!(view.has_stored_password);
         assert_eq!(view.tags, vec!["prod".to_string()]);
@@ -434,6 +539,10 @@ mod tests {
                 forward: view.clone(),
                 waited: false,
                 timed_out: false,
+            },
+            CliData::Saved {
+                forward: view.clone(),
+                change: SaveChange::Created,
             },
             CliData::Bulk {
                 results: vec![BulkResult {

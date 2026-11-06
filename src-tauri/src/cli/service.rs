@@ -2,13 +2,14 @@
 //! app state (spec 03 §20).
 //!
 //! Every mutation goes through the SAME service functions the tray and the
-//! webview use (`ssh::engine::*`, `commands::forwards::run_start_all` /
-//! `run_stop_all`), so a CLI-driven connect emits `tunnel://status`, refreshes
-//! the tray, and is visible to the frontend on its next hydrate. The CLI is a
-//! second *driver*, never a second state owner.
+//! webview use (`ssh::engine::*`, `ops::forwards::*`), so a CLI-driven connect
+//! or edit emits its event, refreshes the tray, and is visible to the frontend
+//! on its next hydrate. The CLI is a second *driver*, never a second state
+//! owner — whether the owner is the desktop app or the headless daemon.
 //!
-//! Nothing here reads or writes a credential: there is no password command and
-//! [`ForwardView`] carries only the `hasStoredPassword` flag (AGENTS §8).
+//! No secret ever reaches this module: `password-set` only flips the
+//! `hasStoredPassword` flag (the CLI process wrote the secret itself) and
+//! `password-clear` deletes without reading (AGENTS §8).
 
 use std::sync::Arc;
 
@@ -16,12 +17,13 @@ use tokio::sync::watch;
 use tokio::time::{timeout_at, Duration, Instant};
 
 use crate::cli::protocol::{
-    BulkResult, CliCommand, CliData, CliRequest, CliResponse, ForwardView, PROTOCOL_VERSION,
+    BulkResult, CliCommand, CliData, CliRequest, CliResponse, ForwardFields, ForwardView,
+    SaveChange, PROTOCOL_VERSION,
 };
-use crate::commands::forwards::{run_start_all, run_stop_all, runtime_or_default};
 use crate::error::AppError;
+use crate::ops::forwards::{self as ops, run_start_all, run_stop_all, runtime_or_default};
 use crate::ssh::engine;
-use crate::state::models::{ForwardConfig, ForwardStatus};
+use crate::state::models::{ForwardConfig, ForwardInput, ForwardStatus};
 use crate::state::AppState;
 
 /// How long to wait for a supervisor handle to appear in the registry after
@@ -80,6 +82,197 @@ async fn dispatch(state: &Arc<AppState>, req: CliRequest) -> Result<CliData, App
         CliCommand::Disconnect => disconnect(state, &require_target(req.target)?).await,
         CliCommand::ConnectAll => connect_all(state, req.wait, timeout_ms).await,
         CliCommand::DisconnectAll => disconnect_all(state).await,
+        CliCommand::Add => add(state, require_fields(req.forward)?).await,
+        CliCommand::Edit => {
+            let target = require_target(req.target)?;
+            edit(state, &target, require_fields(req.forward)?).await
+        }
+        CliCommand::Remove => remove(state, &require_target(req.target)?).await,
+        CliCommand::PasswordSet => password_flag(state, &require_target(req.target)?, true).await,
+        CliCommand::PasswordClear => {
+            password_flag(state, &require_target(req.target)?, false).await
+        }
+    }
+}
+
+fn require_fields(fields: Option<ForwardFields>) -> Result<ForwardFields, AppError> {
+    fields.ok_or_else(|| AppError::InvalidInput("this command requires forward fields".into()))
+}
+
+// --- CRUD (spec 03 §20): the same `ops::forwards` path the window uses ---
+
+/// The defaults a new forward gets for anything `add` did not specify — the
+/// same values the desktop form pre-fills (spec 04 §1).
+fn default_input() -> ForwardInput {
+    ForwardInput {
+        name: String::new(),
+        ssh_host: String::new(),
+        ssh_port: 22,
+        ssh_username: String::new(),
+        identity_file_path: None,
+        local_bind_address: "127.0.0.1".into(),
+        local_port: 0,
+        remote_host: String::new(),
+        remote_port: 0,
+        keep_alive_interval_sec: 30,
+        keep_alive_max_count: 5,
+        group_id: None,
+        tags: Vec::new(),
+    }
+}
+
+/// Overlay the fields that are present onto `input`. Pure — unit-tested.
+pub(crate) fn apply_fields(mut input: ForwardInput, fields: ForwardFields) -> ForwardInput {
+    if let Some(v) = fields.name {
+        input.name = v.trim().to_string();
+    }
+    if let Some(v) = fields.ssh_host {
+        input.ssh_host = v.trim().to_string();
+    }
+    if let Some(v) = fields.ssh_port {
+        input.ssh_port = v;
+    }
+    if let Some(v) = fields.ssh_username {
+        input.ssh_username = v.trim().to_string();
+    }
+    if let Some(v) = fields.identity_file_path {
+        let v = v.trim();
+        input.identity_file_path = (!v.is_empty()).then(|| v.to_string());
+    }
+    if let Some(v) = fields.local_bind_address {
+        input.local_bind_address = v.trim().to_string();
+    }
+    if let Some(v) = fields.local_port {
+        input.local_port = v;
+    }
+    if let Some(v) = fields.remote_host {
+        input.remote_host = v.trim().to_string();
+    }
+    if let Some(v) = fields.remote_port {
+        input.remote_port = v;
+    }
+    if let Some(v) = fields.keep_alive_interval_sec {
+        input.keep_alive_interval_sec = v;
+    }
+    if let Some(v) = fields.keep_alive_max_count {
+        input.keep_alive_max_count = v;
+    }
+    if let Some(v) = fields.tags {
+        input.tags = v;
+    }
+    input
+}
+
+/// The desktop form's rules (`src/lib/validation.ts`), minus the auth rule —
+/// the CLI enforces "password XOR identity" before it sends, because only the
+/// client knows whether a password is about to be stored. Pure — unit-tested.
+pub(crate) fn validate_input(input: &ForwardInput) -> Result<(), AppError> {
+    let mut problems: Vec<&str> = Vec::new();
+    if input.name.trim().is_empty() {
+        problems.push("name is required");
+    }
+    if input.ssh_host.trim().is_empty() {
+        problems.push("SSH host is required");
+    }
+    if input.ssh_username.trim().is_empty() {
+        problems.push("SSH username is required");
+    }
+    if input.local_bind_address.trim().is_empty() {
+        problems.push("local bind address is required");
+    }
+    if input.remote_host.trim().is_empty() {
+        problems.push("remote host is required");
+    }
+    // u16 already caps at 65535; 0 is the only out-of-range value.
+    if input.ssh_port == 0 {
+        problems.push("SSH port must be between 1 and 65535");
+    }
+    if input.local_port == 0 {
+        problems.push("local port must be between 1 and 65535");
+    }
+    if input.remote_port == 0 {
+        problems.push("remote port must be between 1 and 65535");
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(AppError::InvalidInput(problems.join("; ")))
+    }
+}
+
+/// A CLI-created or renamed forward must stay addressable by name, so a name
+/// already used by ANOTHER forward (case-insensitive) is refused. The desktop
+/// form does not enforce this; the CLI does because names are its targets.
+fn ensure_unique_name(
+    state: &Arc<AppState>,
+    name: &str,
+    except_id: Option<&str>,
+) -> Result<(), AppError> {
+    let wanted = name.to_lowercase();
+    let clash = state
+        .configs_snapshot()
+        .into_iter()
+        .any(|c| Some(c.id.as_str()) != except_id && c.name.to_lowercase() == wanted);
+    if clash {
+        return Err(AppError::InvalidInput(format!(
+            "a forward named '{name}' already exists; pick another name"
+        )));
+    }
+    Ok(())
+}
+
+async fn add(state: &Arc<AppState>, fields: ForwardFields) -> Result<CliData, AppError> {
+    let input = apply_fields(default_input(), fields);
+    validate_input(&input)?;
+    ensure_unique_name(state, &input.name, None)?;
+    let cfg = ops::create(state, input).await?;
+    Ok(saved(state, &cfg, SaveChange::Created))
+}
+
+async fn edit(
+    state: &Arc<AppState>,
+    target: &str,
+    fields: ForwardFields,
+) -> Result<CliData, AppError> {
+    if fields.is_empty() {
+        return Err(AppError::InvalidInput("nothing to change".into()));
+    }
+    let existing = resolve_target(state, target)?;
+    let input = apply_fields(ops::input_from_config(&existing), fields);
+    validate_input(&input)?;
+    ensure_unique_name(state, &input.name, Some(&existing.id))?;
+    let cfg = ops::update(state, existing.id, input).await?;
+    Ok(saved(state, &cfg, SaveChange::Updated))
+}
+
+async fn remove(state: &Arc<AppState>, target: &str) -> Result<CliData, AppError> {
+    let cfg = resolve_target(state, target)?;
+    ops::delete(state, &cfg.id).await?;
+    // The forward is gone: report its last config as disconnected.
+    Ok(saved(state, &cfg, SaveChange::Removed))
+}
+
+async fn password_flag(
+    state: &Arc<AppState>,
+    target: &str,
+    stored: bool,
+) -> Result<CliData, AppError> {
+    let cfg = resolve_target(state, target)?;
+    let change = if stored {
+        ops::mark_password_stored(state, &cfg.id, true).await?;
+        SaveChange::PasswordSet
+    } else {
+        ops::clear_password(state, &cfg.id).await?;
+        SaveChange::PasswordCleared
+    };
+    let cfg = state.get_config(&cfg.id).unwrap_or(cfg);
+    Ok(saved(state, &cfg, change))
+}
+
+fn saved(state: &Arc<AppState>, cfg: &ForwardConfig, change: SaveChange) -> CliData {
+    CliData::Saved {
+        forward: view(state, cfg),
+        change,
     }
 }
 
@@ -751,5 +944,143 @@ mod tests {
             }
             other => panic!("expected a version payload, got {other:?}"),
         }
+    }
+    // --- CRUD (spec 03 §20) ---
+
+    fn target_req(cmd: CliCommand, target: &str) -> CliRequest {
+        CliRequest {
+            target: Some(target.to_string()),
+            ..CliRequest::new(cmd)
+        }
+    }
+
+    fn fields(name: &str) -> ForwardFields {
+        ForwardFields {
+            name: Some(name.into()),
+            ssh_host: Some("bastion.example.com".into()),
+            ssh_username: Some("deploy".into()),
+            identity_file_path: Some("~/.ssh/id_ed25519".into()),
+            local_port: Some(15432),
+            remote_host: Some("db.internal".into()),
+            remote_port: Some(5432),
+            ..ForwardFields::default()
+        }
+    }
+
+    fn with_fields(cmd: CliCommand, target: Option<&str>, f: ForwardFields) -> CliRequest {
+        CliRequest {
+            target: target.map(str::to_string),
+            forward: Some(f),
+            ..CliRequest::new(cmd)
+        }
+    }
+
+    #[test]
+    fn apply_fields_overlays_only_present_fields_and_trims() {
+        let base = apply_fields(default_input(), fields("db"));
+        let edited = apply_fields(
+            base.clone(),
+            ForwardFields {
+                name: Some("  renamed ".into()),
+                identity_file_path: Some(String::new()),
+                tags: Some(vec!["prod".into()]),
+                ..ForwardFields::default()
+            },
+        );
+        assert_eq!(edited.name, "renamed");
+        assert_eq!(
+            edited.identity_file_path, None,
+            "empty string clears identity"
+        );
+        assert_eq!(edited.tags, vec!["prod".to_string()]);
+        // Untouched fields keep their values.
+        assert_eq!(edited.ssh_host, base.ssh_host);
+        assert_eq!(edited.local_port, 15432);
+        assert_eq!(edited.ssh_port, 22, "default ssh port");
+        assert_eq!(edited.local_bind_address, "127.0.0.1", "default bind");
+    }
+
+    #[test]
+    fn validate_input_reports_every_missing_field() {
+        let err = validate_input(&default_input()).expect_err("empty input is invalid");
+        let AppError::InvalidInput(msg) = err else {
+            panic!("expected invalidInput");
+        };
+        for needle in [
+            "name",
+            "SSH host",
+            "SSH username",
+            "remote host",
+            "local port",
+        ] {
+            assert!(msg.contains(needle), "{needle} missing from: {msg}");
+        }
+        assert!(validate_input(&apply_fields(default_input(), fields("db"))).is_ok());
+    }
+
+    #[tokio::test]
+    async fn add_edit_remove_round_trip_through_the_socket_handler() {
+        let state = state_with(&[]);
+
+        let res = handle_request(&state, with_fields(CliCommand::Add, None, fields("db"))).await;
+        let Some(CliData::Saved { forward, change }) = res.data else {
+            panic!("add failed: {:?}", res.error);
+        };
+        assert_eq!(change, SaveChange::Created);
+        assert!(!forward.has_stored_password);
+        assert_eq!(state.configs_snapshot().len(), 1);
+
+        // A second forward may not reuse the name (names are CLI targets).
+        let dup = handle_request(&state, with_fields(CliCommand::Add, None, fields("DB"))).await;
+        assert!(matches!(dup.error, Some(AppError::InvalidInput(_))));
+
+        let patch = ForwardFields {
+            local_port: Some(25432),
+            ..ForwardFields::default()
+        };
+        let res = handle_request(&state, with_fields(CliCommand::Edit, Some("db"), patch)).await;
+        let Some(CliData::Saved {
+            forward: edited,
+            change,
+        }) = res.data
+        else {
+            panic!("edit failed: {:?}", res.error);
+        };
+        assert_eq!(change, SaveChange::Updated);
+        assert_eq!(edited.id, forward.id, "edit keeps the id");
+        assert_eq!(edited.local_port, 25432);
+        assert_eq!(edited.remote_port, 5432, "untouched field kept");
+
+        let empty = handle_request(
+            &state,
+            with_fields(CliCommand::Edit, Some("db"), ForwardFields::default()),
+        )
+        .await;
+        assert!(matches!(empty.error, Some(AppError::InvalidInput(_))));
+
+        let res = handle_request(&state, target_req(CliCommand::Remove, "db")).await;
+        assert!(res.ok, "remove failed: {:?}", res.error);
+        assert!(state.configs_snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn password_set_flips_only_the_flag_and_clear_resets_it() {
+        let state = state_with(&[("id-a", "prod-db")]);
+        state
+            .set_password_checked("id-a", "hunter2".into())
+            .await
+            .expect("seed secret");
+        // sample_config starts with the flag on; clear it first.
+        let res = handle_request(&state, target_req(CliCommand::PasswordClear, "prod-db")).await;
+        assert!(res.ok, "{:?}", res.error);
+        assert!(!state.get_config("id-a").expect("cfg").has_stored_password);
+        assert_eq!(state.get_password("id-a"), None, "clear deletes the secret");
+
+        let res = handle_request(&state, target_req(CliCommand::PasswordSet, "prod-db")).await;
+        let Some(CliData::Saved { forward, change }) = res.data else {
+            panic!("password-set failed: {:?}", res.error);
+        };
+        assert_eq!(change, SaveChange::PasswordSet);
+        assert!(forward.has_stored_password);
     }
 }

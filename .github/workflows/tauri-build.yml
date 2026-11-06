@@ -104,3 +104,44 @@ jobs:
             src-tauri/target/release/bundle/**
           if-no-files-found: warn
           retention-days: 7
+
+  # The CLI-only edition (spec 03 §21): `--no-default-features` drops Tauri,
+  # WebKit and GTK, so it needs no system packages at all. Checked separately
+  # because the `build` job above only ever compiles the default (`gui`)
+  # feature set — a cfg mistake in the headless path would otherwise ship.
+  # macOS adds `keychain` (the shipped macOS CLI keeps the OS keychain).
+  cli-headless:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, features: "" }
+          - { os: macos-latest, features: "--features keychain" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+          key: cli-headless
+
+      - name: fmt + clippy + test (headless)
+        working-directory: src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --no-default-features ${{ matrix.features }} --all-targets -- -D warnings
+          cargo test --no-default-features ${{ matrix.features }}
+
+      - name: Smoke-test the binary
+        working-directory: src-tauri
+        run: |
+          cargo build --release --no-default-features ${{ matrix.features }}
+          ./target/release/tunnel-pilot --version | grep -q '(cli)'
+          ls -l target/release/tunnel-pilot

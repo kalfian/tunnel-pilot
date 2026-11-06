@@ -3,7 +3,9 @@
 //! `main.rs` calls [`dispatch`] before any Tauri code. When argv[1] is a known
 //! subcommand this runs a blocking `std::os::unix::net::UnixStream` round-trip
 //! and exits with a meaningful code; otherwise it returns `None` and the GUI
-//! starts as usual (`--minimized` is a flag, never a subcommand).
+//! starts as usual (`--minimized` is a flag, never a subcommand). A few
+//! subcommands never touch the socket: `--version`, the PATH shim, `daemon`
+//! (which IS the socket's owner), `service` and `desktop install`.
 //!
 //! No tokio here on purpose: a CLI invocation should not pay for a runtime.
 //! Rendering is plain ASCII with fixed-width columns — no ANSI colour, full
@@ -15,7 +17,7 @@ use std::time::Duration;
 
 use crate::cli::args::{self, Command, Invocation};
 use crate::cli::protocol::{
-    status_label, BulkResult, CliCommand, CliData, CliRequest, CliResponse, ForwardView,
+    status_label, BulkResult, CliCommand, CliData, CliRequest, CliResponse, ForwardView, SaveChange,
 };
 use crate::cli::shim::{self, CliShimStatus, ShimState};
 use crate::cli::SOCKET_ENV;
@@ -39,8 +41,9 @@ pub const EXIT_TIMEOUT: i32 = 6;
 
 /// Printed when the socket is absent. We never auto-launch the GUI: an agent
 /// must not silently start a desktop process.
-pub const NOT_RUNNING_HINT: &str =
-    "Tunnel Pilot is not running. Start it with: open -a \"Tunnel Pilot\"";
+pub const NOT_RUNNING_HINT: &str = "Tunnel Pilot is not running. Start the desktop app \
+     (macOS: open -a \"Tunnel Pilot\") or the headless daemon \
+     (tunnel-pilot daemon, or tunnel-pilot service install to keep it running).";
 
 /// Slack added to the wait budget when computing the socket read timeout, so
 /// the server's own answer always wins the race against our timeout.
@@ -94,6 +97,19 @@ pub fn run(args: &[String]) -> i32 {
     match &invocation.command {
         Command::InstallCli { target } => return run_shim(&invocation, shim::install(*target)),
         Command::UninstallCli => return run_shim(&invocation, shim::uninstall()),
+        Command::LocalVersion => {
+            println!(
+                "tunnel-pilot {} ({})",
+                env!("CARGO_PKG_VERSION"),
+                crate::cli::EDITION
+            );
+            return EXIT_OK;
+        }
+        // The daemon owns the socket rather than talking to it; `service` and
+        // `desktop install` manage the machine, not a running instance.
+        Command::Daemon(options) => return run_daemon(options),
+        Command::Service(action) => return run_service(action, invocation.json),
+        Command::DesktopInstall => return crate::cli::desktop::install(),
         _ => {}
     }
 
@@ -101,6 +117,17 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!("error: could not resolve the control socket path; set {SOCKET_ENV}");
         return EXIT_INTERNAL;
     };
+
+    if matches!(
+        invocation.command,
+        Command::Add { .. }
+            | Command::Edit { .. }
+            | Command::Remove { .. }
+            | Command::SetPassword { .. }
+            | Command::ClearPassword { .. }
+    ) {
+        return crate::cli::forward_cmd::run(&invocation, &path);
+    }
 
     let request = build_request(&invocation.command);
     let budget = read_timeout(&invocation.command);
@@ -115,7 +142,7 @@ pub fn run(args: &[String]) -> i32 {
 /// Print a transport failure and pick its exit code. A read timeout is a
 /// TIMEOUT (6), not an internal error: the app is running and answering the
 /// socket, it just did not finish in the budget the caller asked for.
-fn report_client_error(path: &Path, budget: Duration, error: ClientError) -> i32 {
+pub(crate) fn report_client_error(path: &Path, budget: Duration, error: ClientError) -> i32 {
     match error {
         ClientError::NotRunning => {
             eprintln!("{NOT_RUNNING_HINT}");
@@ -152,9 +179,19 @@ fn build_request(command: &Command) -> CliRequest {
     match command {
         // Handled before we ever build a request (help prints, the shim
         // subcommands run locally) — no socket round-trip exists for them.
-        Command::Help | Command::InstallCli { .. } | Command::UninstallCli => {
-            CliRequest::new(CliCommand::Version)
-        }
+        // The CRUD commands are multi-step and built in `forward_cmd`.
+        Command::Help
+        | Command::InstallCli { .. }
+        | Command::UninstallCli
+        | Command::LocalVersion
+        | Command::Daemon(_)
+        | Command::Service(_)
+        | Command::DesktopInstall
+        | Command::Add { .. }
+        | Command::Edit { .. }
+        | Command::Remove { .. }
+        | Command::SetPassword { .. }
+        | Command::ClearPassword { .. } => CliRequest::new(CliCommand::Version),
         Command::List => CliRequest::new(CliCommand::List),
         Command::Version => CliRequest::new(CliCommand::Version),
         Command::Status { target } => CliRequest {
@@ -205,7 +242,7 @@ fn read_timeout(command: &Command) -> Duration {
 /// Transport-level failure (never an application error — those come back as a
 /// `CliResponse` with `ok: false`).
 #[derive(Debug, PartialEq, Eq)]
-enum ClientError {
+pub(crate) enum ClientError {
     /// No socket / nothing listening ⇒ the app is not running.
     NotRunning,
     /// The read timeout elapsed before the response line arrived.
@@ -225,7 +262,7 @@ fn classify_read_error(error: &std::io::Error) -> ClientError {
 }
 
 #[cfg(unix)]
-fn send(
+pub(crate) fn send(
     path: &Path,
     request: &CliRequest,
     read_timeout: Duration,
@@ -267,7 +304,7 @@ fn send(
 }
 
 #[cfg(not(unix))]
-fn send(
+pub(crate) fn send(
     _path: &Path,
     _request: &CliRequest,
     _read_timeout: Duration,
@@ -278,7 +315,7 @@ fn send(
 }
 
 /// Print the response (human table or raw JSON) and pick the exit code.
-fn report(invocation: &Invocation, response: CliResponse) -> i32 {
+pub(crate) fn report(invocation: &Invocation, response: CliResponse) -> i32 {
     if !response.ok {
         let error = response
             .error
@@ -332,6 +369,61 @@ pub fn render(data: &CliData) -> String {
             app_version,
             protocol,
         } => render_version(app_version, *protocol),
+        CliData::Saved { forward, change } => render_saved(forward, *change),
+    }
+}
+
+/// One line saying what happened, then the forward's shape (no secret — only
+/// whether a password is stored).
+pub fn render_saved(forward: &ForwardView, change: SaveChange) -> String {
+    let verb = match change {
+        SaveChange::Created => "created",
+        SaveChange::Updated => "updated",
+        SaveChange::Removed => "removed",
+        SaveChange::PasswordSet => "password stored for",
+        SaveChange::PasswordCleared => "password cleared for",
+    };
+    let auth = match forward.identity_file_path.as_deref() {
+        Some(key) if !key.is_empty() => format!("key {key}"),
+        _ if forward.has_stored_password => "password (stored)".to_string(),
+        _ => "none".to_string(),
+    };
+    format!(
+        "{verb} {}  ({})\n  local   {}\n  remote  {}\n  via     {}\n  auth    {auth}\n",
+        forward.name,
+        forward.id,
+        forward.local_endpoint(),
+        forward.remote_endpoint(),
+        forward.ssh_endpoint(),
+    )
+}
+
+/// `daemon`: run the headless engine in the foreground (Unix only — the
+/// control socket is a Unix domain socket).
+fn run_daemon(options: &args::DaemonOptions) -> i32 {
+    #[cfg(unix)]
+    {
+        crate::daemon::run(options)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = options;
+        eprintln!("error: the headless daemon is only available on macOS and Linux");
+        EXIT_USAGE
+    }
+}
+
+/// `service install|uninstall|status`.
+fn run_service(action: &args::ServiceAction, json: bool) -> i32 {
+    #[cfg(unix)]
+    {
+        crate::daemon::service::run(action, json)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (action, json);
+        eprintln!("error: the background service is only available on macOS and Linux");
+        EXIT_USAGE
     }
 }
 
@@ -394,13 +486,7 @@ pub fn render_status(forward: &ForwardView, stats: &TunnelStats) -> String {
     field("status", status_label(forward.status).to_string());
     field("local", forward.local_endpoint());
     field("remote", forward.remote_endpoint());
-    field(
-        "ssh",
-        format!(
-            "{}@{}:{}",
-            forward.ssh_username, forward.ssh_host, forward.ssh_port
-        ),
-    );
+    field("ssh", forward.ssh_endpoint());
     if !forward.tags.is_empty() {
         field("tags", forward.tags.join(", "));
     }
@@ -501,7 +587,10 @@ pub fn exit_code_for_data(command: &Command, data: &CliData) -> i32 {
         Command::Connect { wait: true, .. } | Command::ConnectAll { wait: true, .. }
     );
     match data {
-        CliData::List { .. } | CliData::Status { .. } | CliData::Version { .. } => EXIT_OK,
+        CliData::List { .. }
+        | CliData::Status { .. }
+        | CliData::Version { .. }
+        | CliData::Saved { .. } => EXIT_OK,
         CliData::Action {
             forward, timed_out, ..
         } => {

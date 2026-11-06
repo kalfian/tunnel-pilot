@@ -1,8 +1,8 @@
 //! Hand-rolled argument parsing for the CLI (spec 03 §20).
 //!
-//! Deliberately no `clap`: the surface is eight fixed subcommands with four
-//! flags, and the GUI binary should not carry an argument-parsing framework it
-//! never uses. Revisit if the surface grows.
+//! Deliberately no `clap`: the surface is a fixed set of subcommands with a
+//! handful of flags, and neither the GUI nor the lean CLI-only binary should
+//! carry an argument-parsing framework for it. Revisit if the surface grows.
 //!
 //! [`parse`] is pure — it takes the argv tail and returns either an
 //! [`Invocation`] or a [`UsageError`], so every branch is unit-testable without
@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 
-use crate::cli::protocol::{MAX_TIMEOUT_MS, MIN_TIMEOUT_MS};
+use crate::cli::protocol::{ForwardFields, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS};
 use crate::cli::shim::ShimTarget;
 
 /// Lower/upper bounds for `--timeout`, in seconds (mirrors the server clamp).
@@ -64,6 +64,72 @@ pub enum Command {
     /// Remove the PATH shim. Local, like `install-cli`.
     UninstallCli,
     Version,
+    /// `--version` / `-V`: this binary's own version and edition. Local — it
+    /// never touches the socket (install scripts call it).
+    LocalVersion,
+    /// Create a forward. `fields.name` comes from the positional name.
+    Add {
+        fields: ForwardFields,
+        password: PasswordSource,
+    },
+    /// Change a forward's fields (and optionally switch it to a password).
+    Edit {
+        target: String,
+        fields: ForwardFields,
+        password: PasswordSource,
+    },
+    /// Delete a forward (disconnects it and drops its stored password).
+    Remove {
+        target: String,
+    },
+    /// Store a password for a forward (prompted, or read from stdin).
+    SetPassword {
+        target: String,
+        source: PasswordSource,
+    },
+    /// Delete a forward's stored password.
+    ClearPassword {
+        target: String,
+    },
+    /// Run the headless engine + control socket in the foreground.
+    Daemon(DaemonOptions),
+    /// Manage the background service that runs `daemon` at login/boot.
+    Service(ServiceAction),
+    /// Install the desktop app (tray + window) on top of a CLI-only install.
+    DesktopInstall,
+}
+
+/// Where a password comes from. Never a flag value: argv is visible in `ps`
+/// and shell history, so a secret on the command line is not offered at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PasswordSource {
+    /// No password for this invocation.
+    #[default]
+    None,
+    /// Prompt on the controlling terminal with echo off (`--password`).
+    Prompt,
+    /// Read one line from stdin (`--password-stdin`), for scripts.
+    Stdin,
+}
+
+/// `daemon` flags.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DaemonOptions {
+    /// Connect every forward once the daemon is up (`--connect-all`).
+    pub connect_all: bool,
+    /// Connect these forwards (id or name) once up (`--connect`, repeatable).
+    pub connect: Vec<String>,
+}
+
+/// `service` subcommands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceAction {
+    /// Write + enable the systemd user unit / launchd agent and start it.
+    Install(DaemonOptions),
+    /// Stop + disable + remove it.
+    Uninstall,
+    /// Report whether it is installed / running.
+    Status,
 }
 
 /// A user-facing usage failure → exit code 2.
@@ -101,6 +167,17 @@ pub fn is_cli_subcommand(word: &str) -> bool {
             | "install-cli"
             | "uninstall-cli"
             | "version"
+            | "--version"
+            | "-V"
+            | "add"
+            | "edit"
+            | "remove"
+            | "rm"
+            | "set-password"
+            | "clear-password"
+            | "daemon"
+            | "service"
+            | "desktop"
             | "help"
             | "--help"
             | "-h"
@@ -108,12 +185,12 @@ pub fn is_cli_subcommand(word: &str) -> bool {
 }
 
 pub const HELP_TEXT: &str = "\
-tunnel-pilot — control the running Tunnel Pilot app from a terminal
+tunnel-pilot — SSH port forwards from a terminal (desktop app or headless daemon)
 
 USAGE:
     tunnel-pilot <command> [options]
 
-COMMANDS:
+TUNNELS:
     list                       List every configured forward and its status
     status <id|name>           Show one forward's status, endpoints and stats
     connect <id|name>          Connect a forward and wait for a terminal status
@@ -121,9 +198,35 @@ COMMANDS:
     disconnect <id|name>       Disconnect a forward (waits for teardown)
     connect-all                Connect every forward (tray 'Start All')
     disconnect-all             Disconnect every live forward (tray 'Stop All')
+
+FORWARDS:
+    add <name> --ssh <user@host[:port]> --forward <[bind:]lport:host:rport>
+               (--identity <keyfile> | --password | --password-stdin)
+                               Create a forward
+    edit <id|name> [field options]
+                               Change a forward (disconnects it if live)
+    remove <id|name>           Delete a forward and its stored password (alias: rm)
+    set-password <id|name> [--password-stdin]
+                               Store a password (prompted with echo off)
+    clear-password <id|name>   Delete the stored password
+
+HEADLESS / SERVER:
+    daemon [--connect-all] [--connect <id|name>]...
+                               Run the tunnel engine without a window, in the
+                               foreground (Ctrl-C / SIGTERM disconnects and exits)
+    service install [--connect-all] [--connect <id|name>]...
+                               Run the daemon in the background at login/boot
+                               (systemd user unit on Linux, launchd agent on macOS)
+    service uninstall          Stop and remove that service
+    service status             Show whether the service is installed and running
+    desktop install            Install the desktop app (tray + window); it reuses
+                               the same forwards and passwords
+
+OTHER:
     install-cli                Symlink this binary onto PATH as 'tunnel-pilot'
     uninstall-cli              Remove that symlink
-    version                    App version + protocol version
+    version                    CLI version + version of the running app/daemon
+    --version, -V              This binary's version and edition (no app needed)
     help                       Show this help
 
 OPTIONS:
@@ -134,6 +237,22 @@ OPTIONS:
     --force                    connect only: bounce an already-connected tunnel
     --user | --system          install-cli only: force ~/.local/bin or /usr/local/bin
                                (/usr/local/bin usually prompts for admin rights)
+
+FIELD OPTIONS (add / edit):
+    --name <name>              edit only: rename (add takes the name positionally)
+    --ssh <user@host[:port]>   SSH login; edit also accepts a bare host
+    --ssh-port <port>          SSH port (default 22)
+    --forward, -L <spec>       [bind:]localPort:remoteHost:remotePort, as in 'ssh -L'
+                               (bind defaults to 127.0.0.1)
+    --identity <keyfile>       Private key file (switches edit to key auth and
+                               clears a stored password)
+    --password                 Prompt for a password (echo off)
+    --password-stdin           Read the password from the first line of stdin
+    --keepalive <secs>         Keep-alive interval (0 = default)
+    --keepalive-max <n>        Missed keep-alives before reconnect (0 = default)
+    --tag <tag>                Add a tag (repeatable; on edit, replaces the tags)
+    --no-tags                  edit only: remove every tag
+    A password is never accepted as a flag value (it would land in ps/history).
 
 TARGETS:
     A target is a forward id (exact) or name (case-insensitive, exact).
@@ -147,9 +266,13 @@ EXIT CODES:
     install-cli / uninstall-cli run locally (no socket, no exit 3): 0 ok,
     1 filesystem/permission failure, 2 refused (dev build, or something that is
     not our symlink is in the way).
+    add / edit validation failures exit 2. daemon exits 1 when another app or
+    daemon already owns the control socket.
 
 ENVIRONMENT:
     TUNNEL_PILOT_SOCKET        Socket path override (both app and CLI)
+    TUNNEL_PILOT_CONFIG_DIR    Config dir override for the daemon and the CLI's
+                               password store (default: the app's config dir)
     TUNNEL_PILOT_ALLOW_DEV_SHIM=1  Let install-cli link a development build
 ";
 
@@ -167,6 +290,15 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
     let mut user = false;
     let mut system = false;
     let mut positionals: Vec<&str> = Vec::new();
+    // add / edit field flags.
+    let mut fields = ForwardFields::default();
+    let mut field_flag: Option<&str> = None;
+    let mut password = PasswordSource::None;
+    let mut no_identity_conflict = false;
+    let mut tags: Option<Vec<String>> = None;
+    // daemon / service install flags.
+    let mut daemon = DaemonOptions::default();
+    let mut daemon_flag: Option<&str> = None;
 
     let mut rest = args[1..].iter().map(|s| s.as_str()).peekable();
     while let Some(arg) = rest.next() {
@@ -176,6 +308,88 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             "--force" => force = true,
             "--user" => user = true,
             "--system" => system = true,
+            "--password" => {
+                set_password_source(&mut password, PasswordSource::Prompt)?;
+            }
+            "--password-stdin" => {
+                set_password_source(&mut password, PasswordSource::Stdin)?;
+            }
+            "--no-tags" => {
+                field_flag = Some("--no-tags");
+                tags = Some(Vec::new());
+            }
+            "--connect-all" => {
+                daemon_flag = Some("--connect-all");
+                daemon.connect_all = true;
+            }
+            _ if is_flag(arg, "--connect") => {
+                daemon_flag = Some("--connect");
+                daemon
+                    .connect
+                    .push(take_value(arg, "--connect", &mut rest)?);
+            }
+            _ if is_flag(arg, "--name") => {
+                field_flag = Some("--name");
+                fields.name = Some(non_blank("--name", take_value(arg, "--name", &mut rest)?)?);
+            }
+            _ if is_flag(arg, "--ssh") => {
+                field_flag = Some("--ssh");
+                let (login_user, host, port) = parse_ssh(&take_value(arg, "--ssh", &mut rest)?)?;
+                if login_user.is_some() {
+                    fields.ssh_username = login_user;
+                }
+                fields.ssh_host = Some(host);
+                if port.is_some() && fields.ssh_port.is_none() {
+                    fields.ssh_port = port;
+                }
+            }
+            _ if is_flag(arg, "--ssh-port") => {
+                field_flag = Some("--ssh-port");
+                fields.ssh_port = Some(parse_port(
+                    "--ssh-port",
+                    &take_value(arg, "--ssh-port", &mut rest)?,
+                )?);
+            }
+            _ if is_flag(arg, "--forward") || is_flag(arg, "-L") => {
+                field_flag = Some("--forward");
+                let flag = if arg.starts_with("-L") {
+                    "-L"
+                } else {
+                    "--forward"
+                };
+                let spec = parse_forward(&take_value(arg, flag, &mut rest)?)?;
+                fields.local_bind_address = Some(spec.bind);
+                fields.local_port = Some(spec.local_port);
+                fields.remote_host = Some(spec.remote_host);
+                fields.remote_port = Some(spec.remote_port);
+            }
+            _ if is_flag(arg, "--identity") => {
+                field_flag = Some("--identity");
+                no_identity_conflict = true;
+                fields.identity_file_path = Some(non_blank(
+                    "--identity",
+                    take_value(arg, "--identity", &mut rest)?,
+                )?);
+            }
+            _ if is_flag(arg, "--keepalive") => {
+                field_flag = Some("--keepalive");
+                fields.keep_alive_interval_sec = Some(parse_u32(
+                    "--keepalive",
+                    &take_value(arg, "--keepalive", &mut rest)?,
+                )?);
+            }
+            _ if is_flag(arg, "--keepalive-max") => {
+                field_flag = Some("--keepalive-max");
+                fields.keep_alive_max_count = Some(parse_u32(
+                    "--keepalive-max",
+                    &take_value(arg, "--keepalive-max", &mut rest)?,
+                )?);
+            }
+            _ if is_flag(arg, "--tag") => {
+                field_flag = Some("--tag");
+                let tag = non_blank("--tag", take_value(arg, "--tag", &mut rest)?)?;
+                tags.get_or_insert_with(Vec::new).push(tag);
+            }
             "--help" | "-h" => {
                 return Ok(Invocation {
                     command: Command::Help,
@@ -214,6 +428,37 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             "--user and --system are mutually exclusive",
         ));
     }
+    let is_field_command = matches!(subcommand.as_str(), "add" | "edit");
+    if let Some(flag) = field_flag {
+        if !is_field_command {
+            return Err(UsageError::new(format!(
+                "{flag} only applies to 'add' / 'edit', not '{subcommand}'"
+            )));
+        }
+    }
+    if password != PasswordSource::None
+        && !matches!(subcommand.as_str(), "add" | "edit" | "set-password")
+    {
+        return Err(UsageError::new(format!(
+            "--password/--password-stdin only apply to 'add', 'edit' and 'set-password', \
+             not '{subcommand}'"
+        )));
+    }
+    if no_identity_conflict && password != PasswordSource::None {
+        return Err(UsageError::new(
+            "use either --identity or a password, not both",
+        ));
+    }
+    if let Some(flag) = daemon_flag {
+        let daemon_like = subcommand == "daemon"
+            || (subcommand == "service" && positionals.first() == Some(&"install"));
+        if !daemon_like {
+            return Err(UsageError::new(format!(
+                "{flag} only applies to 'daemon' / 'service install', not '{subcommand}'"
+            )));
+        }
+    }
+    fields.tags = tags;
     let command = match subcommand.as_str() {
         "help" | "--help" | "-h" => Command::Help,
         "list" => {
@@ -257,6 +502,86 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             no_positionals("uninstall-cli", &positionals)?;
             Command::UninstallCli
         }
+        "--version" | "-V" => {
+            no_positionals(subcommand, &positionals)?;
+            Command::LocalVersion
+        }
+        "add" => {
+            let name = one_target("add", &positionals)?;
+            if fields.name.is_some() {
+                return Err(UsageError::new(
+                    "'add' takes the name positionally; --name is for 'edit'",
+                ));
+            }
+            if fields.ssh_host.is_none() || fields.ssh_username.is_none() {
+                return Err(UsageError::new(
+                    "'add' needs --ssh <user@host[:port]> (with a user)",
+                ));
+            }
+            if fields.local_port.is_none() {
+                return Err(UsageError::new(
+                    "'add' needs --forward <[bind:]localPort:remoteHost:remotePort>",
+                ));
+            }
+            if fields.identity_file_path.is_none() && password == PasswordSource::None {
+                return Err(UsageError::new(
+                    "'add' needs an auth method: --identity <keyfile>, --password or \
+                     --password-stdin",
+                ));
+            }
+            fields.name = Some(non_blank("name", name)?);
+            Command::Add { fields, password }
+        }
+        "edit" => {
+            let target = one_target("edit", &positionals)?;
+            if fields.is_empty() && password == PasswordSource::None {
+                return Err(UsageError::new(
+                    "'edit' needs at least one field option (see 'tunnel-pilot help')",
+                ));
+            }
+            Command::Edit {
+                target,
+                fields,
+                password,
+            }
+        }
+        "remove" | "rm" => Command::Remove {
+            target: one_target("remove", &positionals)?,
+        },
+        "set-password" => {
+            let target = one_target("set-password", &positionals)?;
+            let source = match password {
+                PasswordSource::None => PasswordSource::Prompt,
+                other => other,
+            };
+            Command::SetPassword { target, source }
+        }
+        "clear-password" => Command::ClearPassword {
+            target: one_target("clear-password", &positionals)?,
+        },
+        "daemon" => {
+            no_positionals("daemon", &positionals)?;
+            Command::Daemon(daemon)
+        }
+        "service" => match positionals.as_slice() {
+            ["install"] => Command::Service(ServiceAction::Install(daemon)),
+            ["uninstall"] => Command::Service(ServiceAction::Uninstall),
+            ["status"] => Command::Service(ServiceAction::Status),
+            [] => {
+                return Err(UsageError::new(
+                    "'service' needs an action: install, uninstall or status",
+                ))
+            }
+            [other, ..] => {
+                return Err(UsageError::new(format!(
+                    "unknown service action '{other}' (install, uninstall, status)"
+                )))
+            }
+        },
+        "desktop" => match positionals.as_slice() {
+            ["install"] => Command::DesktopInstall,
+            _ => return Err(UsageError::new("usage: tunnel-pilot desktop install")),
+        },
         other => {
             return Err(UsageError::new(format!("unknown command '{other}'")));
         }
@@ -266,6 +591,151 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
         command,
         json,
         socket,
+    })
+}
+
+/// Whether `arg` is `flag` itself or its `flag=value` form.
+fn is_flag(arg: &str, flag: &str) -> bool {
+    arg == flag
+        || arg
+            .strip_prefix(flag)
+            .is_some_and(|rest| rest.starts_with('='))
+}
+
+fn set_password_source(
+    current: &mut PasswordSource,
+    next: PasswordSource,
+) -> Result<(), UsageError> {
+    if *current != PasswordSource::None && *current != next {
+        return Err(UsageError::new(
+            "--password and --password-stdin are mutually exclusive",
+        ));
+    }
+    *current = next;
+    Ok(())
+}
+
+fn non_blank(what: &str, value: String) -> Result<String, UsageError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(UsageError::new(format!("{what} must not be empty")));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn parse_port(what: &str, raw: &str) -> Result<u16, UsageError> {
+    match raw.trim().parse::<u16>() {
+        Ok(port) if port > 0 => Ok(port),
+        _ => Err(UsageError::new(format!(
+            "{what} expects a port between 1 and 65535, got '{raw}'"
+        ))),
+    }
+}
+
+fn parse_u32(what: &str, raw: &str) -> Result<u32, UsageError> {
+    raw.trim()
+        .parse::<u32>()
+        .map_err(|_| UsageError::new(format!("{what} expects a whole number, got '{raw}'")))
+}
+
+/// Strip one pair of IPv6 brackets: `[::1]` → `::1`.
+fn unbracket(host: &str) -> &str {
+    host.strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host)
+}
+
+/// `--ssh` value: `[user@]host[:port]`, host may be a bracketed IPv6 literal.
+/// A bare (unbracketed) IPv6 address is taken whole as the host. Pure.
+pub fn parse_ssh(raw: &str) -> Result<(Option<String>, String, Option<u16>), UsageError> {
+    let raw = raw.trim();
+    let (user, host_port) = match raw.rsplit_once('@') {
+        Some((user, rest)) => {
+            if user.is_empty() {
+                return Err(UsageError::new(format!("--ssh has an empty user: '{raw}'")));
+            }
+            (Some(user.to_string()), rest)
+        }
+        None => (None, raw),
+    };
+    let (host, port) = if let Some(after_open) = host_port.strip_prefix('[') {
+        let Some((inner, tail)) = after_open.split_once(']') else {
+            return Err(UsageError::new(format!(
+                "--ssh has an unclosed '[': '{raw}'"
+            )));
+        };
+        let port = match tail.strip_prefix(':') {
+            Some(p) => Some(parse_port("--ssh port", p)?),
+            None if tail.is_empty() => None,
+            None => {
+                return Err(UsageError::new(format!(
+                    "--ssh: unexpected '{tail}' in '{raw}'"
+                )))
+            }
+        };
+        (inner.to_string(), port)
+    } else if host_port.matches(':').count() == 1 {
+        let (h, p) = host_port.split_once(':').unwrap_or((host_port, ""));
+        (h.to_string(), Some(parse_port("--ssh port", p)?))
+    } else {
+        (host_port.to_string(), None)
+    };
+    if host.is_empty() {
+        return Err(UsageError::new(format!("--ssh has an empty host: '{raw}'")));
+    }
+    Ok((user, host, port))
+}
+
+/// A parsed `--forward` / `-L` spec.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForwardSpec {
+    pub bind: String,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
+/// `--forward` value in `ssh -L` syntax: `[bind:]localPort:remoteHost:remotePort`.
+/// `bind` and `remoteHost` may be bracketed IPv6 literals; `*` binds all
+/// interfaces (`0.0.0.0`), as in OpenSSH. Pure.
+pub fn parse_forward(raw: &str) -> Result<ForwardSpec, UsageError> {
+    let bad = || {
+        UsageError::new(format!(
+            "--forward expects [bind:]localPort:remoteHost:remotePort, got '{raw}'"
+        ))
+    };
+    let raw = raw.trim();
+    // remotePort: after the last ':'.
+    let (rest, remote_port) = raw.rsplit_once(':').ok_or_else(bad)?;
+    let remote_port = parse_port("--forward remote port", remote_port)?;
+    // remoteHost: a bracketed literal, or the segment after the next ':'.
+    let (rest, remote_host) = if rest.ends_with(']') {
+        let open = rest.rfind('[').ok_or_else(bad)?;
+        let head = rest[..open].strip_suffix(':').ok_or_else(bad)?;
+        (head, unbracket(&rest[open..]).to_string())
+    } else {
+        let (head, host) = rest.rsplit_once(':').ok_or_else(bad)?;
+        (head, host.to_string())
+    };
+    if remote_host.is_empty() {
+        return Err(bad());
+    }
+    // localPort, with an optional bind address before it.
+    let (bind, local_port) = match rest.rsplit_once(':') {
+        Some((bind, port)) => (unbracket(bind).to_string(), port),
+        None => ("127.0.0.1".to_string(), rest),
+    };
+    let local_port = parse_port("--forward local port", local_port)?;
+    let bind = match bind.as_str() {
+        "" => return Err(bad()),
+        "*" => "0.0.0.0".to_string(),
+        _ => bind,
+    };
+    Ok(ForwardSpec {
+        bind,
+        local_port,
+        remote_host,
+        remote_port,
     })
 }
 
@@ -617,5 +1087,233 @@ mod tests {
         ] {
             assert!(HELP_TEXT.contains(word), "help must mention {word}");
         }
+    }
+    // --- spec 03 §20/§21: CRUD, daemon, service, desktop ---
+
+    #[test]
+    fn new_subcommands_are_recognized_by_the_dispatch_probe() {
+        for word in [
+            "add",
+            "edit",
+            "remove",
+            "rm",
+            "set-password",
+            "clear-password",
+            "daemon",
+            "service",
+            "desktop",
+            "--version",
+            "-V",
+        ] {
+            assert!(is_cli_subcommand(word), "{word} must start a CLI run");
+        }
+    }
+
+    #[test]
+    fn parse_ssh_handles_users_ports_and_ipv6() {
+        assert_eq!(
+            parse_ssh("deploy@bastion").expect("ssh"),
+            (Some("deploy".into()), "bastion".into(), None)
+        );
+        assert_eq!(
+            parse_ssh("deploy@bastion:2222").expect("ssh"),
+            (Some("deploy".into()), "bastion".into(), Some(2222))
+        );
+        assert_eq!(
+            parse_ssh("ops@[::1]:2200").expect("ssh"),
+            (Some("ops".into()), "::1".into(), Some(2200))
+        );
+        assert_eq!(
+            parse_ssh("fe80::1").expect("bare ipv6"),
+            (None, "fe80::1".into(), None)
+        );
+        assert!(parse_ssh("@host").is_err());
+        assert!(parse_ssh("user@").is_err());
+        assert!(parse_ssh("user@host:0").is_err());
+        assert!(parse_ssh("user@[::1").is_err());
+    }
+
+    #[test]
+    fn parse_forward_follows_ssh_dash_l_syntax() {
+        let spec = parse_forward("5432:db.internal:5432").expect("spec");
+        assert_eq!(spec.bind, "127.0.0.1");
+        assert_eq!(spec.local_port, 5432);
+        assert_eq!(spec.remote_host, "db.internal");
+        assert_eq!(spec.remote_port, 5432);
+
+        let spec = parse_forward("0.0.0.0:8080:web:80").expect("bind");
+        assert_eq!(spec.bind, "0.0.0.0");
+        assert_eq!(spec.local_port, 8080);
+
+        let spec = parse_forward("*:8080:[fe80::1]:80").expect("wildcard + ipv6");
+        assert_eq!(spec.bind, "0.0.0.0");
+        assert_eq!(spec.remote_host, "fe80::1");
+
+        let spec = parse_forward("[::1]:9000:svc:90").expect("ipv6 bind");
+        assert_eq!(spec.bind, "::1");
+
+        for bad in [
+            "5432",
+            "5432:db",
+            "x:db:5432",
+            "5432:db:0",
+            ":5432:db:1",
+            "1::2",
+        ] {
+            assert!(parse_forward(bad).is_err(), "{bad} must be rejected");
+        }
+    }
+
+    #[test]
+    fn add_requires_ssh_forward_and_exactly_one_auth() {
+        let ok = parse_str(&[
+            "add",
+            "db",
+            "--ssh",
+            "deploy@bastion:2222",
+            "-L",
+            "15432:db.internal:5432",
+            "--identity",
+            "~/.ssh/id",
+            "--tag",
+            "prod",
+        ])
+        .expect("add");
+        let Command::Add { fields, password } = ok.command else {
+            panic!("expected add");
+        };
+        assert_eq!(fields.name.as_deref(), Some("db"));
+        assert_eq!(fields.ssh_port, Some(2222));
+        assert_eq!(fields.local_port, Some(15432));
+        assert_eq!(fields.tags, Some(vec!["prod".to_string()]));
+        assert_eq!(password, PasswordSource::None);
+
+        let with_pw = parse_str(&[
+            "add",
+            "db",
+            "--ssh=deploy@bastion",
+            "--forward=1:h:2",
+            "--password-stdin",
+        ])
+        .expect("add with password");
+        assert!(matches!(
+            with_pw.command,
+            Command::Add {
+                password: PasswordSource::Stdin,
+                ..
+            }
+        ));
+
+        for bad in [
+            vec!["add", "db", "--forward", "1:h:2", "--identity", "k"],
+            vec![
+                "add",
+                "db",
+                "--ssh",
+                "host",
+                "--forward",
+                "1:h:2",
+                "--identity",
+                "k",
+            ],
+            vec!["add", "db", "--ssh", "u@h", "--identity", "k"],
+            vec!["add", "db", "--ssh", "u@h", "--forward", "1:h:2"],
+            vec![
+                "add",
+                "db",
+                "--ssh",
+                "u@h",
+                "--forward",
+                "1:h:2",
+                "--identity",
+                "k",
+                "--password",
+            ],
+            vec![
+                "add",
+                "--ssh",
+                "u@h",
+                "--forward",
+                "1:h:2",
+                "--identity",
+                "k",
+            ],
+        ] {
+            assert!(parse_str(&bad).is_err(), "{bad:?} must be a usage error");
+        }
+    }
+
+    #[test]
+    fn field_and_daemon_flags_are_scoped_to_their_commands() {
+        assert!(parse_str(&["list", "--ssh", "u@h"]).is_err());
+        assert!(parse_str(&["connect", "db", "--password"]).is_err());
+        assert!(parse_str(&["list", "--connect-all"]).is_err());
+        assert!(parse_str(&["service", "status", "--connect-all"]).is_err());
+        assert!(parse_str(&["edit", "db"]).is_err(), "edit needs a change");
+        assert!(parse_str(&["edit", "db", "--no-tags"]).is_ok());
+    }
+
+    #[test]
+    fn set_password_defaults_to_a_prompt() {
+        let inv = parse_str(&["set-password", "db"]).expect("parse");
+        assert_eq!(
+            inv.command,
+            Command::SetPassword {
+                target: "db".into(),
+                source: PasswordSource::Prompt
+            }
+        );
+        let inv = parse_str(&["set-password", "db", "--password-stdin"]).expect("parse");
+        assert!(matches!(
+            inv.command,
+            Command::SetPassword {
+                source: PasswordSource::Stdin,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn daemon_service_and_desktop_parse() {
+        let inv = parse_str(&[
+            "daemon",
+            "--connect-all",
+            "--connect",
+            "db",
+            "--connect=web",
+        ])
+        .expect("daemon");
+        assert_eq!(
+            inv.command,
+            Command::Daemon(DaemonOptions {
+                connect_all: true,
+                connect: vec!["db".into(), "web".into()],
+            })
+        );
+        let inv = parse_str(&["service", "install", "--connect-all"]).expect("service install");
+        assert!(matches!(
+            inv.command,
+            Command::Service(ServiceAction::Install(DaemonOptions {
+                connect_all: true,
+                ..
+            }))
+        ));
+        assert_eq!(
+            parse_str(&["service", "uninstall"])
+                .expect("uninstall")
+                .command,
+            Command::Service(ServiceAction::Uninstall)
+        );
+        assert!(parse_str(&["service"]).is_err());
+        assert!(parse_str(&["service", "restart"]).is_err());
+        assert_eq!(
+            parse_str(&["desktop", "install"]).expect("desktop").command,
+            Command::DesktopInstall
+        );
+        assert!(parse_str(&["desktop"]).is_err());
+        assert_eq!(
+            parse_str(&["--version"]).expect("version").command,
+            Command::LocalVersion
+        );
     }
 }

@@ -115,3 +115,88 @@ jobs:
           # resolves the configured GitHub Releases endpoint (spec 03 §16).
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  # CLI-only edition (spec 03 §21): a small binary with no Tauri/WebKit/GTK for
+  # servers and headless boxes, installed by `install.sh --cli`. Linux builds
+  # are static musl (run on any distro, no glibc floor); macOS is a universal
+  # binary that keeps the OS keychain (`--features keychain`). Each archive gets
+  # a `.sha256` sidecar that install.sh verifies. Uploaded to the same draft
+  # release the desktop job created, hence `needs: release`.
+  cli:
+    needs: release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, asset: linux-x86_64, target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-24.04-arm, asset: linux-aarch64, target: aarch64-unknown-linux-musl }
+          - { os: macos-latest, asset: macos-universal, target: universal }
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install musl toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'Linux' && matrix.target || 'aarch64-apple-darwin,x86_64-apple-darwin' }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+          key: cli-${{ matrix.asset }}
+
+      - name: Build (Linux, static musl)
+        if: runner.os == 'Linux'
+        working-directory: src-tauri
+        env:
+          # aws-lc-sys (russh's crypto) compiles C. cc-rs would look for a
+          # `<arch>-linux-musl-gcc` cross compiler that musl-tools does not
+          # ship; its `musl-gcc` wrapper targets the runner's own arch, which
+          # is why aarch64 builds on a native arm runner.
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
+        run: |
+          cargo build --release --locked --no-default-features --target ${{ matrix.target }}
+          mkdir -p ../dist
+          cp target/${{ matrix.target }}/release/tunnel-pilot ../dist/tunnel-pilot
+          strip ../dist/tunnel-pilot
+
+      - name: Build (macOS, universal + keychain)
+        if: runner.os == 'macOS'
+        working-directory: src-tauri
+        run: |
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked --no-default-features --features keychain --target "$t"
+          done
+          mkdir -p ../dist
+          lipo -create -output ../dist/tunnel-pilot \
+            target/aarch64-apple-darwin/release/tunnel-pilot \
+            target/x86_64-apple-darwin/release/tunnel-pilot
+          strip -x ../dist/tunnel-pilot
+
+      - name: Package + checksum
+        run: |
+          ./dist/tunnel-pilot --version | grep -q '(cli)'
+          name="tunnel-pilot-cli-${{ matrix.asset }}.tar.gz"
+          tar -czf "$name" -C dist tunnel-pilot
+          if command -v sha256sum >/dev/null; then sha256sum "$name" > "$name.sha256"; else shasum -a 256 "$name" > "$name.sha256"; fi
+          cat "$name.sha256"
+          ls -l "$name"
+
+      - name: Upload to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" tunnel-pilot-cli-${{ matrix.asset }}.tar.gz tunnel-pilot-cli-${{ matrix.asset }}.tar.gz.sha256 --clobber

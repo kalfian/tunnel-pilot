@@ -8,8 +8,11 @@
 //! snapshot is already in display order (newest first) with no per-read reverse.
 
 use std::collections::VecDeque;
-use std::sync::{Mutex, RwLock};
+use std::sync::Mutex;
+#[cfg(feature = "gui")]
+use std::sync::RwLock;
 
+#[cfg(feature = "gui")]
 use tauri::{AppHandle, Emitter};
 
 use crate::events;
@@ -28,6 +31,7 @@ pub const LOG_CAP: usize = 500;
 #[derive(Default)]
 pub struct LogBuffer {
     entries: Mutex<VecDeque<LogEntry>>,
+    #[cfg(feature = "gui")]
     app: RwLock<Option<AppHandle>>,
 }
 
@@ -38,14 +42,26 @@ impl LogBuffer {
 
     /// Attach the `AppHandle` used to emit `log://line` / `log://cleared`. Until
     /// this is set (early boot, or headless tests) appends are buffered silently.
+    #[cfg(feature = "gui")]
     pub fn set_app_handle(&self, app: AppHandle) {
         if let Ok(mut g) = self.app.write() {
             *g = Some(app);
         }
     }
 
+    #[cfg(feature = "gui")]
     fn app_handle(&self) -> Option<AppHandle> {
         self.app.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Emit to the webview when one is attached; compiled out headless.
+    fn emit<P: serde::Serialize + Clone>(&self, event: &str, payload: P) {
+        #[cfg(feature = "gui")]
+        if let Some(app) = self.app_handle() {
+            let _ = app.emit(event, payload);
+        }
+        #[cfg(not(feature = "gui"))]
+        let _ = (event, payload);
     }
 
     /// Append an already-built entry (newest-first) and emit `log://line`.
@@ -57,9 +73,7 @@ impl LogBuffer {
                 q.pop_back();
             }
         }
-        if let Some(app) = self.app_handle() {
-            let _ = app.emit(events::LOG_LINE, entry);
-        }
+        self.emit(events::LOG_LINE, entry);
     }
 
     /// Convenience: build a `LogEntry` from parts (timestamp = now, `HH:mm:ss`)
@@ -100,9 +114,7 @@ impl LogBuffer {
         if let Ok(mut q) = self.entries.lock() {
             q.clear();
         }
-        if let Some(app) = self.app_handle() {
-            let _ = app.emit(events::LOG_CLEARED, ());
-        }
+        self.emit(events::LOG_CLEARED, ());
     }
 }
 

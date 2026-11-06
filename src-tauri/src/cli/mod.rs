@@ -2,18 +2,22 @@
 //!
 //! A second *driver* of the existing service functions — never a second state
 //! owner. The socket handler resolves a target, calls the same
-//! `ssh::engine::*` / `commands::forwards::run_*` entry points the tray and the
-//! webview use, and serializes the result back as one JSON line. Status writes,
+//! `ssh::engine::*` / `ops::forwards::*` entry points the tray and the webview
+//! use, and serializes the result back as one JSON line. The socket's owner is
+//! either the desktop app or, on a headless host, `tunnel-pilot daemon`. Status writes,
 //! events, and persistence all keep flowing through `AppState` exactly as
 //! before, so a CLI-driven connect updates the tray and (when open) the window.
 //!
 //! Transport is a Unix domain socket under the app config dir; the listener is
 //! `#[cfg(unix)]` (a Windows named pipe would slot in behind the same `serve`
-//! shape). The socket carries **no secrets**: there is no password command and
-//! `ForwardView` exposes only the `hasStoredPassword` flag (AGENTS §8).
+//! shape). The socket carries **no secrets**: the password commands move only
+//! the `hasStoredPassword` flag (the CLI process writes the secret into the
+//! credential store itself) and `ForwardView` exposes only that flag (AGENTS §8).
 
 pub mod args;
 pub mod client;
+pub mod desktop;
+pub mod forward_cmd;
 pub mod protocol;
 #[cfg(unix)]
 pub mod server;
@@ -35,6 +39,19 @@ pub const IDENTIFIER: &str = "com.kalfian.tunnelpilot";
 
 /// Sub-directory of the app config dir holding the control socket.
 pub const SOCKET_DIR: &str = "cli";
+
+/// Which build this binary is: the full desktop app (which also serves the
+/// CLI) or the lean headless CLI/daemon (spec 03 §21). Printed by
+/// `--version`; install scripts key off it.
+pub const EDITION: &str = if cfg!(feature = "gui") {
+    "desktop"
+} else {
+    "cli"
+};
+
+/// Config-dir override honored by the headless daemon and by the CLI's own
+/// password writes. The desktop app always uses Tauri's `app_config_dir()`.
+pub const CONFIG_DIR_ENV: &str = "TUNNEL_PILOT_CONFIG_DIR";
 
 /// Socket filename inside [`SOCKET_DIR`].
 pub const SOCKET_FILE: &str = "cli.sock";
@@ -76,7 +93,18 @@ pub fn default_socket_path() -> Option<PathBuf> {
     if let Some(p) = socket_path_from_env() {
         return Some(p);
     }
-    platform_config_dir().map(|d| socket_path_in(&d.join(IDENTIFIER)))
+    default_config_dir().map(|d| socket_path_in(&d))
+}
+
+/// The app config dir without a Tauri context: [`CONFIG_DIR_ENV`] when set,
+/// else the platform config dir + [`IDENTIFIER`] — the same directory Tauri's
+/// `app_config_dir()` resolves, so the daemon, the desktop app and the CLI
+/// share one config, one secrets file and one socket.
+pub fn default_config_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os(CONFIG_DIR_ENV).filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
+    platform_config_dir().map(|d| d.join(IDENTIFIER))
 }
 
 /// `dirs::config_dir()` equivalent for the platforms we ship a CLI on. macOS:

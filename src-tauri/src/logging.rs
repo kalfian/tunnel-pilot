@@ -132,6 +132,17 @@ impl<S: tracing::Subscriber> Layer<S> for LogBufferLayer {
 /// dev log is not spammed. To capture the "Unknown algorithm" negotiation, run
 /// with `RUST_LOG=tunnel_pilot_lib=debug,russh=debug,russh_keys=debug`.
 pub fn init_tracing() {
+    init_tracing_with_ansi(true);
+}
+
+/// [`init_tracing`] for the headless daemon: colour only when stdout is a
+/// terminal, so journald / the launchd log file get plain text.
+pub fn init_tracing_for_daemon() {
+    use std::io::IsTerminal;
+    init_tracing_with_ansi(std::io::stdout().is_terminal());
+}
+
+fn init_tracing_with_ansi(ansi: bool) {
     // Bridge `log` → tracing so russh's negotiation logs are capturable. `.ok()`
     // (via `let _`) makes a repeat call, or a pre-existing `log` logger, a no-op
     // instead of an error.
@@ -142,7 +153,7 @@ pub fn init_tracing() {
 
     let _ = tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_ansi(ansi))
         .with(LogBufferLayer::new())
         .try_init();
 }

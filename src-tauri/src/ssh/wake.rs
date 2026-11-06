@@ -45,7 +45,7 @@ fn sweep_connected(state: &Arc<AppState>) {
 /// Spawn the app-lifetime wake watchdog on the Tauri async runtime (called from
 /// `lib.rs` setup, which is not itself inside an async context).
 pub fn spawn_wake_watchdog(state: Arc<AppState>) {
-    tauri::async_runtime::spawn(watchdog_loop(state));
+    crate::rt::spawn(watchdog_loop(state));
 }
 
 /// The monotonic-gap loop. Uses `tokio::time::Instant` so the gap reflects the

@@ -16,6 +16,7 @@ pub mod tunnel_registry;
 
 use std::sync::{Arc, RwLock};
 
+#[cfg(feature = "gui")]
 use tauri::Emitter;
 use tokio::sync::{mpsc, oneshot};
 
@@ -173,13 +174,16 @@ pub struct AppState {
     /// headless tests (no `config_store` → no writer task). Mutations push the
     /// latest full section snapshot here instead of spawning a detached write.
     persist_tx: Option<mpsc::UnboundedSender<PersistMsg>>,
-    /// `AppHandle` for emitting events; `None` in headless engine tests.
+    /// `AppHandle` for emitting events; `None` in headless engine tests and in
+    /// the headless daemon. Absent entirely from the CLI-only build.
+    #[cfg(feature = "gui")]
     app: RwLock<Option<tauri::AppHandle>>,
 }
 
 impl AppState {
-    /// Production constructor: build from the loaded config document plus the
-    /// persistence + credential stores. The RAM mirrors are seeded from `doc`.
+    /// Desktop constructor: [`AppState::new_persistent`] plus the
+    /// `AppHandle`, so state changes reach the webview as events.
+    #[cfg(feature = "gui")]
     pub fn new_hydrated(
         app: tauri::AppHandle,
         config_store: Arc<ConfigStore>,
@@ -187,15 +191,32 @@ impl AppState {
         logs: Arc<LogBuffer>,
         doc: ConfigDocument,
     ) -> Self {
-        let keychain_available = credentials.keychain_available();
         // Attach the app handle so log appends now emit `log://line` to the FE.
         logs.set_app_handle(app.clone());
+        let state = Self::new_persistent(config_store, credentials, logs, doc);
+        if let Ok(mut slot) = state.app.write() {
+            *slot = Some(app);
+        }
+        state
+    }
+
+    /// Production constructor without a UI: build from the loaded config
+    /// document plus the persistence + credential stores. The RAM mirrors are
+    /// seeded from `doc`. Used directly by the headless daemon (spec 03 §21);
+    /// event emission is a no-op until/unless an `AppHandle` is attached.
+    pub fn new_persistent(
+        config_store: Arc<ConfigStore>,
+        credentials: Arc<CredentialStore>,
+        logs: Arc<LogBuffer>,
+        doc: ConfigDocument,
+    ) -> Self {
+        let keychain_available = credentials.keychain_available();
         // Spin up the single ordered persistence writer (F37): one task drains
         // the channel and is the sole writer, so mutations can never race the
         // config store's write lock and land out of order.
         let (persist_tx, persist_rx) = mpsc::unbounded_channel::<PersistMsg>();
         let writer_store = config_store.clone();
-        tauri::async_runtime::spawn(persist_writer_loop(writer_store, persist_rx));
+        crate::rt::spawn(persist_writer_loop(writer_store, persist_rx));
         Self {
             registry: Arc::new(TunnelRegistry::new()),
             configs: RwLock::new(doc.forwards),
@@ -206,7 +227,8 @@ impl AppState {
             keychain_available,
             config_store: Some(config_store),
             persist_tx: Some(persist_tx),
-            app: RwLock::new(Some(app)),
+            #[cfg(feature = "gui")]
+            app: RwLock::new(None),
         }
     }
 
@@ -227,41 +249,51 @@ impl AppState {
             keychain_available,
             config_store: None,
             persist_tx: None,
+            #[cfg(feature = "gui")]
             app: RwLock::new(None),
         }
     }
 
     /// The `AppHandle` for emitting events / firing notifications; `None` in
     /// headless engine tests (event emission + notifications are no-ops).
+    #[cfg(feature = "gui")]
     pub fn app_handle(&self) -> Option<tauri::AppHandle> {
         self.app.read().ok().and_then(|g| g.clone())
     }
 
+    /// Emit one event to the webview. A no-op without an `AppHandle` (tests,
+    /// headless daemon) and compiled out of the CLI-only build, where the
+    /// control socket is the only observer and reads state on demand.
+    fn emit<P: serde::Serialize + Clone>(&self, event: &str, payload: P) {
+        #[cfg(feature = "gui")]
+        if let Some(app) = self.app_handle() {
+            let _ = app.emit(event, payload);
+        }
+        #[cfg(not(feature = "gui"))]
+        let _ = (event, payload);
+    }
+
     /// Emit `tunnel://status` (no-op when headless).
     pub fn emit_status(&self, id: &str, status: ForwardStatus, last_error: Option<String>) {
-        if let Some(app) = self.app_handle() {
-            let _ = app.emit(
-                events::TUNNEL_STATUS,
-                StatusPayload {
-                    id: id.to_string(),
-                    status,
-                    last_error,
-                },
-            );
-        }
+        self.emit(
+            events::TUNNEL_STATUS,
+            StatusPayload {
+                id: id.to_string(),
+                status,
+                last_error,
+            },
+        );
     }
 
     /// Emit `tunnel://stats` (no-op when headless).
     pub fn emit_stats(&self, id: &str, stats: TunnelStats) {
-        if let Some(app) = self.app_handle() {
-            let _ = app.emit(
-                events::TUNNEL_STATS,
-                StatsPayload {
-                    id: id.to_string(),
-                    stats,
-                },
-            );
-        }
+        self.emit(
+            events::TUNNEL_STATS,
+            StatsPayload {
+                id: id.to_string(),
+                stats,
+            },
+        );
     }
 
     // --- config accessors (RAM mirror, persisted on mutation) ---
@@ -387,23 +419,17 @@ impl AppState {
 
     /// Emit `forwards://changed` with the current full list (CRUD/reorder).
     pub fn emit_forwards_changed(&self) {
-        if let Some(app) = self.app_handle() {
-            let _ = app.emit(events::FORWARDS_CHANGED, self.configs_snapshot());
-        }
+        self.emit(events::FORWARDS_CHANGED, self.configs_snapshot());
     }
 
     /// Emit `groups://changed` with the current full group list.
     pub fn emit_groups_changed(&self) {
-        if let Some(app) = self.app_handle() {
-            let _ = app.emit(events::GROUPS_CHANGED, self.groups_snapshot());
-        }
+        self.emit(events::GROUPS_CHANGED, self.groups_snapshot());
     }
 
     /// Emit `settings://changed` with the current settings.
     pub fn emit_settings_changed(&self) {
-        if let Some(app) = self.app_handle() {
-            let _ = app.emit(events::SETTINGS_CHANGED, self.settings_snapshot());
-        }
+        self.emit(events::SETTINGS_CHANGED, self.settings_snapshot());
     }
 
     // --- credential accessors (keychain / fallback file) ---

@@ -13,35 +13,57 @@
 // this once the engine/commands wire the modules up (M1/M4).
 #![allow(dead_code)]
 
+// Always compiled: the core (state, SSH engine, persistence, credentials), the
+// CLI client + control socket, and the headless daemon.
+pub mod boot;
 pub mod cli;
-pub mod commands;
 pub mod credentials;
+#[cfg(unix)]
+pub mod daemon;
 pub mod error;
 pub mod events;
 pub mod logging;
+pub mod ops;
 pub mod platform;
+pub mod rt;
 pub mod ssh;
 pub mod state;
 pub mod storage;
+
+// Desktop-only (feature `gui`, on by default): Tauri commands, tray, window,
+// updater. `--no-default-features` builds the CLI-only binary without them
+// (spec 03 §21).
+#[cfg(feature = "gui")]
+pub mod commands;
+#[cfg(feature = "gui")]
 pub mod tray;
+#[cfg(feature = "gui")]
 pub mod updater;
+#[cfg(feature = "gui")]
 pub mod window;
 
+#[cfg(feature = "gui")]
 use std::sync::Arc;
 
+#[cfg(feature = "gui")]
 use tauri::Manager;
 
+#[cfg(feature = "gui")]
 use crate::credentials::CredentialStore;
+#[cfg(feature = "gui")]
 use crate::state::AppState;
-use crate::storage::config_file::{ConfigDocument, ConfigStore};
+#[cfg(feature = "gui")]
+use crate::storage::config_file::ConfigStore;
 
 /// CLI flag baked into the OS autostart registration (see the autostart plugin
 /// init below). Present in argv ⇒ this launch was triggered at login ⇒ stay
 /// hidden in the tray. Absent ⇒ a normal user launch ⇒ show + focus the window.
+#[cfg(feature = "gui")]
 const AUTOSTART_ARG: &str = "--minimized";
 
 /// True iff this process was started by the OS autostart/login registration,
 /// detected via the [`AUTOSTART_ARG`] flag in argv (spec 03 §12).
+#[cfg(feature = "gui")]
 fn launched_from_autostart() -> bool {
     std::env::args().any(|a| a == AUTOSTART_ARG)
 }
@@ -50,6 +72,7 @@ fn launched_from_autostart() -> bool {
 ///
 /// The window starts hidden (`visible: false` in `tauri.conf.json`) so the app
 /// boots straight into the tray.
+#[cfg(feature = "gui")]
 pub fn run() {
     tauri::Builder::default()
         // single-instance MUST be registered first (spec 02 §8/§11). On a second
@@ -148,33 +171,14 @@ pub fn run() {
             let config_store = Arc::new(ConfigStore::from_config_dir(&config_dir));
             let credentials = Arc::new(CredentialStore::from_app_dir(&config_dir));
 
-            // First-run v1→v2 migration (hardcoded per-OS v1 probe, plaintext
-            // passwords → keychain), then load the v2 document. Bad config never
-            // crashes the app (spec 03 §7): on error we log and start with
-            // defaults. `block_on` at this binary edge is fine — it is a one-
-            // time boot step before the event loop spins up.
-            let doc = tauri::async_runtime::block_on(async {
-                if let Err(e) = crate::storage::migration::migrate_if_needed(
-                    config_store.as_ref(),
-                    credentials.as_ref(),
-                )
-                .await
-                {
-                    tracing::error!(error = %e, "v1→v2 migration failed; continuing");
-                }
-                config_store.load().await
-            })
-            .unwrap_or_else(|e| {
-                tracing::error!(error = %e, "failed to load config; starting with defaults");
-                ConfigDocument::default()
-            });
-
-            if !credentials.keychain_available() {
-                tracing::warn!(
-                    "OS keychain unavailable — SSH passwords use the plaintext fallback file; \
-                     the UI will surface a warning (M4)"
-                );
-            }
+            // First-run v1→v2 migration, then load the v2 document — the same
+            // boot the headless daemon runs (`boot.rs`). Bad config never
+            // crashes the app (spec 03 §7). `block_on` at this binary edge is
+            // fine — it is a one-time boot step before the event loop spins up.
+            let doc = tauri::async_runtime::block_on(crate::boot::load_document(
+                config_store.as_ref(),
+                credentials.as_ref(),
+            ));
 
             // The shared application state (source of truth, spec 02 §5). Owns
             // the tunnel registry + the persisted config mirror + credentials.

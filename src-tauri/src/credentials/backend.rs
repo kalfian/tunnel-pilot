@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+#[cfg(feature = "keychain")]
 use keyring::{Entry, Error as KeyringError};
 
 use crate::error::AppError;
@@ -23,6 +24,7 @@ pub const KC_SERVICE: &str = "tunnel-pilot";
 
 /// Sentinel account used only by the boot-time availability probe. Namespaced
 /// so it can never collide with a real forward id (uuid).
+#[cfg(feature = "keychain")]
 const PROBE_ACCOUNT: &str = "__probe__.keychain_available";
 
 /// A password store keyed by account name. Abstracts the real OS keychain so
@@ -41,9 +43,19 @@ pub trait KeychainBackend: Send + Sync {
 
 /// The production backend: the `keyring` crate with the per-target native
 /// backend selected in `Cargo.toml`.
+#[cfg(feature = "keychain")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeyringBackend;
 
+/// Built without the `keychain` feature (the Linux CLI-only build): there is no
+/// OS keychain to talk to, so the "production" backend always probes
+/// unavailable and every secret takes the 0600 fallback-file route — exactly
+/// what a headless Linux host without Secret Service gets at runtime anyway
+/// (spec 03 §9, §21).
+#[cfg(not(feature = "keychain"))]
+pub use NullBackend as KeyringBackend;
+
+#[cfg(feature = "keychain")]
 impl KeyringBackend {
     fn entry(account: &str) -> Result<Entry, AppError> {
         Entry::new(KC_SERVICE, account)
@@ -51,6 +63,7 @@ impl KeyringBackend {
     }
 }
 
+#[cfg(feature = "keychain")]
 impl KeychainBackend for KeyringBackend {
     fn set(&self, account: &str, secret: &str) -> Result<(), AppError> {
         Self::entry(account)?
