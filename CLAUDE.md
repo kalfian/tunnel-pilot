@@ -17,7 +17,7 @@ available. Signed self-updates via `tauri-plugin-updater` (minisign).
 ## Quick Reference
 
 - **Bundle identifier**: `com.kalfian.tunnelpilot` (`tauri.conf.json`; duplicated as `cli::IDENTIFIER`)
-- **App version**: 2.3.0
+- **App version**: 2.4.0
 - **Toolchain**: Rust via rustup (do not use asdf-rust) · Node + pnpm via asdf
 
 ### CLI
