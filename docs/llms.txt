@@ -1,8 +1,11 @@
 # Tunnel Pilot
 
-> Tunnel Pilot is a free, open-source SSH local port forwarding manager. It ships as two products built from one codebase with identical features: Tunnel Pilot (desktop), a tray app with a window for macOS, Windows and Linux, and Tunnel Pilot CLI (server), a daemon with no window, managed from the terminal and from a web UI.
+> Tunnel Pilot is a free, open-source (MIT) SSH tunnel manager and port forwarder: it saves SSH local port forwards (`ssh -L`) and keeps them connected. It ships as two products built from one codebase with identical features: Tunnel Pilot (desktop), a tray / menu-bar app with a window for macOS, Windows and Linux, and Tunnel Pilot CLI (server), a daemon with no window, managed from the terminal and from a web UI.
 
-Tunnel Pilot replaces repeated `ssh -L` commands with saved forwards that can be toggled, grouped and kept connected.
+Tunnel Pilot replaces repeated `ssh -L` commands with saved forwards that can be toggled, grouped and kept connected. Current version: 2.4.0 (November 2026). Since version 2.0 it is written in Rust with Tauri v2 and a Svelte frontend; version 1 (v1.0–v1.4, March–June 2026) was a Flutter app and is no longer maintained.
+
+- Full documentation for LLMs: https://kalfian.github.io/tunnel-pilot/llms-full.txt
+- Last updated: 2026-11-09
 
 ## Shared Features (both products)
 
@@ -59,8 +62,15 @@ Tunnel Pilot replaces repeated `ssh -L` commands with saved forwards that can be
 - GitHub repository: https://github.com/kalfian/tunnel-pilot
 - Latest releases: https://github.com/kalfian/tunnel-pilot/releases/latest
 
+## Alternatives It Is Compared With
+
+- Plain `ssh -L` / `autossh` in a terminal (Tunnel Pilot saves the forwards, reconnects them, stores passwords in the keychain and adds a tray toggle or web UI)
+- Core Tunnel, SSH Tunnel Manager and Secure Pipes: macOS menu-bar tunnel apps. Tunnel Pilot also runs on Windows and Linux, is MIT-licensed and free, and has a server edition with a web UI
+
 ## Common Search Intents
 
+- Tunnel Pilot, Tunnel Pilot app, Tunnel Pilot CLI
+- Port forwarder app; SSH port forwarder
 - SSH local port forwarding app
 - SSH tunnel manager
 - ssh -L GUI

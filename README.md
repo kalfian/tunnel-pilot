@@ -16,9 +16,11 @@
   <b>Website</b>: <a href="https://kalfian.github.io/tunnel-pilot">kalfian.github.io/tunnel-pilot</a>
 </p>
 
-Manage your SSH tunnels (`ssh -L`) with ease — toggle connections on/off directly from the tray menu, configure tunnels through a clean settings window, and get status at a glance. Tunnel Pilot lives entirely in the menu bar (macOS) or system tray (Windows/Linux) — no Dock icon by default.
+**Tunnel Pilot is a free, open-source SSH tunnel manager and port forwarder.** Save your SSH local port forwards (`ssh -L`) once, then toggle them from the menu bar (macOS) or system tray (Windows, Linux) and let them reconnect on their own. For servers, homelabs and a Raspberry Pi there is **[Tunnel Pilot CLI](#tunnel-pilot-cli-server)**: the same features as a daemon you manage from the terminal or a browser-based web UI.
 
-> **Tunnel Pilot 2.0 is a full rewrite in Rust + Tauri v2.** The app now idles in roughly **15–30 MB of RAM** (down from ~100–200 MB on the Flutter v1 build), starts faster, and adds a ⌘K command palette, groups/tags, a resizable/responsive window, OS-keychain credential storage, and a **cryptographically signed self-updater**. See [Upgrading from v1](#upgrading-from-v1) — **your saved tunnels are preserved automatically.**
+Manage your SSH tunnels with ease — toggle connections on/off directly from the tray menu, configure tunnels through a clean settings window, and get status at a glance. Tunnel Pilot lives entirely in the menu bar (macOS) or system tray (Windows/Linux) — no Dock icon by default.
+
+> **Since 2.0, Tunnel Pilot is a full rewrite in Rust + Tauri v2** (version 1 was a Flutter app). The app now idles in roughly **15–30 MB of RAM** (down from ~100–200 MB on the Flutter v1 build), starts faster, and adds a ⌘K command palette, groups/tags, a resizable/responsive window, OS-keychain credential storage, and a **cryptographically signed self-updater**. See [Upgrading from v1](#upgrading-from-v1) — **your saved tunnels are preserved automatically.**
 
 <p align="center">
   <img src="docs/screenshots/connections.png" alt="Connections — grouped tunnels" width="30%">

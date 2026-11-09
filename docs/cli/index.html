@@ -3,108 +3,330 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tunnel Pilot CLI — SSH Tunnel Daemon with a Web UI for Servers &amp; Homelabs</title>
-  <meta name="description" content="Tunnel Pilot CLI keeps SSH local port forwards up on a server, homelab or Raspberry Pi. One ~10 MB binary for Linux and macOS: a daemon you manage from the terminal or from a password-protected web UI. Free and open source.">
-  <meta name="keywords" content="SSH tunnel daemon, SSH port forwarding server, headless SSH tunnel manager, ssh -L web UI, SSH tunnel systemd service, homelab SSH tunnel, Raspberry Pi SSH tunnel">
-  <meta name="robots" content="index, follow">
+  <title>Tunnel Pilot CLI — SSH Tunnel Daemon &amp; Web UI for Servers</title>
+  <meta name="description" content="Tunnel Pilot CLI is a free, open-source SSH tunnel daemon for Linux and macOS. It keeps ssh -L forwards up as a systemd or launchd service, with a web UI.">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
   <meta name="author" content="kalfian">
   <link rel="canonical" href="https://kalfian.github.io/tunnel-pilot/cli/">
   <meta name="theme-color" content="#111318">
+  <link rel="icon" type="image/png" href="../favicon.png">
+  <link rel="apple-touch-icon" href="../app_icon.png">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="Tunnel Pilot CLI — SSH tunnels on your server, managed from a browser">
-  <meta property="og:description" content="The Tunnel Pilot daemon without the window: keeps ssh -L forwards up on servers, homelabs and a Raspberry Pi. Manage it from the terminal or a web UI. Linux and macOS, free and open source.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://kalfian.github.io/tunnel-pilot/cli/">
-  <meta property="og:image" content="https://kalfian.github.io/tunnel-pilot/og-banner.png?v=2">
-  <meta property="og:image:secure_url" content="https://kalfian.github.io/tunnel-pilot/og-banner.png?v=2">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="400">
-  <meta property="og:image:alt" content="Tunnel Pilot — SSH local port forwarding manager">
   <meta property="og:site_name" content="Tunnel Pilot">
   <meta property="og:locale" content="en_US">
+  <meta property="og:url" content="https://kalfian.github.io/tunnel-pilot/cli/">
+  <meta property="og:title" content="Tunnel Pilot CLI — SSH tunnel daemon with a web UI for servers">
+  <meta property="og:description" content="Keeps ssh -L forwards up on servers, homelabs and a Raspberry Pi as a systemd or launchd service. Manage it from the terminal or a web UI. Linux and macOS, free and open source (MIT).">
+  <meta property="og:image" content="https://kalfian.github.io/tunnel-pilot/og/cli.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Tunnel Pilot CLI, the SSH tunnel daemon for Linux and macOS servers, with its service install command and its web UI listing SSH tunnels.">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Tunnel Pilot CLI — SSH tunnels on your server, managed from a browser">
-  <meta name="twitter:description" content="A daemon that keeps ssh -L forwards up, managed from the terminal or a web UI. Linux and macOS, free and open source.">
-  <meta name="twitter:image" content="https://kalfian.github.io/tunnel-pilot/og-banner.png?v=2">
-  <meta name="twitter:image:alt" content="Tunnel Pilot banner — SSH local port forwarding manager">
+  <meta name="twitter:title" content="Tunnel Pilot CLI — SSH tunnel daemon with a web UI">
+  <meta name="twitter:description" content="Keeps ssh -L forwards up as a systemd or launchd service, managed from the terminal or a web UI. Linux and macOS, free and open source (MIT).">
+  <meta name="twitter:image" content="https://kalfian.github.io/tunnel-pilot/og/cli.png">
+  <meta name="twitter:image:alt" content="Tunnel Pilot CLI, the SSH tunnel daemon for Linux and macOS servers, with its service install command and its web UI listing SSH tunnels.">
 
-  <!-- Structured Data -->
+  <!-- Structured data: generated from the visible FAQ and steps (keep them in sync) -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "Tunnel Pilot CLI",
-    "alternateName": "tunnel-pilot-cli",
-    "description": "Tunnel Pilot CLI is the server edition of Tunnel Pilot: the same SSH local port forwarding features with no window. A daemon keeps the forwards up and reconnects them, managed from the terminal or from a web UI in the browser. For servers, homelabs, a Raspberry Pi and CI boxes.",
-    "url": "https://kalfian.github.io/tunnel-pilot/cli/",
-    "downloadUrl": "https://github.com/kalfian/tunnel-pilot/releases/latest",
-    "installUrl": "https://kalfian.github.io/tunnel-pilot/cli/install.sh",
-    "image": "https://kalfian.github.io/tunnel-pilot/og-banner.png",
-    "screenshot": [
-      "https://kalfian.github.io/tunnel-pilot/screenshots/web-ui.png"
-    ],
-    "applicationCategory": "DeveloperApplication",
-    "applicationSubCategory": "SSH tunnel daemon",
-    "operatingSystem": "Linux, macOS",
-    "keywords": "SSH tunnel daemon, SSH port forwarding server, headless SSH tunnel manager, ssh -L web UI, homelab SSH tunnel",
-    "featureList": [
-      "Daemon that keeps SSH local port forwards up, as a systemd service or a launchd agent",
-      "Web UI with the same interface as the desktop app; login always required",
-      "Terminal commands for every action, with --json output",
-      "Auto-reconnect with SSH keep-alive liveness",
-      "Groups, tags, live stats, activity log and backup export/import",
-      "Passwords in the OS keychain, or a 0600 file where no keychain exists",
-      "Single static binary for Linux x86_64 and aarch64, plus macOS"
-    ],
-    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-    "author": { "@type": "Person", "name": "kalfian", "url": "https://github.com/kalfian" },
-    "license": "https://opensource.org/licenses/MIT",
-    "isAccessibleForFree": true
-  }
-  </script>
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
+    "@graph": [
       {
-        "@type": "Question",
-        "name": "Does Tunnel Pilot CLI run on Windows?",
-        "acceptedAnswer": { "@type": "Answer", "text": "No. Tunnel Pilot CLI is built for Linux x86_64, Linux aarch64 and macOS. On Windows, use the Tunnel Pilot desktop app, which has the same features in a tray app with a window." }
+        "@type": "WebSite",
+        "@id": "https://kalfian.github.io/tunnel-pilot/#website",
+        "url": "https://kalfian.github.io/tunnel-pilot/",
+        "name": "Tunnel Pilot",
+        "alternateName": [
+          "TunnelPilot",
+          "tunnel-pilot"
+        ],
+        "description": "Free, open-source SSH tunnel and port forwarding manager: a tray app for macOS, Windows and Linux, and a server edition with a web UI.",
+        "inLanguage": "en",
+        "publisher": {
+          "@id": "https://kalfian.github.io/tunnel-pilot/#author"
+        }
       },
       {
-        "@type": "Question",
-        "name": "Can I install the CLI and the desktop app on the same machine?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Yes. They are separate products with separate config, so they install side by side. To move forwards from one to the other, export a backup in one and import it in the other. Backups never contain passwords, so set those again afterwards." }
+        "@type": "Person",
+        "@id": "https://kalfian.github.io/tunnel-pilot/#author",
+        "name": "kalfian",
+        "url": "https://github.com/kalfian",
+        "sameAs": [
+          "https://github.com/kalfian"
+        ]
       },
       {
-        "@type": "Question",
-        "name": "How do I serve the web UI over HTTPS?",
-        "acceptedAnswer": { "@type": "Answer", "text": "The web UI has no built-in TLS. Put an HTTPS reverse proxy such as Caddy or nginx in front of 127.0.0.1:1855, or keep the default localhost bind and reach it through an SSH tunnel. Start the daemon with --public-host <your domain> --trust-proxy. With nginx, pass the Host header (proxy_set_header Host $host;), X-Forwarded-For/-Proto, and the WebSocket Upgrade and Connection headers." }
+        "@type": "FAQPage",
+        "@id": "https://kalfian.github.io/tunnel-pilot/cli/#webpage",
+        "url": "https://kalfian.github.io/tunnel-pilot/cli/",
+        "name": "Tunnel Pilot CLI — SSH Tunnel Daemon & Web UI for Servers",
+        "description": "Tunnel Pilot CLI is a free, open-source SSH tunnel daemon for Linux and macOS. It keeps ssh -L forwards up as a systemd or launchd service, with a web UI.",
+        "inLanguage": "en",
+        "isPartOf": {
+          "@id": "https://kalfian.github.io/tunnel-pilot/#website"
+        },
+        "about": {
+          "@id": "https://kalfian.github.io/tunnel-pilot/cli/#app"
+        },
+        "author": {
+          "@id": "https://kalfian.github.io/tunnel-pilot/#author"
+        },
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is Tunnel Pilot CLI?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Tunnel Pilot CLI (tunnel-pilot-cli) is the server edition of Tunnel Pilot: a free, open-source SSH tunnel daemon for Linux and macOS. It keeps your ssh -L forwards open as a systemd or launchd service, reconnects them when they drop, and is managed from the terminal or from a web UI in the browser."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is Tunnel Pilot CLI free?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. It is free and open source under the MIT License, and it ships in the same GitHub release as the desktop app."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I keep an SSH tunnel running after a reboot?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Add the forward, then run tunnel-pilot-cli service install --connect-all. It writes and starts a systemd unit (a user unit, or a system unit as root) or a launchd agent that connects every forward when it starts and reconnects them after drops. A user unit stops at logout unless lingering is on; the installer prints the sudo loginctl enable-linger command when it is needed."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is it an alternative to autossh?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes, for local port forwards. Like autossh it brings a dropped tunnel back. It also keeps named forwards in its own config, installs its own systemd or launchd service, reports status as JSON, pins SSH host keys and has an optional web UI."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does it run on Windows?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No — Tunnel Pilot CLI is built for Linux x86_64, Linux aarch64 and macOS. On Windows, use the desktop app: the same features in a tray app with a window."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I install it next to the desktop app?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. They are separate products with separate config, so they install side by side. To move forwards from one to the other, export a backup in one and import it in the other. Backups never contain passwords, so set those again afterwards."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I serve the web UI over HTTPS?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "It has no built-in TLS. Put an HTTPS reverse proxy such as Caddy or nginx in front of 127.0.0.1:1855, or keep the default localhost bind and reach it through an SSH tunnel. Start the daemon with --public-host <your domain> --trust-proxy. With nginx, pass proxy_set_header Host $host;, the X-Forwarded-* headers and the WebSocket Upgrade and Connection headers. Examples are in Web UI security."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need the web UI?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Leave out --web and the daemon runs without it. Every action is also a terminal command — add, edit, remove, list, connect, disconnect, status — all with --json output."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Where are SSH passwords stored?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "In the OS keychain when one is available. On a server without a keychain they go to a separate file readable only by its owner (mode 0600), and the web UI shows a notice saying so. The web UI admin password is stored as an argon2id hash."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does it check SSH host keys?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Each forward pins its SSH server’s host key on the first connection and honours ~/.ssh/known_hosts without changing it. If the key later changes, the connection is refused and not retried until you verify the new fingerprint and run tunnel-pilot-cli trust-host-key <name>, or choose Trust new key in the web UI. forget-host-key drops a pin."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I uninstall Tunnel Pilot CLI?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Run curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/uninstall.sh | bash. It stops and removes the service and the binary and keeps your config; add -s -- --purge to also delete the config, the web admin password and stored passwords."
+            }
+          }
+        ],
+        "breadcrumb": {
+          "@id": "https://kalfian.github.io/tunnel-pilot/cli/#breadcrumb"
+        },
+        "primaryImageOfPage": {
+          "@type": "ImageObject",
+          "url": "https://kalfian.github.io/tunnel-pilot/og/cli.png",
+          "width": 1200,
+          "height": 630
+        },
+        "relatedLink": [
+          "https://kalfian.github.io/tunnel-pilot/"
+        ]
       },
       {
-        "@type": "Question",
-        "name": "Do I need the web UI?",
-        "acceptedAnswer": { "@type": "Answer", "text": "No. Leave out --web and the daemon runs without it. Every action is also a terminal command: add, edit, remove, list, connect, disconnect and status, all with --json output." }
+        "@type": "BreadcrumbList",
+        "@id": "https://kalfian.github.io/tunnel-pilot/cli/#breadcrumb",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Tunnel Pilot",
+            "item": "https://kalfian.github.io/tunnel-pilot/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Tunnel Pilot CLI",
+            "item": "https://kalfian.github.io/tunnel-pilot/cli/"
+          }
+        ]
       },
       {
-        "@type": "Question",
-        "name": "Where are SSH passwords stored?",
-        "acceptedAnswer": { "@type": "Answer", "text": "In the OS keychain when one is available. On a server without a keychain they go to a separate file readable only by its owner (mode 0600), and the web UI shows a notice saying so. The web UI admin password is stored as an argon2id hash." }
+        "@type": "SoftwareApplication",
+        "@id": "https://kalfian.github.io/tunnel-pilot/cli/#app",
+        "name": "Tunnel Pilot CLI",
+        "alternateName": [
+          "tunnel-pilot-cli",
+          "Tunnel Pilot server edition"
+        ],
+        "description": "Tunnel Pilot CLI is the server edition of Tunnel Pilot: a free, open-source SSH tunnel daemon for Linux and macOS that keeps your ssh -L forwards open and reconnects them when they drop. Manage it from the terminal or a web UI — on a server, a homelab or a Raspberry Pi.",
+        "url": "https://kalfian.github.io/tunnel-pilot/cli/",
+        "image": "https://kalfian.github.io/tunnel-pilot/og/cli.png",
+        "screenshot": [
+          "https://kalfian.github.io/tunnel-pilot/screenshots/web-ui.png",
+          "https://kalfian.github.io/tunnel-pilot/screenshots/web-ui-mobile.png"
+        ],
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "SSH tunnel daemon",
+        "operatingSystem": "Linux, macOS",
+        "softwareVersion": "2.4.0",
+        "releaseNotes": "https://github.com/kalfian/tunnel-pilot/releases/tag/v2.4.0",
+        "downloadUrl": "https://github.com/kalfian/tunnel-pilot/releases/latest",
+        "installUrl": "https://kalfian.github.io/tunnel-pilot/cli/#install",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "isAccessibleForFree": true,
+        "license": "https://opensource.org/licenses/MIT",
+        "author": {
+          "@id": "https://kalfian.github.io/tunnel-pilot/#author"
+        },
+        "isBasedOn": {
+          "@id": "https://kalfian.github.io/tunnel-pilot/#source"
+        },
+        "sameAs": [
+          "https://github.com/kalfian/tunnel-pilot"
+        ],
+        "featureList": [
+          "Daemon that keeps SSH local port forwards (ssh -L) up, installed as a systemd service or a launchd agent",
+          "Web UI with the same interface as the desktop app, on port 1855; login always required",
+          "Terminal commands for every action, with --json output",
+          "Auto-reconnect with exponential backoff and SSH keep-alive",
+          "Groups, tags, live stats, activity log and backup export/import",
+          "Passwords in the OS keychain, or a 0600 file where no keychain exists",
+          "SSH host-key pinning: pinned on first connect, ~/.ssh/known_hosts honoured read-only, a changed key is refused until trusted",
+          "Single binary of about 10 MB: Linux x86_64 and aarch64 (static), and macOS",
+          "SHA-256 verified installer"
+        ]
+      },
+      {
+        "@type": "SoftwareSourceCode",
+        "@id": "https://kalfian.github.io/tunnel-pilot/#source",
+        "name": "tunnel-pilot",
+        "url": "https://github.com/kalfian/tunnel-pilot",
+        "codeRepository": "https://github.com/kalfian/tunnel-pilot",
+        "programmingLanguage": [
+          "Rust",
+          "TypeScript",
+          "Svelte"
+        ],
+        "license": "https://opensource.org/licenses/MIT",
+        "author": {
+          "@id": "https://kalfian.github.io/tunnel-pilot/#author"
+        },
+        "targetProduct": [
+          {
+            "@id": "https://kalfian.github.io/tunnel-pilot/#app"
+          },
+          {
+            "@id": "https://kalfian.github.io/tunnel-pilot/cli/#app"
+          }
+        ]
+      },
+      {
+        "@type": "HowTo",
+        "@id": "https://kalfian.github.io/tunnel-pilot/cli/#how-to",
+        "name": "How to keep an SSH tunnel running on a server",
+        "description": "Install, add a forward, run it as a service. The service starts with the machine, connects every forward and brings each one back when it drops.",
+        "inLanguage": "en",
+        "about": {
+          "@id": "https://kalfian.github.io/tunnel-pilot/cli/#app"
+        },
+        "step": [
+          {
+            "@type": "HowToStep",
+            "position": 1,
+            "name": "Install Tunnel Pilot CLI",
+            "text": "Run: curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/install.sh | bash. One ~10 MB binary, installed to ~/.local/bin. The download is SHA-256 verified and refused if the checksum is missing or wrong.",
+            "url": "https://kalfian.github.io/tunnel-pilot/cli/#howto-step-1"
+          },
+          {
+            "@type": "HowToStep",
+            "position": 2,
+            "name": "Add a forward",
+            "text": "Run: tunnel-pilot-cli add prod-db --ssh deploy@bastion.example.com --forward 5432:db.internal:5432 --identity ~/.ssh/id_ed25519. --forward takes ssh -L syntax. Key auth shown; --password prompts instead and never takes the password as a flag value.",
+            "url": "https://kalfian.github.io/tunnel-pilot/cli/#howto-step-2"
+          },
+          {
+            "@type": "HowToStep",
+            "position": 3,
+            "name": "Set a web admin password (optional)",
+            "text": "Run: tunnel-pilot-cli web set-password. Only needed for the web UI. Prompted with echo off and stored as an argon2id hash; setting it again signs everyone out.",
+            "url": "https://kalfian.github.io/tunnel-pilot/cli/#howto-step-3"
+          },
+          {
+            "@type": "HowToStep",
+            "position": 4,
+            "name": "Install the service",
+            "text": "Run: tunnel-pilot-cli service install --connect-all --web. A systemd unit (a user unit, or a system unit as root) or a launchd agent that starts with the machine, connects every forward and reconnects them when they drop. A user unit needs lingering to outlive your login; the installer prints the command. Leave out --web for terminal only; with it, the web UI is on http://127.0.0.1:1855, reachable through an SSH tunnel or, with --bind 0.0.0.0, behind HTTPS.",
+            "url": "https://kalfian.github.io/tunnel-pilot/cli/#howto-step-4"
+          },
+          {
+            "@type": "HowToStep",
+            "position": 5,
+            "name": "Check it",
+            "text": "Run: tunnel-pilot-cli list. Lists every forward with its live status; service status reports the service. Logs go to journalctl --user -u tunnel-pilot-cli on Linux.",
+            "url": "https://kalfian.github.io/tunnel-pilot/cli/#howto-step-5"
+          }
+        ]
       }
     ]
   }
   </script>
 
-  <link rel="icon" type="image/png" href="../favicon.png">
-
   <!-- Without JS, the scroll-reveal/hero animations never trigger — show final state. -->
   <noscript><style>
     .reveal { opacity:1 !important; transform:none !important; }
-    .hero .eyebrow, .hero h1, .hero .lede, .hero .cta-row, .hero .hero-meta, .hero-figure { animation:none !important; }
+    .hero h1, .hero .lede, .hero .cta-row, .hero .hero-meta, .hero-figure { animation:none !important; }
     .zoom-hint { display:none !important; }
   </style></noscript>
 
@@ -251,7 +473,9 @@
        gets the full column instead of half of it. */
     .hero { padding:var(--sp-11) 0 var(--sp-10); position:relative; overflow:hidden; }
     .hero-split { display:grid; grid-template-columns:1.1fr 1fr; gap:var(--sp-10); align-items:end; }
-    .hero h1 { font-size:44px; line-height:1.08; letter-spacing:-0.02em; font-weight:800; margin-top:var(--sp-5); }
+    /* The h1 carries the product name (search engines and AI answers quote it) above the tagline. */
+    .hero h1 .h1-name { display:block; font-size:20px; line-height:1.3; letter-spacing:-0.01em; font-weight:700; color:var(--text); margin-bottom:var(--sp-4); }
+    .hero h1 .h1-sub { display:block; text-wrap:balance; font-size:44px; line-height:1.08; letter-spacing:-0.02em; font-weight:800; }
     .hero h1 .accent { color:var(--accent-text); }
     .hero .lede { font-size:17px; color:var(--text-2); line-height:1.6; max-width:52ch; }
     .hero .lede strong { color:var(--text); font-weight:600; }
@@ -315,6 +539,7 @@
     .sec-head.center { margin-left:auto; margin-right:auto; text-align:center; }
     .sec-head h2 { font-size:30px; line-height:1.2; letter-spacing:-0.02em; font-weight:700; margin:var(--sp-3) 0 var(--sp-3); text-wrap:balance; }
     .sec-head p { color:var(--text-2); font-size:16px; }
+    .sec-head h2 code { font-size:0.88em; letter-spacing:-0.03em; }
     .sec-head p code, .aside code, .cli-step p code, .checks code, .parity code, .callout p code, .install-note code, .compare code { font-size:0.92em; color:var(--text); white-space:nowrap; } /* never split a flag after its "--" */
 
     /* ---------- How it works ---------- */
@@ -412,6 +637,11 @@
     .compare td { color:var(--text-2); }
     .compare td code { white-space:normal; overflow-wrap:anywhere; }
     .compare .here { color:var(--text); }
+    .compare.stack { table-layout:fixed; }
+    .compare.stack thead td:first-child { width:22%; }
+    .compare.stack td.here { background:var(--accent-subtle); }
+    .compare.stack thead th.here { background:var(--accent-subtle-2); }
+    .compare th, .compare td { line-height:1.5; }
 
     /* ---------- FAQ ---------- */
     .faq-list { max-width:760px; margin:0 auto; }
@@ -444,8 +674,7 @@
 
     @keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
     @keyframes riseIn { from { transform:translateY(12px); } to { transform:none; } }
-    .hero .eyebrow  { animation:fadeUp 0.5s var(--ease-standard) both; }
-    .hero h1        { animation:fadeUp 0.5s var(--ease-standard) 0.06s both; }
+    .hero h1        { animation:fadeUp 0.5s var(--ease-standard) both; }
     .hero .lede     { animation:fadeUp 0.5s var(--ease-standard) 0.12s both; }
     .hero .cta-row  { animation:fadeUp 0.5s var(--ease-standard) 0.18s both; }
     .hero .hero-meta{ animation:fadeUp 0.5s var(--ease-standard) 0.24s both; }
@@ -456,7 +685,7 @@
       .hero-split, .cli-grid, .sec-grid { grid-template-columns:1fr; gap:var(--sp-8); }
       .hero-split { gap:var(--sp-5); }
       .fgrid, .parity { grid-template-columns:repeat(2,1fr); }
-      .hero h1 { font-size:36px; }
+      .hero h1 .h1-sub { font-size:36px; }
       .nav-links { gap:var(--sp-5); }
       .nav-links .nav-opt { display:none; }
     }
@@ -465,7 +694,16 @@
       .nav-links a:not(.btn) { display:none; }
       .fgrid, .parity { grid-template-columns:1fr; }
       .hero { padding:var(--sp-9) 0; }
-      .hero h1 { font-size:30px; }
+      .hero h1 .h1-name { font-size:17px; margin-bottom:var(--sp-3); }
+      .hero h1 .h1-sub { font-size:30px; }
+      .compare.stack thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
+      .compare.stack, .compare.stack tbody, .compare.stack tr, .compare.stack th, .compare.stack td { display:block; width:auto; }
+      .compare.stack tbody tr { border-top:1px solid var(--border); padding:var(--sp-4) var(--sp-4) var(--sp-3); }
+      .compare.stack tbody tr:first-child { border-top:0; }
+      .compare.stack tbody th { border:0; padding:0 0 var(--sp-3); width:auto; }
+      .compare.stack caption { display:block; }
+      .compare.stack td { position:relative; border:0; padding:var(--sp-2) var(--sp-3) var(--sp-2) calc(96px + var(--sp-3) * 2); border-radius:var(--radius-xs); }
+      .compare.stack td::before { content:attr(data-label); content:attr(data-label) / ""; position:absolute; left:var(--sp-3); top:var(--sp-2); width:96px; font-weight:600; color:var(--text); } /* the hidden thead already names the column for screen readers */
       .hero .lede { font-size:16px; }
       .hero-meta { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-5); margin-top:var(--sp-8); }
       .hero-figure { margin-top:var(--sp-8); }
@@ -485,7 +723,7 @@
       *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
       .reveal { opacity:1 !important; transform:none !important; }
       .fcard:hover, .zoom:hover .shot, .zoom:focus-visible .shot, .zoom:active .shot, .fcard:hover .ic { transform:none !important; }
-      .hero .eyebrow, .hero h1, .hero .lede, .hero .cta-row, .hero .hero-meta, .hero-figure { animation:none !important; }
+      .hero h1, .hero .lede, .hero .cta-row, .hero .hero-meta, .hero-figure { animation:none !important; }
     }
   </style>
 </head>
@@ -518,7 +756,7 @@
   <header class="nav">
     <div class="wrap nav-inner">
       <a href="#top" class="brand">
-        <img src="../app_icon.png" alt="" width="26" height="26">
+        <img src="../app_icon.png" alt="" width="26" height="26" decoding="async">
         Tunnel Pilot <span class="ver">CLI</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
@@ -541,22 +779,20 @@
   <main id="top">
 
     <!-- ============ HERO ============ -->
-    <section class="hero">
+    <section class="hero" aria-labelledby="hero-title">
       <div class="wrap">
         <div class="hero-split">
           <div>
-            <span class="eyebrow">
-              <svg class="icon" aria-hidden="true"><use href="#i-server"/></svg>
-              Server edition &middot; Linux &amp; macOS
-            </span>
-            <h1>SSH tunnels that stay up on your server, <span class="accent">managed from a browser.</span></h1>
+            <h1 id="hero-title">
+              <span class="h1-name">Tunnel Pilot CLI</span>
+              <span class="h1-sub">SSH tunnels that stay up on your server, <span class="accent">managed from a browser.</span></span>
+            </h1>
           </div>
           <div>
             <p class="lede">
-              <strong>Tunnel Pilot CLI</strong> is Tunnel Pilot without the window. A daemon holds your
-              <span class="mono">ssh -L</span> forwards open and reconnects them when they drop; you manage it
-              from the terminal or from the desktop app&rsquo;s interface in your browser.
-              For servers, homelabs, a Raspberry Pi, CI boxes.
+              <strong>Tunnel Pilot CLI</strong> is the server edition of Tunnel Pilot: a free, open-source SSH tunnel daemon for Linux and macOS
+              that keeps your <span class="mono">ssh -L</span> forwards open and reconnects them when they drop.
+              Manage it from the terminal or a web UI &mdash; on a server, a homelab or a Raspberry Pi.
             </p>
             <div class="cta-row">
               <a href="#install" class="btn btn-primary">
@@ -680,70 +916,149 @@
       </div>
     </section>
 
-    <!-- ============ QUICK START ============ -->
+    <!-- ============ QUICK START / HOW TO (HowTo JSON-LD is generated from these steps) ============ -->
     <section id="quick-start" class="band" aria-labelledby="qs-title">
       <div class="wrap cli-grid">
         <div class="sec-head reveal">
           <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg> Quick start</span>
-          <h2 id="qs-title">From install to a running web UI</h2>
-          <p>Set a password, install the service, open the browser. The service starts at boot and the web UI listens on localhost until you choose otherwise.</p>
-          <p class="aside">Terminal only? Leave out <code>--web</code>; the daemon runs without the web UI and every action is a command.</p>
+          <h2 id="qs-title">How to keep an SSH tunnel running on a server</h2>
+          <p id="howto-desc">Install, add a forward, run it as a service. The service starts with the machine, connects every forward and brings each one back when it drops.</p>
+          <p class="aside">Prefer the browser? With the web UI on, you can add and switch forwards there instead of step 2.</p>
         </div>
 
-        <ol class="cli-steps" role="list" aria-label="Quick start steps">
-          <li class="cli-step copy-scope reveal">
+        <ol class="cli-steps" role="list">
+          <li class="cli-step copy-scope reveal" id="howto-step-1">
             <div class="cli-step-head">
               <span class="cli-step-n" aria-hidden="true">1</span>
-              <h3>Set the web admin password</h3>
-              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli web set-password">
-                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> set-password command</span>
+              <h3>Install Tunnel Pilot CLI</h3>
+              <button class="copy-btn" type="button" data-copy="curl -fsSL https://kalfian.github.io/tunnel-pilot/cli/install.sh | bash">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> install command</span>
               </button>
             </div>
-            <p>Prompted with echo off and stored as an argon2id hash. Setting it again signs everyone out.</p>
-            <pre class="cli-code"><code>tunnel-pilot-cli web set-password</code></pre>
+            <p>One ~10 MB binary, installed to <code>~/.local/bin</code>. The download is SHA-256 verified and refused if the checksum is missing or wrong.</p>
+            <pre class="cli-code"><code>curl -fsSL https://kalfian.github.io/<wbr>tunnel-pilot/<wbr>cli/install.sh | bash</code></pre>
           </li>
-          <li class="cli-step copy-scope reveal">
+          <li class="cli-step copy-scope reveal" id="howto-step-2">
             <div class="cli-step-head">
               <span class="cli-step-n" aria-hidden="true">2</span>
-              <h3>Install the service with the web UI</h3>
-              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli service install --web">
-                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> service install command</span>
-              </button>
-            </div>
-            <p>The web UI is on <code>http://127.0.0.1:1855</code> &mdash; on the server itself, or from your machine <a href="#proxy-ssh">through an SSH tunnel</a>.</p>
-            <pre class="cli-code"><code>tunnel-pilot-cli service install --web</code></pre>
-          </li>
-          <li class="cli-step copy-scope reveal">
-            <div class="cli-step-head">
-              <span class="cli-step-n" aria-hidden="true">3</span>
-              <h3>Reach it from other machines <span class="opt">(optional)</span></h3>
-              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli service install --web --bind 0.0.0.0">
-                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> service install command with --bind 0.0.0.0</span>
-              </button>
-            </div>
-            <p>Listens on every interface at <code>http://&lt;server-ip&gt;:1855</code>. Plain HTTP &mdash; <a href="#security">put HTTPS in front</a> before you rely on it.</p>
-            <pre class="cli-code"><code>tunnel-pilot-cli service install --web --bind 0.0.0.0</code></pre>
-          </li>
-          <li class="cli-step copy-scope reveal">
-            <div class="cli-step-head">
-              <span class="cli-step-n" aria-hidden="true">4</span>
-              <h3>Add forwards &mdash; in the browser or here</h3>
+              <h3>Add a forward</h3>
               <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli add prod-db \&#10;  --ssh deploy@bastion.example.com \&#10;  --forward 5432:db.internal:5432 \&#10;  --identity ~/.ssh/id_ed25519">
                 <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> add-forward command</span>
               </button>
             </div>
-            <p>Key auth shown; <code>--password</code> prompts instead and never takes the password as a flag value. Then <code>list</code>, <code>connect</code>, <code>disconnect</code> and <code>status</code>, all with <code>--json</code>.</p>
+            <p><code>--forward</code> takes <code>ssh -L</code> syntax. Key auth shown; <code>--password</code> prompts instead and never takes the password as a flag value.</p>
             <pre class="cli-code"><code>tunnel-pilot-cli add prod-db \
   --ssh deploy@bastion.example.com \
   --forward 5432:db.internal:5432 \
   --identity ~/.ssh/id_ed25519</code></pre>
           </li>
+          <li class="cli-step copy-scope reveal" id="howto-step-3">
+            <div class="cli-step-head">
+              <span class="cli-step-n" aria-hidden="true">3</span>
+              <h3>Set a web admin password <span class="opt">(optional)</span></h3>
+              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli web set-password">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> set-password command</span>
+              </button>
+            </div>
+            <p>Only needed for the web UI. Prompted with echo off and stored as an argon2id hash; setting it again signs everyone out.</p>
+            <pre class="cli-code"><code>tunnel-pilot-cli web set-password</code></pre>
+          </li>
+          <li class="cli-step copy-scope reveal" id="howto-step-4">
+            <div class="cli-step-head">
+              <span class="cli-step-n" aria-hidden="true">4</span>
+              <h3>Install the service</h3>
+              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli service install --connect-all --web">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> service install command</span>
+              </button>
+            </div>
+            <p>A systemd unit (a user unit, or a system unit as root) or a launchd agent that starts with the machine, connects every forward and reconnects them when they drop. A user unit needs lingering to outlive your login; the installer prints the command. Leave out <code>--web</code> for terminal only; with it, the web UI is on <code>http://127.0.0.1:1855</code>, reachable <a href="#proxy-ssh">through an SSH tunnel</a> or, with <code>--bind 0.0.0.0</code>, <a href="#security">behind HTTPS</a>.</p>
+            <pre class="cli-code"><code>tunnel-pilot-cli service install --connect-all --web</code></pre>
+          </li>
+          <li class="cli-step copy-scope reveal" id="howto-step-5">
+            <div class="cli-step-head">
+              <span class="cli-step-n" aria-hidden="true">5</span>
+              <h3>Check it</h3>
+              <button class="copy-btn" type="button" data-copy="tunnel-pilot-cli list">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span><span class="sr-only"> list command</span>
+              </button>
+            </div>
+            <p>Lists every forward with its live status; <code>service status</code> reports the service. Logs go to <code>journalctl --user -u tunnel-pilot-cli</code> on Linux.</p>
+            <pre class="cli-code"><code>tunnel-pilot-cli list</code></pre>
+          </li>
         </ol>
       </div>
     </section>
 
+    <!-- ============ COMPARISON ============ -->
+    <section id="compare" aria-labelledby="compare-title">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <span class="eyebrow">Compared</span>
+          <h2 id="compare-title">Tunnel Pilot CLI vs <code>ssh -L</code> in a systemd unit and autossh</h2>
+          <p>Both are the usual way to keep a tunnel up on a server, and both work. This is the part you would otherwise write and maintain yourself.</p>
+        </div>
+        <div class="compare-wrap reveal">
+          <table class="compare stack" role="table">
+            <caption>What each one gives you</caption>
+            <thead role="rowgroup">
+              <tr role="row">
+                <td role="cell"></td>
+                <th scope="col" role="columnheader"><code>ssh -L</code> + a unit</th>
+                <th scope="col" role="columnheader">autossh</th>
+                <th scope="col" role="columnheader" class="here">Tunnel Pilot CLI</th>
+              </tr>
+            </thead>
+            <tbody role="rowgroup">
+              <tr role="row">
+                <th scope="row" role="rowheader">Starts at boot</th>
+                <td role="cell" data-label="ssh -L">Once you write the unit</td>
+                <td role="cell" data-label="autossh">Once you write the unit</td>
+                <td role="cell" data-label="Tunnel Pilot CLI" class="here"><code>service install</code> writes the systemd unit or launchd agent</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Reconnects after a drop</th>
+                <td role="cell" data-label="ssh -L">Only through the unit&rsquo;s <code>Restart=</code> policy</td>
+                <td role="cell" data-label="autossh">Yes, it restarts ssh</td>
+                <td role="cell" data-label="Tunnel Pilot CLI" class="here">Yes, per tunnel, with keep-alive and backoff</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Several tunnels</th>
+                <td role="cell" data-label="ssh -L">More <code>-L</code> flags or more units</td>
+                <td role="cell" data-label="autossh">More <code>-L</code> flags or more processes</td>
+                <td role="cell" data-label="Tunnel Pilot CLI" class="here">Named forwards with groups and tags, each on or off</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Status for scripts</th>
+                <td role="cell" data-label="ssh -L">The unit&rsquo;s state</td>
+                <td role="cell" data-label="autossh">The process or its unit</td>
+                <td role="cell" data-label="Tunnel Pilot CLI" class="here"><code>list</code> and <code>status</code> per forward, with <code>--json</code></td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Browser UI</th>
+                <td role="cell" data-label="ssh -L">None</td>
+                <td role="cell" data-label="autossh">None</td>
+                <td role="cell" data-label="Tunnel Pilot CLI" class="here">Web UI on port 1855, login required</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Passwords</th>
+                <td role="cell" data-label="ssh -L">Use a key; a service can&rsquo;t answer a prompt</td>
+                <td role="cell" data-label="autossh">Use a key; a restart can&rsquo;t answer a prompt</td>
+                <td role="cell" data-label="Tunnel Pilot CLI" class="here">A key, or a password in the keychain or a 0600 file</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Host-key check</th>
+                <td role="cell" data-label="ssh -L"><code>known_hosts</code></td>
+                <td role="cell" data-label="autossh"><code>known_hosts</code>, through ssh</td>
+                <td role="cell" data-label="Tunnel Pilot CLI" class="here">Pinned on first connect; <code>known_hosts</code> honoured read-only</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ SECURITY ============ -->
-    <section id="security" aria-labelledby="security-title">
+    <section id="security" class="band" aria-labelledby="security-title">
       <div class="wrap sec-grid">
         <div>
           <div class="sec-head reveal">
@@ -838,7 +1153,7 @@
     </section>
 
     <!-- ============ FEATURE PARITY ============ -->
-    <section id="features" class="band" aria-labelledby="features-title">
+    <section id="features" aria-labelledby="features-title">
       <div class="wrap">
         <div class="sec-head reveal">
           <span class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg> Same app, different delivery</span>
@@ -904,13 +1219,29 @@
     </section>
 
     <!-- ============ FAQ ============ -->
-    <section id="faq" aria-labelledby="faq-title">
+    <section id="faq" class="band" aria-labelledby="faq-title">
       <div class="wrap">
         <div class="sec-head center reveal">
           <span class="eyebrow">FAQ</span>
           <h2 id="faq-title">Common questions</h2>
         </div>
         <div class="faq-list">
+          <details class="faq reveal">
+            <summary><span class="q-text">What is Tunnel Pilot CLI?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>Tunnel Pilot CLI (<code>tunnel-pilot-cli</code>) is the server edition of <a href="../">Tunnel Pilot</a>: a free, open-source SSH tunnel daemon for Linux and macOS. It keeps your <code>ssh -L</code> forwards open as a systemd or launchd service, reconnects them when they drop, and is managed from the terminal or from a web UI in the browser.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">Is Tunnel Pilot CLI free?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>Yes. It is free and open source under the MIT License, and it ships in the same GitHub release as the desktop app.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">How do I keep an SSH tunnel running after a reboot?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>Add the forward, then run <code>tunnel-pilot-cli service install --connect-all</code>. It writes and starts a systemd unit (a user unit, or a system unit as root) or a launchd agent that connects every forward when it starts and reconnects them after drops. A user unit stops at logout unless lingering is on; the installer prints the <code>sudo loginctl enable-linger</code> command when it is needed.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">Is it an alternative to autossh?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>Yes, for local port forwards. Like autossh it brings a dropped tunnel back. It also keeps named forwards in its own config, installs its own systemd or launchd service, reports status as JSON, pins SSH host keys and has an optional web UI.</p>
+          </details>
           <details class="faq reveal">
             <summary><span class="q-text">Does it run on Windows?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
             <p>No &mdash; Tunnel Pilot CLI is built for Linux x86_64, Linux aarch64 and macOS. On Windows, use the <a href="../#download">desktop app</a>: the same features in a tray app with a window.</p>
@@ -930,6 +1261,14 @@
           <details class="faq reveal">
             <summary><span class="q-text">Where are SSH passwords stored?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
             <p>In the OS keychain when one is available. On a server without a keychain they go to a separate file readable only by its owner (mode 0600), and the web UI shows a notice saying so. The web UI admin password is stored as an argon2id hash.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">How does it check SSH host keys?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>Each forward pins its SSH server&rsquo;s host key on the first connection and honours <code>~/.ssh/known_hosts</code> without changing it. If the key later changes, the connection is refused and not retried until you verify the new fingerprint and run <code>tunnel-pilot-cli trust-host-key &lt;name&gt;</code>, or choose Trust new key in the web UI. <code>forget-host-key</code> drops a pin.</p>
+          </details>
+          <details class="faq reveal">
+            <summary><span class="q-text">How do I uninstall Tunnel Pilot CLI?</span> <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+            <p>Run <code>curl -fsSL https://kalfian.github.io/<wbr>tunnel-pilot/<wbr>cli/uninstall.sh | bash</code>. It stops and removes the service and the binary and keeps your config; add <code>-s -- --purge</code> to also delete the config, the web admin password and stored passwords.</p>
           </details>
         </div>
       </div>
@@ -952,10 +1291,10 @@
     <div class="wrap foot">
       <div>
         <a href="#top" class="brand">
-          <img src="../app_icon.png" alt="" width="22" height="22">
+          <img src="../app_icon.png" alt="" width="22" height="22" loading="lazy" decoding="async">
           Tunnel Pilot <span class="ver">CLI</span>
         </a>
-        <p class="foot-note">Open-source SSH local port forwarding for servers. MIT License &middot; &copy; 2026 kalfian.</p>
+        <p class="foot-note">Open-source SSH tunnel daemon for servers. Version 2.4 &middot; MIT License &middot; &copy; 2026 kalfian.</p>
       </div>
       <nav class="foot-links" aria-label="Footer">
         <a href="../"><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg> Desktop app</a>
