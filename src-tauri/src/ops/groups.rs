@@ -121,8 +121,18 @@ pub async fn assign_forward_group(
 /// `start_group` — connect every forward in the folder (per-group bulk). Reuses
 /// the same start policy as the global sweep but scoped to one folder.
 pub async fn start_group(state: &Arc<AppState>, group_id: String) -> Result<(), AppError> {
+    start_group_where(state, group_id, |_| true).await
+}
+
+/// [`start_group`] over the forwards `include` accepts (see
+/// `ops::forwards::run_start_all_where`).
+pub async fn start_group_where(
+    state: &Arc<AppState>,
+    group_id: String,
+    include: impl Fn(&crate::state::models::ForwardConfig) -> bool,
+) -> Result<(), AppError> {
     for cfg in state.configs_snapshot() {
-        if cfg.group_id.as_deref() != Some(group_id.as_str()) {
+        if cfg.group_id.as_deref() != Some(group_id.as_str()) || !include(&cfg) {
             continue;
         }
         match state.registry.current_status(&cfg.id) {

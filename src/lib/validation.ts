@@ -180,6 +180,13 @@ export const SECRET_MAX = 4096;
 /** `{{NAME}}` — how a variable is written inside a username. */
 export const variableToken = (name: string): string => `{{${name}}}`;
 
+/**
+ * The key a secret variable's server binding uses — the same as the backend's
+ * `endpoint_key`: host trimmed and ASCII-lowercased, then `:port`.
+ */
+export const endpointKey = (host: string, port: number): string =>
+  `${host.trim().replace(/[A-Z]/g, (c) => c.toLowerCase())}:${port}`;
+
 /** One piece of a username template. */
 export type TemplateSegment =
   { kind: "text"; text: string } | { kind: "var"; name: string };
@@ -408,8 +415,16 @@ export function validateVariableForm(
     errors.value = `Keep the value to ${PLAIN_VALUE_MAX} characters or fewer.`;
   } else if (values.value.includes("{{")) {
     errors.value = "A value can't contain {{ — variables don't nest.";
-  } else if (/\p{Cc}/u.test(values.value)) {
-    errors.value = "The value contains a control character.";
+  } else if (
+    /[\p{Cc}\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\u034F\u115F\u1160\u2028\u2029\u3164\uFFA0\u{E0000}-\u{E007F}]/u.test(
+      values.value,
+    )
+  ) {
+    errors.value =
+      "The value contains a control or invisible formatting character.";
+  } else if (values.value.trim().startsWith("-")) {
+    errors.value =
+      "A value can't start with “-” (ssh would read it as an option).";
   }
 
   return errors;

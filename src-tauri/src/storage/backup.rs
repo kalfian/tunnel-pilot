@@ -133,9 +133,15 @@ pub fn plan_variable_import(
                 .into_iter()
                 .map(|mut v| {
                     if v.secret {
-                        v.has_stored_value = current
+                        // Keep what this machine already had under the name:
+                        // the stored value and the servers it was bound to.
+                        if let Some(local) = current
                             .iter()
-                            .any(|c| c.name == v.name && c.secret && c.has_stored_value);
+                            .find(|c| c.name == v.name && c.secret && c.has_stored_value)
+                        {
+                            v.has_stored_value = true;
+                            v.allowed_endpoints = local.allowed_endpoints.clone();
+                        }
                     }
                     v
                 })
@@ -216,6 +222,9 @@ fn strip_secret(mut v: Variable) -> Variable {
         v.value = String::new();
     }
     v.has_stored_value = false;
+    // Server bindings are this machine's authorizations; a backup cannot
+    // grant one (spec 03 §24).
+    v.allowed_endpoints = Vec::new();
     v
 }
 
@@ -241,6 +250,17 @@ pub fn parse_backup(bytes: &[u8]) -> Result<BackupFile, AppError> {
     for f in &mut backup.forwards {
         // Backups carry no secrets; the recipient must re-enter passwords.
         f.has_stored_password = false;
+        // Nor a binding to one: a crafted backup could otherwise aim a forward
+        // at its own server with `passwordVariable` naming a secret that
+        // already exists on this machine, and the next connect would send it.
+        // The user re-picks the variable after checking the forward.
+        f.password_variable = None;
+        // Forward ids key the credential store; anything but a uuid could
+        // name another entry (e.g. `var:DB_PASS`). Mint a fresh one.
+        if uuid::Uuid::parse_str(&f.id).is_err() {
+            tracing::warn!("backup forward with a non-uuid id; assigning a new id");
+            f.id = uuid::Uuid::new_v4().to_string();
+        }
     }
 
     // A hand-edited backup could put a value on a secret variable: drop it so
@@ -301,7 +321,10 @@ mod tests {
         assert_eq!(backup.forwards.len(), 1);
 
         let f = &backup.forwards[0];
-        assert_eq!(f.id, "v1-fwd");
+        // Not a uuid (real exports always use one), so a fresh id is minted:
+        // forward ids key the credential store.
+        assert_ne!(f.id, "v1-fwd");
+        assert!(uuid::Uuid::parse_str(&f.id).is_ok());
         assert_eq!(f.ssh_port, 22, "v2 default applied to a v1 entry");
         assert!(
             !f.has_stored_password,
@@ -444,6 +467,7 @@ mod tests {
             secret,
             value: value.into(),
             has_stored_value: stored,
+            allowed_endpoints: vec![],
         }
     }
 
@@ -530,5 +554,24 @@ mod tests {
         assert_eq!(planned[0].value, "mine");
         assert_eq!(planned[1].name, "PASS");
         assert!(orphaned.is_empty());
+    }
+
+    #[test]
+    fn imported_forwards_never_bind_a_local_secret_or_borrow_an_account() {
+        let raw = r#"{
+            "version": 2,
+            "forwards": [
+                { "id": "var:DB_PASS", "name": "evil", "sshHost": "evil.example",
+                  "sshUsername": "u", "localPort": 1, "remoteHost": "h", "remotePort": 2,
+                  "passwordVariable": "DB_PASS" }
+            ]
+        }"#;
+        let backup = parse_backup(raw.as_bytes()).expect("parse");
+        let f = &backup.forwards[0];
+        assert_eq!(f.password_variable, None, "the binding is not imported");
+        assert!(
+            uuid::Uuid::parse_str(&f.id).is_ok(),
+            "a non-uuid id is replaced"
+        );
     }
 }

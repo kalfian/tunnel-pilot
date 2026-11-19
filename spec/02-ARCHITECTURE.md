@@ -343,8 +343,15 @@ the plain variables' current values.
 | `list_variables` | `() -> Vec<Variable>` | Settings → Variables (also in `AppSnapshot.variables`) |
 | `save_variable` | `(input: VariableInput) -> Variable` | variable dialog save — create, change the value, or switch plain ↔ secret |
 | `delete_variable` | `(name: String) -> ()` | variable delete; `invalidInput` while a forward uses it |
+| `allow_variable_endpoint` | `(input: VariableEndpointInput) -> Variable` | web UI, before an action that would send a secret variable somewhere new: proves the value and returns a one-time 2-minute grant for that server (wrong values: doubling lockout per variable, 1 s → 1 h) |
+| `revoke_variable_endpoint` | `(name: String, endpoint: String) -> Variable` | Settings → Variables "stop sending to" |
 
-`Variable` = `{ name, secret, value, hasStoredValue }` — `value` is `""` for a secret one;
+Over the web transport, `create_forward` / `update_forward` / `trust_host_key` /
+`forget_host_key` consume such a grant whenever they would send a secret variable to a new
+destination (03 §24 item 8); the desktop and the CLI never need one.
+
+`Variable` = `{ name, secret, value, hasStoredValue, allowedEndpoints }` — `value` is `""`
+for a secret one; `allowedEndpoints` are the `host:port` servers it may be sent to (03 §24);
 its value lives in the credential store and **no command returns it**. `VariableInput` =
 `{ name, secret, value: Option<String> }`: required for a plain variable; for a secret one
 the new value, or `None` to keep the stored one. Like `set_forward_password`, the secret

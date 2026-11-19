@@ -218,7 +218,7 @@
           placeholder={keepsStoredSecret
             ? "•••••••• stored — leave blank to keep"
             : "Enter the secret value"}
-          autocomplete="off"
+          autocomplete="new-password"
           describedby={keepsStoredSecret ? "v-secret-hint" : undefined}
           invalid={!!showErr("value")}
           errorText={showErr("value")}

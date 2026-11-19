@@ -9,7 +9,7 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::ops::variables as ops;
-use crate::state::models::{Variable, VariableInput};
+use crate::state::models::{Variable, VariableEndpointInput, VariableInput};
 use crate::state::AppState;
 
 /// `list_variables` — every variable, without secret values.
@@ -34,4 +34,26 @@ pub async fn delete_variable(
     name: String,
 ) -> Result<(), AppError> {
     ops::delete(state.inner(), &name).await
+}
+
+/// `allow_variable_endpoint` — bind a secret variable to a server by proving
+/// its value (the web UI's path; the desktop form binds implicitly).
+#[tauri::command]
+pub async fn allow_variable_endpoint(
+    state: State<'_, Arc<AppState>>,
+    input: VariableEndpointInput,
+) -> Result<Variable, AppError> {
+    // The desktop never needs a grant (it binds servers itself); the
+    // check still runs so the command behaves the same everywhere.
+    ops::allow_endpoint_with_proof(state.inner(), "desktop", input).await
+}
+
+/// `revoke_variable_endpoint` — stop sending a secret variable to a server.
+#[tauri::command]
+pub async fn revoke_variable_endpoint(
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    endpoint: String,
+) -> Result<Variable, AppError> {
+    ops::revoke_endpoint(state.inner(), &name, &endpoint).await
 }

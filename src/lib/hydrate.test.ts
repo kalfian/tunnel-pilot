@@ -86,7 +86,13 @@ const SNAPSHOT: AppSnapshot = {
   ],
   groups: [{ id: "g1", name: "prod", color: null, order: 0, collapsed: false }],
   variables: [
-    { name: "DB_USER", secret: false, value: "kalfian", hasStoredValue: false },
+    {
+      name: "DB_USER",
+      secret: false,
+      value: "kalfian",
+      hasStoredValue: false,
+      allowedEndpoints: [],
+    },
   ],
   settings: SETTINGS,
   logs: [

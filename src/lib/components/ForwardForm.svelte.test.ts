@@ -355,9 +355,22 @@ describe("ForwardForm — variables (spec 03 §24)", () => {
         secret: false,
         value: "kalfian",
         hasStoredValue: false,
+        allowedEndpoints: [],
       },
-      { name: "DB_PASS", secret: true, value: "", hasStoredValue: true },
-      { name: "NEW_PASS", secret: true, value: "", hasStoredValue: false },
+      {
+        name: "DB_PASS",
+        secret: true,
+        value: "",
+        hasStoredValue: true,
+        allowedEndpoints: [],
+      },
+      {
+        name: "NEW_PASS",
+        secret: true,
+        value: "",
+        hasStoredValue: false,
+        allowedEndpoints: [],
+      },
     ]);
   });
 
@@ -380,6 +393,20 @@ describe("ForwardForm — variables (spec 03 §24)", () => {
     expect(arg.passwordVariable).toBe("DB_PASS");
     expect(arg.identityFilePath).toBeNull();
     expect(setForwardPassword).not.toHaveBeenCalled();
+  });
+
+  it("never asks for a secret's value on the desktop (servers bind implicitly)", async () => {
+    render(ForwardForm, { props: { mode: "add", onClose: vi.fn() } });
+    await fillValid();
+    await fireEvent.click(
+      within(authGroup()).getByRole("radio", { name: "Variable" }),
+    );
+    await fireEvent.change(screen.getByLabelText(/password variable/i), {
+      target: { value: "DB_PASS" },
+    });
+    expect(
+      screen.queryByLabelText(/confirm DB_PASS for this server/i),
+    ).not.toBeInTheDocument();
   });
 
   it("sends passwordVariable: null outside variable mode", async () => {

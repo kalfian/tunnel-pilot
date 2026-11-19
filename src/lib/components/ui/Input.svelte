@@ -17,7 +17,7 @@
     /** Id(s) of helper text that describes the field (merged with the error). */
     describedby?: string;
     name?: string;
-    autocomplete?: "off" | "current-password" | "username";
+    autocomplete?: "off" | "current-password" | "new-password" | "username";
     autofocus?: boolean;
     onkeydown?: (e: KeyboardEvent) => void;
   }

@@ -83,6 +83,20 @@ export interface Variable {
   value: string;
   /** A secret variable has a value in the keychain / secrets file. */
   hasStoredValue: boolean;
+  /**
+   * SSH servers (`host:port`, see `endpointKey`) a secret variable may be sent
+   * to. The web UI adds one by proving the value (`allowVariableEndpoint`);
+   * the desktop app and the CLI add them implicitly.
+   */
+  allowedEndpoints: string[];
+}
+
+/** `allow_variable_endpoint` payload — carries the secret, inbound only. */
+export interface VariableEndpointInput {
+  name: string;
+  sshHost: string;
+  sshPort: number;
+  value: string;
 }
 
 /**

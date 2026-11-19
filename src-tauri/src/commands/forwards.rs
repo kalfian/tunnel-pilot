@@ -13,6 +13,7 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::ops::forwards as ops;
+use crate::ops::variables::Binding;
 use crate::ssh::engine;
 use crate::state::models::{ForwardConfig, ForwardInput, ForwardRuntime};
 use crate::state::AppState;
@@ -36,7 +37,9 @@ pub async fn create_forward(
     state: State<'_, Arc<AppState>>,
     input: ForwardInput,
 ) -> Result<ForwardConfig, AppError> {
-    ops::create(state.inner(), input).await
+    // The desktop user can read their own keychain: binding a secret variable
+    // to this server needs no proof here (spec 03 §24).
+    ops::create_as(state.inner(), input, Binding::BindAfterSave).await
 }
 
 /// `update_forward` — edit an existing forward. If it is currently live it is
@@ -48,7 +51,7 @@ pub async fn update_forward(
     id: String,
     input: ForwardInput,
 ) -> Result<ForwardConfig, AppError> {
-    ops::update(state.inner(), id, input).await
+    ops::update_as(state.inner(), id, input, Binding::BindAfterSave).await
 }
 
 /// `delete_forward` — tear down the tunnel if live, drop its stored secret, then

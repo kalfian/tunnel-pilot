@@ -7,12 +7,14 @@
     isFormValid,
     resolveUsername,
     variableToken,
+    endpointKey,
     type ForwardFormField,
     type ForwardFormValues,
   } from "../validation";
   import {
     createForward,
     updateForward,
+    allowVariableEndpoint,
     setForwardPassword,
     clearForwardPassword,
     forgetHostKey,
@@ -338,9 +340,43 @@
       : []),
   ]);
 
+  // Web UI (spec 03 §24): whenever this save would start sending a secret
+  // variable somewhere new — a new tunnel, a different variable, another
+  // server, or a server it is no longer allowed on — its value is typed once.
+  // Mirrors the backend's rule; the desktop app never asks.
+  let variableProof = $state("");
+  let proofError = $state<string | null>(null);
+  const proofEndpoint = $derived(
+    endpointKey(sshHost, Number.parseInt(sshPort, 10) || 22),
+  );
+  const needsProof = $derived(
+    isWeb &&
+      authMode === "variable" &&
+      !!selectedSecret &&
+      selectedSecret.hasStoredValue &&
+      !(
+        // Same variable on the very same server (compared as typed, like
+        // the backend's pin rule), still allowed there and already pinned.
+        c !== undefined &&
+        c.passwordVariable === passwordVariable &&
+        c.sshHost === sshHost.trim() &&
+        String(c.sshPort) === sshPort.trim() &&
+        c.hostKey !== null &&
+        selectedSecret.allowedEndpoints.includes(proofEndpoint)
+      ),
+  );
+  // Forgetting the pin of a tunnel that sends a secret variable lets the next
+  // connection trust any server; over the web that needs the desktop app or
+  // the CLI (the backend refuses it without a proof).
+  const forgetBlocked = $derived(isWeb && !!c?.passwordVariable);
+
   async function save(): Promise<void> {
     submitted = true;
-    if (!valid) {
+    proofError =
+      needsProof && variableProof === ""
+        ? `Enter the value of ${passwordVariable} to allow it on ${proofEndpoint}.`
+        : null;
+    if (!valid || proofError) {
       // Errors on the Advanced tab shouldn't hide behind General.
       if (AUTH_ON_ADVANCED.some((f) => errors[f])) tab = "advanced";
       shake = true;
@@ -352,6 +388,18 @@
     let result: ForwardConfig;
     try {
       const input = toInput();
+      if (needsProof) {
+        try {
+          await allowVariableEndpoint({
+            name: input.passwordVariable ?? "",
+            sshHost: input.sshHost,
+            sshPort: input.sshPort,
+            value: variableProof,
+          });
+        } finally {
+          variableProof = "";
+        }
+      }
       result =
         mode === "add"
           ? await createForward(input)
@@ -612,20 +660,28 @@
                     Pinned
                   {/if}
                 </span>
-                <span bind:this={forgetBtnWrap}>
-                  <Button
-                    size="sm"
-                    ariaLabel="Forget pinned host key for {c.name}"
-                    onclick={() => void openForget()}
-                  >
-                    Forget…
-                  </Button>
-                </span>
+                {#if !forgetBlocked}
+                  <span bind:this={forgetBtnWrap}>
+                    <Button
+                      size="sm"
+                      ariaLabel="Forget pinned host key for {c.name}"
+                      onclick={() => void openForget()}
+                    >
+                      Forget…
+                    </Button>
+                  </span>
+                {/if}
               </div>
             {/if}
           {:else}
             <p class="hint hk-empty">
               Not pinned yet — pinned on the first successful connection.
+            </p>
+          {/if}
+          {#if pin && forgetBlocked}
+            <p class="hint">
+              This tunnel sends a secret variable, so its pin can only be
+              forgotten from the desktop app or the CLI.
             </p>
           {/if}
           {#if pin && serverChanged}
@@ -675,6 +731,26 @@
                 }}
               />
             </div>
+            {#if needsProof}
+              <label class="lbl" for="f-pwvar-proof"
+                >Confirm {passwordVariable} for this server</label
+              >
+              <Input
+                id="f-pwvar-proof"
+                type="password"
+                bind:value={variableProof}
+                placeholder="Value of {passwordVariable}"
+                autocomplete="off"
+                describedby="f-pwvar-proof-hint"
+                invalid={!!proofError}
+                errorText={proofError ?? undefined}
+              />
+              <p class="hint" id="f-pwvar-proof-hint">
+                From the web UI, a secret variable starts going to a server only
+                after you type its value. This allows
+                <span class="mono">{proofEndpoint}</span>.
+              </p>
+            {/if}
             {#if selectedSecret && !selectedSecret.hasStoredValue}
               <p class="hint warn">
                 {selectedSecret.name} has no value yet. Set it in Settings → Variables

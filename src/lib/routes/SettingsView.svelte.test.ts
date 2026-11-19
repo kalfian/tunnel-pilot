@@ -598,6 +598,7 @@ describe("SettingsView — variables", () => {
         secret: false,
         value: "kalfian",
         hasStoredValue: false,
+        allowedEndpoints: [],
       },
     ]);
   });

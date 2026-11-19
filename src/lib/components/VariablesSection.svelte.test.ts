@@ -24,15 +24,34 @@ vi.mock("../ipc", () => ({
     }),
   ),
   deleteVariable: vi.fn(() => Promise.resolve()),
+  revokeVariableEndpoint: vi.fn(() => Promise.resolve()),
 }));
 
 import VariablesSection from "./VariablesSection.svelte";
-import { deleteVariable, saveVariable } from "../ipc";
+import { deleteVariable, revokeVariableEndpoint, saveVariable } from "../ipc";
 
 const VARS: Variable[] = [
-  { name: "DB_USER", secret: false, value: "kalfian", hasStoredValue: false },
-  { name: "DB_PASS", secret: true, value: "", hasStoredValue: true },
-  { name: "API_KEY", secret: true, value: "", hasStoredValue: false },
+  {
+    name: "DB_USER",
+    secret: false,
+    value: "kalfian",
+    hasStoredValue: false,
+    allowedEndpoints: [],
+  },
+  {
+    name: "DB_PASS",
+    secret: true,
+    value: "",
+    hasStoredValue: true,
+    allowedEndpoints: [],
+  },
+  {
+    name: "API_KEY",
+    secret: true,
+    value: "",
+    hasStoredValue: false,
+    allowedEndpoints: [],
+  },
 ];
 
 function fwd(over: Partial<ForwardConfig>): ForwardConfig {
@@ -277,5 +296,29 @@ describe("VariablesSection", () => {
     ).not.toBeInTheDocument();
     await fireEvent.click(within(dialog).getByRole("button", { name: "OK" }));
     expect(deleteVariable).not.toHaveBeenCalled();
+  });
+
+  it("lists the servers a secret may be sent to and can remove one", async () => {
+    variables.set([
+      { ...VARS[1], allowedEndpoints: ["bastion:22", "db.example:2222"] },
+      VARS[2],
+    ]);
+    render(VariablesSection);
+    const servers = screen.getByRole("list", {
+      name: "Servers DB_PASS may be sent to",
+    });
+    expect(within(servers).getAllByRole("listitem")).toHaveLength(2);
+    expect(
+      within(rowFor("API_KEY")).getByText(/not allowed on any server yet/i),
+    ).toBeInTheDocument();
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: "Stop sending DB_PASS to bastion:22",
+      }),
+    );
+    expect(revokeVariableEndpoint).toHaveBeenCalledWith(
+      "DB_PASS",
+      "bastion:22",
+    );
   });
 });

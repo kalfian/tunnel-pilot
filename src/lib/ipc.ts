@@ -27,6 +27,7 @@ import type {
   TunnelGroup,
   UpdateStatus,
   Variable,
+  VariableEndpointInput,
   VariableInput,
 } from "./types";
 
@@ -105,6 +106,20 @@ export const saveVariable = (input: VariableInput): Promise<Variable> =>
 /** Refused while any forward uses the variable. */
 export const deleteVariable = (name: string): Promise<void> =>
   invoke("delete_variable", { name });
+
+/**
+ * Allow a secret variable to be sent to a server by proving its value (the
+ * web UI's path before saving a tunnel on a new server). Inbound only.
+ */
+export const allowVariableEndpoint = (
+  input: VariableEndpointInput,
+): Promise<Variable> => invoke("allow_variable_endpoint", { input });
+
+/** Stop sending a secret variable to a server (`host:port`). */
+export const revokeVariableEndpoint = (
+  name: string,
+  endpoint: string,
+): Promise<Variable> => invoke("revoke_variable_endpoint", { name, endpoint });
 
 export const listGroups = (): Promise<TunnelGroup[]> => invoke("list_groups");
 

@@ -1,7 +1,7 @@
 //! The web UI server of `tunnel-pilot-cli` (spec 02 §10, 03 §22).
 //!
 //! Serves the same Svelte UI as the desktop app plus a JSON binding of the same
-//! IPC contract: `POST /api/invoke/<command>` runs `ops::dispatch::invoke`, and
+//! IPC contract: `POST /api/invoke/<command>` runs `ops::dispatch::invoke_scoped`, and
 //! `GET /api/events` streams the §7 events over a WebSocket. It is a third
 //! driver of `AppState`, next to the tray/webview and the CLI socket — never a
 //! second owner.
@@ -524,6 +524,7 @@ async fn logout(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response {
     }
     for id in session_cookies(&headers) {
         ctx.auth.logout(&id);
+        ctx.state.web_guard.forget_scope(&id);
     }
     (
         StatusCode::NO_CONTENT,
@@ -541,9 +542,10 @@ async fn invoke(
     if let Err(res) = check_mutation(&headers, &ctx.options) {
         return *res;
     }
-    if let Err(res) = require_session(&ctx, &headers) {
-        return *res;
-    }
+    let session = match require_session(&ctx, &headers) {
+        Ok(session) => session,
+        Err(res) => return *res,
+    };
     let args = if body.iter().all(u8::is_ascii_whitespace) {
         serde_json::Value::Null
     } else {
@@ -558,7 +560,7 @@ async fn invoke(
         }
     };
     tracing::debug!(command = %command, "web invoke");
-    match crate::ops::dispatch::invoke(&ctx.state, &command, args).await {
+    match crate::ops::dispatch::invoke_scoped(&ctx.state, &session, &command, args).await {
         Ok(value) => Json(value).into_response(),
         Err(e) => error_response(status_for(&e), e),
     }

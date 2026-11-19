@@ -23,7 +23,8 @@ pub const VALUE_MAX: usize = 256;
 pub const SECRET_MAX: usize = 4096;
 
 /// Credential-store account of a secret variable. Forward passwords are keyed
-/// by a uuid, which never contains `:`, so the two can never collide.
+/// by the forward id, a uuid (never containing `:`): every create mints one and
+/// backup import replaces any other id, so the two cannot collide.
 pub fn secret_account(name: &str) -> String {
     format!("var:{name}")
 }
@@ -58,9 +59,19 @@ pub fn validate_plain_value(name: &str, value: &str) -> Result<(), AppError> {
             "variable {name} is longer than {VALUE_MAX} characters"
         )));
     }
-    if value.chars().any(char::is_control) {
+    if value
+        .chars()
+        .any(|c| c.is_control() || is_invisible_format_char(c))
+    {
         return Err(AppError::InvalidInput(format!(
-            "variable {name} contains a control character"
+            "variable {name} contains a control or invisible formatting character"
+        )));
+    }
+    if value.starts_with('-') {
+        // It becomes the start of `user@host`, which `ssh` would read as an
+        // option (e.g. `-oProxyCommand=…`) in a copied command.
+        return Err(AppError::InvalidInput(format!(
+            "variable {name} cannot start with '-'"
         )));
     }
     if value.contains("{{") {
@@ -69,6 +80,30 @@ pub fn validate_plain_value(name: &str, value: &str) -> Result<(), AppError> {
         )));
     }
     Ok(())
+}
+
+/// Zero-width and bidirectional-override characters: invisible, and able to
+/// make a displayed username read differently from what is sent.
+fn is_invisible_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+            | '\u{034F}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{3164}'
+            | '\u{FFA0}'
+            | '\u{E0000}'..='\u{E007F}'
+    )
 }
 
 /// A secret value: non-empty and at most [`SECRET_MAX`] bytes. The message
@@ -224,6 +259,10 @@ mod tests {
         assert!(validate_plain_value("U", "").is_err());
         assert!(validate_plain_value("U", "a\nb").is_err());
         assert!(validate_plain_value("U", "{{X}}").is_err());
+        assert!(validate_plain_value("U", "admin\u{202E}nimda").is_err());
+        assert!(validate_plain_value("U", "a\u{200B}b").is_err());
+        assert!(validate_plain_value("U", "-oProxyCommand=sh").is_err());
+        validate_plain_value("U", "ops-team").expect("a dash inside is fine");
         validate_secret_value("P", "hunter2").expect("secret");
         let err = validate_secret_value("P", &"x".repeat(SECRET_MAX + 1)).expect_err("long");
         assert!(!err.to_string().contains("xxxx"));

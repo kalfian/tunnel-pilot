@@ -340,7 +340,11 @@ async fn supervise(
                 // cannot fix it and would hammer a possibly hostile server.
                 // Neither is a variable problem (undefined, no value): only the
                 // user can fix it, and a retry reads the variables afresh.
-                let fatal = matches!(e, AppError::HostKeyMismatch(_) | AppError::InvalidInput(_));
+                // Nor is a failed FIRST dial of a forward that sends a secret
+                // variable: with no pinned key, an unattended retry would trust
+                // whatever answers next (spec 03 §24) — the user retries.
+                let fatal = matches!(e, AppError::HostKeyMismatch(_) | AppError::InvalidInput(_))
+                    || crate::ops::variables::sends_secret_unpinned(&state, &cfg);
                 match handle_teardown(
                     TeardownCtx {
                         state: &state,

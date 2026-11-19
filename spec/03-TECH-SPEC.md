@@ -1126,8 +1126,12 @@ ssh -N -L <bindPrefix><localPort>:<remoteHost>:<remotePort> -p <sshPort> [-i <id
 - `<bindPrefix>` = `""` when `localBindAddress == "127.0.0.1"`, else `"<localBindAddress>:"`
   (exactly v1's rule).
 - **Always** append `-p <sshPort>` (matches v1 — even for port 22).
-- `-i` only when `identityFilePath` is set & non-empty; wrap the path in double quotes
-  **only if it contains a space** (v1: `path.contains(' ') ? '"$path"' : path`).
+- `-i` only when `identityFilePath` is set & non-empty.
+- **Quoting (v2.5, security review):** every user-supplied token (the `-L` spec, the
+  identity path, `user@host`) is POSIX single-quoted when it contains anything but
+  `[A-Za-z0-9@._+-:,/%=~]` — v1's double quotes for a space did not stop `$()`/backticks.
+  A destination starting with `-` is preceded by `--` so `ssh` never reads it as an option.
+  (POSIX shells; `cmd.exe` quoting is not attempted.)
 - Never include the password.
 
 ### Acceptance criteria
@@ -1646,18 +1650,64 @@ shared login is one change instead of an edit per forward.
    `passwordVariable` together with an identity file. A forward that switches to a password
    variable has its own stored password deleted.
 7. **Backups** carry plain variables with their values and secret variables by name only.
-   Import: *replace* takes the backup's list (a secret variable keeps the value already
-   stored on this machine under the same name; secrets of dropped variables are deleted);
-   *merge* adds names (ignoring case) that are new. A malformed entry is skipped.
+   Import: *replace* takes the backup's list (a secret variable keeps the value and server
+   bindings already on this machine under the same name; secrets of dropped variables are
+   deleted); *merge* adds names (ignoring case) that are new. A malformed entry is skipped.
+   **Imported forwards never carry a `passwordVariable`** (a crafted backup could otherwise
+   aim a forward at its own server with a local secret's name) and any non-uuid forward id
+   is replaced (forward ids key the credential store; `var:NAME` must stay unreachable).
+8. **Server binding (security reviews, Kalfian 2026-11-19).** A secret variable is sent
+   only to the SSH servers in its `allowedEndpoints` (`host:port`, host trimmed + ASCII
+   lowercase). Enforced when a forward is saved (`Binding::Required`) AND at dial time.
+   - A binding exists only while some forward uses that variable on that server: it is
+     added AFTER a successful save (`Binding::BindAfterSave`) and pruned after every
+     create/update/delete/import. `revoke_variable_endpoint` removes one by hand. A value
+     change keeps the bindings; a switch to plain drops them; backups never import them.
+   - **Local drivers** (desktop app, CLI socket — whose user can read the credential store
+     anyway) save with `BindAfterSave`, no proof.
+   - **Web**: every action that would send a secret somewhere new needs proof of its value:
+     `create_forward` with a `passwordVariable`; `update_forward` unless it keeps the same
+     variable on the same RAW host and port (any spelling change drops the pin) that is
+     still bound and already pinned; `trust_host_key` / `forget_host_key` on a forward that
+     uses one (a replaced or forgotten pin is a new server in effect — e.g. a hostile
+     listener on a bound loopback port). The proof is `allow_variable_endpoint { name,
+     sshHost, sshPort, value }`: constant-time compare; the attempt is COUNTED BEFORE the
+     check with the lockout it would earn already in force (1 s, doubling to 1 h, per
+     variable — a client that hangs up mid-check cannot skip it; no lock is held; a keychain
+     failure is refunded, not counted). Success yields a one-time grant for that session +
+     `name` + server, valid 2 minutes, consumed by the action; logout drops the session's
+     grants. Proving binds nothing by itself.
+   - **First dial from the web**: a forward that sends a secret variable but has no pinned
+     host key would trust whatever key answers. `connect_forward` / `retry_forward` over
+     the web refuse it unless the same session saved that forward with a proof in the last
+     10 minutes (a "first-dial permit"); `start_all` / `start_group` over the web skip such
+     forwards and log why. Local drivers are not limited. A failed FIRST dial of such a
+     forward is never retried automatically either (`TeardownCtx.fatal`), so an unattended
+     retry cannot trust a listener planted meanwhile; the user retries. Once pinned, the
+     pin rules (§23) apply as usual.
+   - Scope is the web session: someone replaying the owner's own session cookie is that
+     session and can use its pending grant (≤ 2 min) or permit (≤ 10 min) — inherent to
+     cookie sessions; protect the cookie with HTTPS (03 §22).
+   - `duplicate_forward` over the web needs no proof: the copy keeps the original's server
+     and pin, so it sends the secret nowhere new.
+   - Known limit: a web session can keep a variable's proof locked out by guessing wrong at
+     every expiry (≤ 1 h); the desktop app and the CLI are unaffected and a daemon restart
+     clears it — acceptable, as an admin session can already delete every forward.
+   - The web form asks for the value in exactly these cases; "Forget…" is hidden for such
+     forwards on the web.
 
-**Trust note.** Anyone who may edit forwards (desktop user, CLI user, web admin) can point a
-forward that uses a secret variable at a server of their choosing and so have the secret
-sent there — the same power they have over a forward's own password before typing it.
-Variables do not widen who can do that, but they make one secret reachable from many
-forwards; give the web UI's admin password accordingly.
+**Trust note.** Whoever may edit forwards from a LOCAL driver (desktop, CLI socket) can
+point a secret variable at any server — they can read the credential store directly anyway.
+Over the web, every new destination needs the value, so a hijacked admin session cannot
+extract secret variables it does not already know; it can still connect and disconnect the
+forwards that use them, and sees nothing but names. Guessing the value is throttled per
+variable (doubling lockout to 1 h). `copy_ssh_command` shell-quotes `user@host` and inserts `--` before a destination
+that starts with `-`; plain values may not start with `-` or contain invisible formatting
+characters (bidi overrides, zero-width).
 
-Surfaces: Settings → Variables (desktop + web) to list/add/edit/delete; the forward form's
-auth control gains "Variable" (pick a secret variable) and the username field inserts
+Surfaces: Settings → Variables (desktop + web) to list/add/edit/delete and to remove a
+secret's allowed servers; the forward form's auth control gains "Variable" (pick a secret
+variable; on the web, a new server asks for the value once) and the username field inserts
 `{{NAME}}`; CLI `var list | var set NAME VALUE | var set NAME --secret [--password-stdin] |
 var rm NAME` and `add/edit --password-var NAME`, `edit --no-password-var` (socket commands
 `variable-list`, `variable-set`, `variable-secret-stored`, `variable-remove`; the protocol

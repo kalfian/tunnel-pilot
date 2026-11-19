@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import type { Variable } from "../types";
-  import { deleteVariable } from "../ipc";
+  import { deleteVariable, revokeVariableEndpoint } from "../ipc";
   import { variables } from "../stores/variables";
   import { forwards } from "../stores/forwards";
   import { toUpdateErrorMessage } from "../stores/updater";
@@ -40,6 +40,19 @@
   function useRole(u: VariableUse): string {
     if (u.inUsername && u.asPassword) return "username + password";
     return u.inUsername ? "in username" : "as password";
+  }
+
+  async function revoke(name: string, endpoint: string): Promise<void> {
+    try {
+      await revokeVariableEndpoint(name, endpoint);
+      pushToast(`${name} is no longer sent to ${endpoint}`, {
+        tone: "success",
+      });
+    } catch (err) {
+      pushToast(toUpdateErrorMessage(err) || `Couldn't update ${name}`, {
+        tone: "error",
+      });
+    }
   }
 
   async function confirmDelete(): Promise<void> {
@@ -136,6 +149,37 @@
                 {n === 0 ? "Not used" : `Used by ${tunnels(n)}`}
               </span>
             </span>
+            {#if v.secret}
+              <!-- Servers this secret may be sent to (spec 03 §24). -->
+              <div class="v-servers">
+                {#if v.allowedEndpoints.length === 0}
+                  <span class="v-servers-label"
+                    >Not allowed on any server yet</span
+                  >
+                {:else}
+                  <span class="v-servers-label">Sent only to</span>
+                  <ul
+                    class="endpoints"
+                    aria-label="Servers {v.name} may be sent to"
+                  >
+                    {#each v.allowedEndpoints as endpoint (endpoint)}
+                      <li class="endpoint">
+                        <span class="mono">{endpoint}</span>
+                        <button
+                          type="button"
+                          class="endpoint-x"
+                          aria-label="Stop sending {v.name} to {endpoint}"
+                          title="Stop sending {v.name} to {endpoint}"
+                          onclick={() => void revoke(v.name, endpoint)}
+                        >
+                          <Icon name="x" size={12} />
+                        </button>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              </div>
+            {/if}
           </div>
           <div class="v-actions">
             <Button
@@ -347,6 +391,64 @@
   }
   .sep {
     color: var(--text-3);
+  }
+  .v-servers {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-1) var(--sp-2);
+    font-size: var(--fs-body-sm);
+    line-height: var(--lh-body-sm);
+    color: var(--text-3);
+    min-width: 0;
+  }
+  .endpoints {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    min-width: 0;
+  }
+  .endpoint {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    max-width: 100%;
+    padding: 0 2px 0 var(--sp-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    color: var(--text-2);
+    font-size: var(--fs-mono-sm);
+  }
+  .endpoint .mono {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .endpoint-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+    flex: none;
+  }
+  .endpoint-x:hover {
+    color: var(--text);
+    background: var(--hover);
+  }
+  .endpoint-x:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
   }
   .v-actions {
     display: flex;

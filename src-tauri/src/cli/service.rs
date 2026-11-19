@@ -22,6 +22,7 @@ use crate::cli::protocol::{
 };
 use crate::error::AppError;
 use crate::ops::forwards::{self as ops, run_start_all, run_stop_all, runtime_or_default};
+use crate::ops::variables::Binding;
 use crate::ssh::engine;
 use crate::state::models::{ForwardConfig, ForwardInput, ForwardStatus, Variable, VariableInput};
 use crate::state::AppState;
@@ -310,7 +311,9 @@ async fn add(state: &Arc<AppState>, fields: ForwardFields) -> Result<CliData, Ap
     let input = apply_fields(default_input(), fields);
     validate_input(&input)?;
     ensure_unique_name(state, &input.name, None)?;
-    let cfg = ops::create(state, input).await?;
+    // The socket is owner-only: its user can read the credential store
+    // directly, so binding a secret variable here needs no proof (03 §24).
+    let cfg = ops::create_as(state, input, Binding::BindAfterSave).await?;
     Ok(saved(state, &cfg, SaveChange::Created))
 }
 
@@ -326,7 +329,7 @@ async fn edit(
     let input = apply_fields(ops::input_from_config(&existing), fields);
     validate_input(&input)?;
     ensure_unique_name(state, &input.name, Some(&existing.id))?;
-    let cfg = ops::update(state, existing.id, input).await?;
+    let cfg = ops::update_as(state, existing.id, input, Binding::BindAfterSave).await?;
     Ok(saved(state, &cfg, SaveChange::Updated))
 }
 

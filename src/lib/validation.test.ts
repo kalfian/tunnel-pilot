@@ -151,10 +151,34 @@ describe("validateForwardForm", () => {
 // --- Variables (spec 03 §24) ---
 
 const VARS: Variable[] = [
-  { name: "DB_USER", secret: false, value: "kalfian", hasStoredValue: false },
-  { name: "ENV", secret: false, value: "prod", hasStoredValue: false },
-  { name: "DB_PASS", secret: true, value: "", hasStoredValue: true },
-  { name: "NEW_PASS", secret: true, value: "", hasStoredValue: false },
+  {
+    name: "DB_USER",
+    secret: false,
+    value: "kalfian",
+    hasStoredValue: false,
+    allowedEndpoints: [],
+  },
+  {
+    name: "ENV",
+    secret: false,
+    value: "prod",
+    hasStoredValue: false,
+    allowedEndpoints: [],
+  },
+  {
+    name: "DB_PASS",
+    secret: true,
+    value: "",
+    hasStoredValue: true,
+    allowedEndpoints: [],
+  },
+  {
+    name: "NEW_PASS",
+    secret: true,
+    value: "",
+    hasStoredValue: false,
+    allowedEndpoints: [],
+  },
 ];
 
 function fwd(over: Partial<ForwardConfig>): ForwardConfig {
@@ -316,6 +340,9 @@ describe("validateVariableForm", () => {
     expect(v("a{{B}}")).toMatch(/nest/);
     expect(v("a\tb")).toMatch(/control/);
     expect(v("x".repeat(257))).toMatch(/256/);
+    expect(v("admin\u202Enimda")).toMatch(/invisible/);
+    expect(v("-oProxyCommand=sh")).toMatch(/start with/);
+    expect(v("ops-team")).toBeUndefined();
   });
 
   it("lets a blank secret keep a stored value, but not create one", () => {

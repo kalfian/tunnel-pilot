@@ -452,7 +452,8 @@ On export: set every `hasStoredPassword` to `false` (recipient has no secret). O
 - **Merge**: append forwards whose `id` (or name+host+port key) is not already present;
   skip duplicates → reflected in `ImportResult.skipped`.
 - Imported forwards start with `hasStoredPassword=false` (user must re-enter passwords).
-- Variables (03 §24): a secret variable's value is never exported; on parse, any `value` on a
+- Imported forwards never carry `passwordVariable`, and a non-uuid forward id is replaced.
+- Variables (03 §24): a secret variable's value and server bindings are never exported; on parse, any `value` on a
   secret entry is dropped and `hasStoredValue` forced false; invalid or duplicate (ignoring
   case) entries are skipped. Replace keeps a same-named secret already stored locally;
   merge adds only new names.
@@ -553,7 +554,10 @@ pub struct Variable {
     pub secret: bool,
     pub value: String,           // plain value; "" for a secret variable
     pub has_stored_value: bool,  // secret: a value exists in the credential store
+    pub allowed_endpoints: Vec<String>, // secret: "host:port" servers it may be sent to
 }
+/// `allow_variable_endpoint` payload (web) — carries the secret, no Debug.
+pub struct VariableEndpointInput { pub name: String, pub ssh_host: String, pub ssh_port: u16, pub value: String }
 /// `save_variable` payload — carries a secret, so no Debug and never logged.
 pub struct VariableInput {
     pub name: String,
@@ -562,7 +566,8 @@ pub struct VariableInput {
 }
 ```
 ```typescript
-export interface Variable { name: string; secret: boolean; value: string; hasStoredValue: boolean; }
+export interface Variable { name: string; secret: boolean; value: string; hasStoredValue: boolean; allowedEndpoints: string[]; }
+export interface VariableEndpointInput { name: string; sshHost: string; sshPort: number; value: string; }
 export interface VariableInput { name: string; secret: boolean; value: string | null; }
 ```
 `ForwardRuntime` gains `needsReconnect: bool` (a variable the live tunnel uses changed).

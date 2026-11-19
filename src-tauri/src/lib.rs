@@ -125,6 +125,8 @@ pub fn run() {
             crate::commands::variables::list_variables,
             crate::commands::variables::save_variable,
             crate::commands::variables::delete_variable,
+            crate::commands::variables::allow_variable_endpoint,
+            crate::commands::variables::revoke_variable_endpoint,
             // Groups & tags (§6.2)
             crate::commands::groups::list_groups,
             crate::commands::groups::create_group,

@@ -203,6 +203,24 @@ pub struct Variable {
     /// A secret variable has a value in the credential store.
     #[serde(default)]
     pub has_stored_value: bool,
+    /// SSH servers (`host:port`, see `ops::variables::endpoint_key`) a secret
+    /// variable may be sent to (spec 03 §24). A server joins the list when a
+    /// local driver (desktop / CLI) binds it, or when the web UI proves it
+    /// knows the value. Public information; never imported from a backup.
+    #[serde(default)]
+    pub allowed_endpoints: Vec<String>,
+}
+
+/// `allow_variable_endpoint` payload (web UI): allow secret variable `name`
+/// to be sent to `ssh_host:ssh_port` by proving the value. Carries a secret,
+/// so no `Debug` and never logged.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariableEndpointInput {
+    pub name: String,
+    pub ssh_host: String,
+    pub ssh_port: u16,
+    pub value: String,
 }
 
 /// Create/update payload for a variable. Carries a secret for a secret

@@ -63,6 +63,8 @@ async fn import_backup_bytes(
     mode: ImportMode,
 ) -> Result<ImportResult, AppError> {
     let mut backup = crate::storage::backup::parse_backup(bytes)?;
+    // Serialize with variable saves/deletes so neither undoes the other.
+    let _guard = state.lock_variables().await;
     let (variables, orphaned_secrets) = plan_variable_import(
         &state.variables_snapshot(),
         std::mem::take(&mut backup.variables),
@@ -91,6 +93,8 @@ async fn import_backup_bytes(
     state.emit_groups_changed();
     // Secrets of variables the import dropped (best-effort: the config no
     // longer references them either way).
+    // Bindings the import left without a forward go (spec 03 §24).
+    crate::ops::variables::prune_bindings_locked(state).await?;
     for name in orphaned_secrets {
         if let Err(e) = state.delete_password_checked(&secret_account(&name)).await {
             tracing::warn!(variable = %name, error = %e, "could not delete a dropped variable's secret");

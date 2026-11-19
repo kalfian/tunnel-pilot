@@ -178,6 +178,8 @@ pub struct AppState {
     /// variable exists / is unused / the name is free") still holds when the
     /// change it guards is applied (spec 03 §24).
     variables_lock: tokio::sync::Mutex<()>,
+    /// Web-only proof bookkeeping for secret variables (03 §24).
+    pub web_guard: crate::ops::variables::WebGuard,
     /// App settings — RAM mirror of the persisted file.
     settings: RwLock<AppSettings>,
     /// In-memory log ring buffer (cap 500, newest-first; not persisted). Shared
@@ -248,6 +250,7 @@ impl AppState {
             groups: RwLock::new(doc.groups),
             variables: RwLock::new(doc.variables),
             variables_lock: tokio::sync::Mutex::new(()),
+            web_guard: Default::default(),
             settings: RwLock::new(doc.settings),
             logs,
             credentials,
@@ -275,6 +278,7 @@ impl AppState {
             groups: RwLock::new(Vec::new()),
             variables: RwLock::new(Vec::new()),
             variables_lock: tokio::sync::Mutex::new(()),
+            web_guard: Default::default(),
             settings: RwLock::new(AppSettings::default()),
             logs,
             credentials,
