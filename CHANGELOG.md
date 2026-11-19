@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.5.0] - 2026-11-19
 
 ### Added
 - **Variables** — Define a username or password once and use it in many tunnels, in both products.
@@ -13,10 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Change a variable once and every tunnel that uses it picks up the new value on its next connection. Connected tunnels show **reconnect to apply**; nothing is disconnected for you.
   - Manage them in **Settings → Variables** (desktop and web UI) or with `var list | var set | var rm`; `add` / `edit` take `--password-var NAME` (and `edit --no-password-var`).
   - A tunnel cannot reference a variable that does not exist, a secret variable cannot be used in a username, and a variable in use cannot be deleted. A tunnel whose variable has no value fails once with a clear message instead of retrying.
-  - Backups include plain variables and the names of secret ones (re-enter secret values after restoring on another machine).
+  - Backups include plain variables and the names of secret ones (re-enter secret values after restoring on another machine). An imported tunnel never comes with a password variable attached: pick it again after checking the tunnel.
+  - **A secret variable is only sent to servers it is allowed on.** The desktop app and the CLI allow a tunnel's server automatically when you save it. In the web UI, anything that would send a secret somewhere new asks you to type it once: a new tunnel with it, switching a tunnel to it, moving a tunnel to another server, or trusting a tunnel's new host key. Wrong values lock that variable out for a while (1 s, doubling up to an hour). A tunnel that sends a secret and has never connected (so its server's key isn't pinned yet) can only make that first connection from the web right after you saved it with the value; otherwise connect it once from the desktop app or the CLI. So a web session that does not know a secret cannot redirect it. Settings → Variables lists each secret's servers and lets you remove one; a server no tunnel uses any more is removed automatically.
 
 ### Changed
-- `copy_ssh_command` shows the username with its variables filled in.
+- `copy_ssh_command` shows the username with its variables filled in, and shell-quotes every part you typed (the `-L` spec, the key path, `user@host`) when it contains characters a shell would interpret; a destination starting with `-` gets `--` first. Previously a key path with a space was double-quoted, which did not stop `$(…)`.
+- Backup import gives a fresh id to a tunnel whose id is not a uuid.
 - `status` (CLI) now prints how a tunnel authenticates.
 - `uninstall.sh --purge` and `cli/uninstall.sh --purge` also delete secret variables from the keychain.
 
