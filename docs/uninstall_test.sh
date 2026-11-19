@@ -45,7 +45,8 @@ setup_linux() {
   touch "$HOME/.local/share/icons/tunnel_pilot.png"
   printf '[Desktop Entry]\nName=Tunnel Pilot\nExec=tunnel-pilot --minimized\n' > "$XDG_CONFIG_HOME/autostart/Tunnel Pilot.desktop"
   printf '[Desktop Entry]\nName=Other\nExec=other-app\n' > "$XDG_CONFIG_HOME/autostart/other.desktop"
-  echo "{\"forwards\":[{\"id\":\"$ID1\"}]}" > "$XDG_CONFIG_HOME/com.kalfian.tunnelpilot/tunnel_pilot_config.json"
+  printf '{\n  "forwards": [{"id": "%s", "name": "prod db"}],\n  "variables": [\n    {\n      "name": "DB_PASS",\n      "secret": true\n    }\n  ]\n}\n' "$ID1" \
+    > "$XDG_CONFIG_HOME/com.kalfian.tunnelpilot/tunnel_pilot_config.json"
   echo '{}' > "$XDG_CONFIG_HOME/com.kalfian.tunnelpilot.cli/tunnel_pilot_config.json"
   : > "$SECRET_CALLS"
 }
@@ -71,6 +72,7 @@ uninstall_linux >/dev/null 2>&1
 assert_gone "desktop config purged" "$XDG_CONFIG_HOME/com.kalfian.tunnelpilot"
 assert_exists "cli config untouched" "$XDG_CONFIG_HOME/com.kalfian.tunnelpilot.cli/tunnel_pilot_config.json"
 grep -q "clear service tunnel-pilot username $ID1" "$SECRET_CALLS" && pass "secret cleared for each forward id" || fail "secret not cleared"
+grep -q "clear service tunnel-pilot username var:DB_PASS" "$SECRET_CALLS" && pass "secret variable cleared" || fail "secret variable not cleared"
 
 group "a foreign tunnel-pilot on PATH is left alone"
 setup_linux
@@ -87,7 +89,7 @@ touch "$TP_APPLICATIONS_DIR/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot"
 ln -s "$TP_APPLICATIONS_DIR/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot" "$HOME/.local/bin/tunnel-pilot"
 echo "<string>/Applications/Tunnel Pilot.app/Contents/MacOS/tunnel-pilot</string>" > "$HOME/Library/LaunchAgents/Tunnel Pilot.plist"
 echo "<string>/usr/bin/other</string>" > "$HOME/Library/LaunchAgents/other.plist"
-echo "{\"forwards\":[{\"id\":\"$ID1\"}]}" > "$HOME/Library/Application Support/com.kalfian.tunnelpilot/tunnel_pilot_config.json"
+echo "{\"forwards\":[{\"id\":\"$ID1\"}],\"variables\":[{\"name\":\"DB_PASS\",\"secret\":true}]}" > "$HOME/Library/Application Support/com.kalfian.tunnelpilot/tunnel_pilot_config.json"
 : > "$SECRET_CALLS"
 PURGE=true
 uname() { echo Darwin; }
@@ -99,6 +101,7 @@ assert_gone "login item removed" "$HOME/Library/LaunchAgents/Tunnel Pilot.plist"
 assert_exists "other LaunchAgent kept" "$HOME/Library/LaunchAgents/other.plist"
 assert_gone "config purged" "$HOME/Library/Application Support/com.kalfian.tunnelpilot"
 grep -q "delete-generic-password -s tunnel-pilot -a $ID1" "$SECRET_CALLS" && pass "keychain entry deleted" || fail "keychain entry not deleted"
+grep -q "delete-generic-password -s tunnel-pilot -a var:DB_PASS" "$SECRET_CALLS" && pass "secret variable deleted from the keychain" || fail "secret variable not deleted"
 
 echo ""
 TOTAL=$((PASS + FAIL))

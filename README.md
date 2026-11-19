@@ -41,6 +41,7 @@ Manage your SSH tunnels with ease — toggle connections on/off directly from th
 - **Command Palette (⌘K)** — Fuzzy-search every action: connect/disconnect, jump to a view, toggle theme, check for updates, and more.
 - **Groups & Tags** — Organize tunnels into collapsible groups and filter by tag; start/stop a whole group at once.
 - **Password & Identity File Auth** — SSH password or identity file. Passwords are stored in your **OS keychain** (Keychain / Windows Credential Manager / Secret Service), with an owner-only (`0600`) local file as the fallback when no keychain is available (that file is plaintext — prefer identity files on such machines).
+- **Variables** — Define a username or password once and reuse it across tunnels: write `{{DB_USER}}` in a tunnel's SSH username, or pick a **secret variable** as its password. Rotate a shared login by changing one variable; live tunnels pick it up on their next connection (they show "reconnect to apply"). Secret values live in the keychain and are never displayed, returned by the API or written to backups.
 - **Host-Key Pinning** — Each tunnel pins its SSH server's host key on the first connection (and honours your `~/.ssh/known_hosts`, read-only). A changed key is refused — never retried automatically — and shown with both fingerprints until you verify and trust it, so an impostor server cannot receive your password or traffic.
 - **Auto-Reconnect & Keep-Alive** — Configurable backoff, SSH keep-alive liveness, and wake-from-sleep recovery.
 - **Backup & Restore** — Export/import configurations as JSON (passwords excluded for security; identity file paths included). Non-destructive **merge** or **replace** import.
@@ -179,6 +180,22 @@ permission failure exits `1`.
 mismatch** (a stale `tunnel-pilot` symlink against a newer app) surfaces as exit `4` with an
 `unsupported protocol version` message — that text is what distinguishes it from a missing
 target.
+
+Variables (shared usernames / passwords, applied on the next connection):
+
+```console
+$ tunnel-pilot var set DB_USER deploy                 # plain: use as {{DB_USER}}
+$ tunnel-pilot var set DB_PASS --secret               # prompted with echo off
+$ tunnel-pilot add prod-db --ssh '{{DB_USER}}@bastion' -L 5432:db.internal:5432 --password-var DB_PASS
+$ tunnel-pilot var list
+NAME     KIND    VALUE     USED BY
+DB_USER  plain   deploy    prod-db
+DB_PASS  secret  (stored)  prod-db
+```
+
+A secret variable's value follows the password rule below: never in argv, never over the
+socket. `var rm` is refused while a tunnel uses the variable; `edit --no-password-var`
+switches a tunnel back to its own password.
 
 Notes: the CLI talks to a **running** app (or daemon) and never launches it for you.
 Passwords are never accepted as a flag value and never cross the socket: the CLI prompts

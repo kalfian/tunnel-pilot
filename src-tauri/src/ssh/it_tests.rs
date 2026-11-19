@@ -341,6 +341,7 @@ fn base_config(id: &str, local_port: u16, ssh_port: u16, remote_port: u16) -> Fo
         group_id: None,
         tags: vec![],
         host_key: None,
+        password_variable: None,
     }
 }
 

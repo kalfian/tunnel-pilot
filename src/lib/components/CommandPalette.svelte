@@ -44,8 +44,9 @@
   import { fuzzyRank } from "../fuzzy";
   import Icon from "./ui/Icon.svelte";
   import StatusDot from "./ui/StatusDot.svelte";
+  import { APP_VERSION } from "../version";
 
-  const DESKTOP_VERSION = "2.4.0";
+  const DESKTOP_VERSION = APP_VERSION;
   // Web mode reports the server build it is talking to.
   const VERSION = $derived(
     isWeb ? ($serverVersion ?? DESKTOP_VERSION) : DESKTOP_VERSION,

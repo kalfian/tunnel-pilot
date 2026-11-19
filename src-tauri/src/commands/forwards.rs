@@ -113,7 +113,7 @@ pub fn copy_ssh_command(state: State<'_, Arc<AppState>>, id: String) -> Result<S
     let cfg = state
         .get_config(&id)
         .ok_or_else(|| AppError::NotFound(format!("forward {id}")))?;
-    Ok(ops::build_ssh_command(&cfg))
+    Ok(ops::ssh_command(state.inner(), &cfg))
 }
 
 // --- Credentials (route through the keychain / fallback store) ---

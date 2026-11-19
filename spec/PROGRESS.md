@@ -619,6 +619,18 @@ Superseded design (2026-11-06, Kalfian): the first cut (`0bf03aa`, pushed to mas
       (pin == `ssh-keygen -lf`, reinstall refused w/o retry loop, trust, known_hosts wrong/right).
 - Closes the backlog item "Host-key verification (MITM)" below.
 
+## M12 — Variables (03 §24), both products
+- [x] `variables.rs` (pure template/validation) + `ops/variables.rs`; plain values in the
+      config, secret values in the credential store under `var:<NAME>`.
+- [x] Resolved at dial time (`ssh/client.rs`); live users flagged `needsReconnect`; variable
+      errors park without auto-retry.
+- [x] Commands `list_variables` / `save_variable` / `delete_variable` (Tauri + web dispatcher),
+      `variables://changed`, `AppSnapshot.variables`; backup export/import; CLI `var …`,
+      `--password-var`, socket `variable-*`; uninstallers purge `var:*` keychain entries.
+- [x] UI: Settings → Variables, forward-form "Variable" auth + `{{NAME}}` username, row
+      "reconnect to apply".
+- [ ] E2E against real OpenSSH (see 03 §24 acceptance).
+
 ## M3 review outcome (focused code-review) — CLEAN
 CONTINUE — 0 blockers, 0 majors; all 6 lifecycle concerns verified against code (quit teardown uses real parent-cancel+join; close=hide single-registration; single-instance plugin-first; dock truth matches v1; tray debounce trailing-edge, no dropped final state; §4 hygiene clean).
 Defensive follow-ups (non-blocking — do in a pre-cutover hardening pass):

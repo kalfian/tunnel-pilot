@@ -124,6 +124,20 @@ setup_install
 assert_gone "cli config purged" "$XDG_CONFIG_HOME/com.kalfian.tunnelpilot.cli"
 assert_exists "desktop config untouched" "$XDG_CONFIG_HOME/com.kalfian.tunnelpilot/tunnel_pilot_config.json"
 
+group "uninstall --purge (macOS keychain)"
+setup_install
+MAC_CFG="$HOME/Library/Application Support/com.kalfian.tunnelpilot.cli"
+mkdir -p "$MAC_CFG"
+printf '{"forwards":[{"id":"11111111-2222-3333-4444-555555555555","name":"db"}],"variables":[{"name":"DB_PASS","secret":true}]}\n' \
+  > "$MAC_CFG/tunnel_pilot_config.json"
+( uname() { echo Darwin; }; security() { echo "security $*" >> "$SANDBOX/calls"; return 0; }
+  PURGE=true; purge_data ) >/dev/null 2>&1
+grep -q "delete-generic-password -s tunnel-pilot-cli -a 11111111-2222-3333-4444-555555555555" "$SANDBOX/calls" \
+  && pass "forward password deleted from the keychain" || fail "forward password not deleted"
+grep -q "delete-generic-password -s tunnel-pilot-cli -a var:DB_PASS" "$SANDBOX/calls" \
+  && pass "secret variable deleted from the keychain" || fail "secret variable not deleted"
+assert_gone "macOS cli config purged" "$MAC_CFG"
+
 group "uninstall with a space in HOME"
 SPACED="$SANDBOX/my home"
 mkdir -p "$SANDBOX/my/precious" "$SPACED/.local/bin"

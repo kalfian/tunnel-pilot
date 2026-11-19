@@ -53,6 +53,7 @@ function mk(
     groupId,
     tags: [],
     hostKey: null,
+    passwordVariable: null,
   };
 }
 

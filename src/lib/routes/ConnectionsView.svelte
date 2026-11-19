@@ -6,6 +6,7 @@
     statsById,
     lastErrorById,
     hostKeyMismatchById,
+    needsReconnectById,
     connectedCount,
   } from "../stores/forwards";
   import { settings } from "../stores/settings";
@@ -409,6 +410,7 @@
           statsById={$statsById}
           lastErrorById={$lastErrorById}
           hostKeyMismatchById={$hostKeyMismatchById}
+          needsReconnectById={$needsReconnectById}
           {selectedId}
           filterQuery={filter}
           activeTag={$activeTag}

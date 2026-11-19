@@ -48,6 +48,7 @@ fn config_from_input(
         group_id: input.group_id,
         tags: input.tags,
         host_key,
+        password_variable: input.password_variable,
     }
 }
 
@@ -69,6 +70,7 @@ pub fn input_from_config(cfg: &ForwardConfig) -> ForwardInput {
         keep_alive_max_count: cfg.keep_alive_max_count,
         group_id: cfg.group_id.clone(),
         tags: cfg.tags.clone(),
+        password_variable: cfg.password_variable.clone(),
     }
 }
 
@@ -117,6 +119,18 @@ pub fn build_ssh_command(cfg: &ForwardConfig) -> String {
     parts.join(" ")
 }
 
+/// `copy_ssh_command`: [`build_ssh_command`] with the username's `{{NAME}}`
+/// references resolved to the plain variables' current values (a username
+/// never contains a secret — spec 03 §24). An unresolvable template is left
+/// as written, so the user sees which variable is missing.
+pub fn ssh_command(state: &AppState, cfg: &ForwardConfig) -> String {
+    let mut resolved = cfg.clone();
+    if let Ok(username) = crate::ops::variables::resolve_username(state, cfg) {
+        resolved.ssh_username = username;
+    }
+    build_ssh_command(&resolved)
+}
+
 /// The runtime for an id, or a `Disconnected` default when the tunnel is not
 /// live (no registry entry yet). Shared by the webview command and the CLI's
 /// `ForwardView`, so the "not live ⇒ disconnected" rule lives in one place.
@@ -129,6 +143,7 @@ pub fn runtime_or_default(state: &Arc<AppState>, id: &str) -> ForwardRuntime {
             stats: TunnelStats::default(),
             last_error: None,
             host_key_mismatch: None,
+            needs_reconnect: false,
         })
 }
 
@@ -137,6 +152,8 @@ pub fn runtime_or_default(state: &Arc<AppState>, id: &str) -> ForwardRuntime {
 /// Append a new forward (fresh uuid, no stored password) and persist. The
 /// password (if any) is a separate [`set_password`] call.
 pub async fn create(state: &Arc<AppState>, input: ForwardInput) -> Result<ForwardConfig, AppError> {
+    let _guard = state.lock_variables().await;
+    let input = crate::ops::variables::check_forward_input(state, input)?;
     let config = config_from_input(Uuid::new_v4().to_string(), input, false, None);
     state.upsert_config(config.clone());
     state.persist_forwards().await?;
@@ -155,6 +172,7 @@ pub async fn update(
     let existing = state
         .get_config(&id)
         .ok_or_else(|| AppError::NotFound(format!("forward {id}")))?;
+    let input = crate::ops::variables::check_forward_input(state, input)?;
 
     // Editing a connected/live config force-disconnects first (v1 parity): the
     // running tunnel used the OLD host/port/auth, so it must be torn down before
@@ -163,6 +181,12 @@ pub async fn update(
         engine::disconnect_forward(state, &id, true).await?;
     }
 
+    // Re-check under the variables lock: a variable may have been deleted or
+    // changed kind while the tunnel was being torn down (the early check above
+    // only spares the user a pointless disconnect).
+    let _guard = state.lock_variables().await;
+    let input = crate::ops::variables::check_forward_input(state, input)?;
+
     // A stored password belongs to ONE login (user @ host : port). If the edit
     // points the forward elsewhere, drop it: otherwise anyone who may edit
     // forwards could aim one at an SSH server they control and have the old
@@ -170,10 +194,16 @@ pub async fn update(
     let endpoint_changed = existing.ssh_host != input.ssh_host
         || existing.ssh_port != input.ssh_port
         || existing.ssh_username != input.ssh_username;
-    let keep_password = existing.has_stored_password && !endpoint_changed;
-    if existing.has_stored_password && endpoint_changed {
+    // A forward that now takes its password from a variable has no use for a
+    // password of its own: drop it rather than leave a stale secret behind.
+    let uses_variable = input.password_variable.is_some();
+    let keep_password = existing.has_stored_password && !endpoint_changed && !uses_variable;
+    if existing.has_stored_password && !keep_password {
         state.delete_password_checked(&id).await?;
-        tracing::info!(forward_id = %id, "SSH endpoint changed; stored password cleared");
+        tracing::info!(
+            forward_id = %id,
+            "stored password cleared (SSH endpoint changed or a password variable is used)"
+        );
     }
 
     // The pinned host key belongs to host:port; a different server must be
@@ -301,8 +331,16 @@ pub async fn mark_password_stored(
     let mut config = state
         .get_config(id)
         .ok_or_else(|| AppError::NotFound(format!("forward {id}")))?;
-    if config.has_stored_password != stored {
+    // A password of its own is only used without a password variable (the
+    // variable wins at dial time), so storing one switches the forward to it —
+    // otherwise the new password would be silently ignored, then deleted by
+    // the next edit.
+    let drop_variable = stored && config.password_variable.is_some();
+    if config.has_stored_password != stored || drop_variable {
         config.has_stored_password = stored;
+        if drop_variable {
+            config.password_variable = None;
+        }
         state.upsert_config(config);
         state.persist_forwards().await?;
         state.emit_forwards_changed();
@@ -466,6 +504,7 @@ mod tests {
             group_id: None,
             tags: vec![],
             host_key: None,
+            password_variable: None,
         }
     }
 
@@ -613,6 +652,7 @@ mod tests {
             keep_alive_max_count: 5,
             group_id: None,
             tags: vec![],
+            password_variable: None,
         };
         let updated = update(&state, "live".into(), input).await.expect("update");
 

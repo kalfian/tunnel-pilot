@@ -352,6 +352,10 @@ async fn authenticate_inner(
 ) -> Result<(), AppError> {
     // Identity file takes precedence over a password when both are set.
     let identity = cfg.identity_file_path.as_deref().filter(|p| !p.is_empty());
+    // `{{NAME}}` references resolve now, so a changed variable applies on the
+    // next (re)connect without editing the forward (spec 03 §24).
+    let resolved_gen = state.registry.variables_gen();
+    let username = crate::ops::variables::resolve_username(state, cfg)?;
 
     if let Some(path) = identity {
         // load_secret_key does synchronous file I/O — run it off the async path.
@@ -384,26 +388,31 @@ async fn authenticate_inner(
 
         let key = russh::keys::PrivateKeyWithHashAlg::new(key, hash_alg);
         let result = session
-            .authenticate_publickey(&cfg.ssh_username, key)
+            .authenticate_publickey(&username, key)
             .await
             .map_err(|e| AppError::Ssh(format!("publickey auth error: {e}")))?;
         if !result.success() {
             return Err(AppError::Ssh("publickey authentication rejected".into()));
         }
     } else {
-        // Keyring get does blocking OS calls; run it off the async runtime (F38).
-        let pw = state
-            .get_password_async(&cfg.id)
-            .await
+        // The forward's own password, or its password variable's secret. The
+        // keyring read runs off the async runtime (F38).
+        let pw = crate::ops::variables::resolve_password(state, cfg)
+            .await?
             .ok_or_else(|| AppError::Connection("password or identity file required".into()))?;
         let result = session
-            .authenticate_password(&cfg.ssh_username, pw)
+            .authenticate_password(&username, pw)
             .await
             .map_err(|e| AppError::Ssh(format!("password auth error: {e}")))?;
         if !result.success() {
             return Err(AppError::Ssh("password authentication rejected".into()));
         }
     }
+    // This session runs on the values resolved above; a later change to one
+    // of its variables marks it `needsReconnect` (spec 03 §24).
+    state
+        .registry
+        .record_variables_resolved(&cfg.id, resolved_gen);
     Ok(())
 }
 
@@ -470,6 +479,7 @@ mod tests {
             group_id: None,
             tags: vec![],
             host_key: None,
+            password_variable: None,
         }
     }
 

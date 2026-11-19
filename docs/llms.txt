@@ -16,6 +16,7 @@ Tunnel Pilot replaces repeated `ssh -L` commands with saved forwards that can be
 - Backup export and import (backups never contain passwords)
 - Cmd/Ctrl+K command palette
 - Passwords stored in the OS keychain, or a separate 0600 file when no keychain is available
+- Variables: define a username or password once and reuse it across forwards — `{{NAME}}` in the SSH username for a plain variable, a secret variable as the password (kept in the keychain, never displayed or exported); a change applies on each tunnel's next connection (`var set` / `var list` / `var rm` in the CLI)
 - SSH host-key pinning: each forward pins its server's host key on the first connection and honours ~/.ssh/known_hosts (read-only); a changed key is refused, never retried automatically, until the user verifies and trusts it (`trust-host-key` in the CLI)
 - License: MIT; source: https://github.com/kalfian/tunnel-pilot
 

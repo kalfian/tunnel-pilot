@@ -205,6 +205,7 @@ pub async fn import(
         schema_version: SCHEMA_VERSION,
         forwards,
         groups: Vec::new(),
+        variables: Vec::new(),
         settings,
     };
     store.write_document(&doc).await?;

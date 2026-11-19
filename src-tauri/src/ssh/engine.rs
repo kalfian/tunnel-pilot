@@ -129,6 +129,8 @@ pub async fn connect_forward(state: &Arc<AppState>, id: &str) -> Result<(), AppE
         status: status_tx,
         last_error: None,
         host_key_mismatch: None,
+        resolved_gen: 0,
+        changed_gen: 0,
         retry_requested: false,
         retry_notify,
         wake_notify,
@@ -336,7 +338,9 @@ async fn supervise(
                 tracing::warn!(tunnel = %id, error = %e, "connect attempt failed");
                 // A refused host key is never retried automatically: retrying
                 // cannot fix it and would hammer a possibly hostile server.
-                let fatal = matches!(e, AppError::HostKeyMismatch(_));
+                // Neither is a variable problem (undefined, no value): only the
+                // user can fix it, and a retry reads the variables afresh.
+                let fatal = matches!(e, AppError::HostKeyMismatch(_) | AppError::InvalidInput(_));
                 match handle_teardown(
                     TeardownCtx {
                         state: &state,

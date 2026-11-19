@@ -41,6 +41,12 @@ export const hostKeyMismatchById = writable<
   Record<string, HostKeyMismatch | null>
 >({});
 
+/**
+ * Live tunnels running on variable values that have since changed (spec 03
+ * §24): the new value applies on the next connection. Absent/false = current.
+ */
+export const needsReconnectById = writable<Record<string, boolean>>({});
+
 /** Neutral stats used to seed a forward that has no live runtime yet. */
 export const EMPTY_STATS: TunnelStats = {
   activeConnections: 0,
@@ -65,6 +71,7 @@ export function applyForwards(list: ForwardConfig[]): void {
   statsById.update((prev) => reconcile(ids, prev, EMPTY_STATS));
   lastErrorById.update((prev) => reconcile(ids, prev, null));
   hostKeyMismatchById.update((prev) => reconcile(ids, prev, null));
+  needsReconnectById.update((prev) => reconcile(ids, prev, false));
 }
 
 /** Apply a `tunnel://status` transition to a single tunnel. */
@@ -75,6 +82,10 @@ export function applyStatus(e: TunnelStatusEvent): void {
   hostKeyMismatchById.update((m) => ({
     ...m,
     [e.id]: e.hostKeyMismatch ?? null,
+  }));
+  needsReconnectById.update((m) => ({
+    ...m,
+    [e.id]: e.needsReconnect ?? false,
   }));
 }
 
@@ -103,16 +114,19 @@ export function applyRuntimes(runtimes: [string, ForwardRuntime][]): void {
   const stats: Record<string, TunnelStats> = {};
   const errors: Record<string, string | null> = {};
   const mismatches: Record<string, HostKeyMismatch | null> = {};
+  const stale: Record<string, boolean> = {};
   for (const [id, rt] of runtimes) {
     status[id] = rt.status;
     stats[id] = rt.stats;
     errors[id] = rt.lastError;
     mismatches[id] = rt.hostKeyMismatch ?? null;
+    stale[id] = rt.needsReconnect ?? false;
   }
   statusById.update((m) => ({ ...m, ...status }));
   statsById.update((m) => ({ ...m, ...stats }));
   lastErrorById.update((m) => ({ ...m, ...errors }));
   hostKeyMismatchById.update((m) => ({ ...m, ...mismatches }));
+  needsReconnectById.update((m) => ({ ...m, ...stale }));
 }
 
 /** Number of tunnels currently `connected` — feeds the tray/UI count. */

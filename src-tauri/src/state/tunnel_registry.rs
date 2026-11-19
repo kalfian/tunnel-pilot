@@ -11,7 +11,7 @@
 //! illegal `(current, new)` pair (F23/F28/F31).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use tokio::sync::{watch, Notify};
@@ -62,6 +62,14 @@ pub struct TunnelHandle {
     pub last_error: Option<String>,
     /// The refused host key, while parked on a mismatch (spec 03 §23).
     pub host_key_mismatch: Option<HostKeyMismatch>,
+    /// Variables generation the current attempt resolved its username and
+    /// password at (spec 03 §24).
+    pub resolved_gen: u64,
+    /// Generation of the latest change to a variable this tunnel uses. The
+    /// tunnel needs a reconnect while it is connected and this is newer than
+    /// [`resolved_gen`](Self::resolved_gen) — exact even when the change lands
+    /// mid-dial (before or after the attempt resolved its values).
+    pub changed_gen: u64,
     /// Pending-retry SOURCE OF TRUTH — guarded by the registry lock (F29).
     pub retry_requested: bool,
     /// WAKEUP ONLY (never the truth): `retry_forward` pokes it after setting the
@@ -79,6 +87,11 @@ pub struct TunnelHandle {
 }
 
 impl TunnelHandle {
+    /// Connected on variable values that have changed since (spec 03 §24).
+    fn needs_reconnect(&self) -> bool {
+        *self.status.borrow() == ForwardStatus::Connected && self.changed_gen > self.resolved_gen
+    }
+
     /// Build the combined runtime view for `get_forward_runtime` (spec 04 §5).
     pub fn runtime(&self) -> ForwardRuntime {
         ForwardRuntime {
@@ -86,6 +99,7 @@ impl TunnelHandle {
             stats: self.stats.snapshot(),
             last_error: self.last_error.clone(),
             host_key_mismatch: self.host_key_mismatch.clone(),
+            needs_reconnect: self.needs_reconnect(),
         }
     }
 }
@@ -123,6 +137,8 @@ pub struct TunnelRegistry {
     /// live. Guards auto-start (exactly one sampler regardless of tunnel count,
     /// spec 03 §2) — NOT a lock, just a cheap presence flag.
     sampler_running: AtomicBool,
+    /// Bumped on every change to a variable's value (spec 03 §24).
+    variables_gen: AtomicU64,
 }
 
 impl TunnelRegistry {
@@ -331,6 +347,45 @@ impl TunnelRegistry {
             .and_then(|h| h.host_key_mismatch.clone())
     }
 
+    /// Start a new variables generation (a variable's value changed) and
+    /// return it (spec 03 §24).
+    pub fn bump_variables_gen(&self) -> u64 {
+        self.variables_gen.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// The current variables generation. Read it BEFORE resolving variables,
+    /// so a change racing the resolution errs towards "needs reconnect".
+    pub fn variables_gen(&self) -> u64 {
+        self.variables_gen.load(Ordering::SeqCst)
+    }
+
+    /// The attempt of tunnel `id` resolved its variables at generation `gen`.
+    pub fn record_variables_resolved(&self, id: &str, gen: u64) {
+        if let Some(h) = self.lock().get_mut(id) {
+            h.resolved_gen = gen;
+        }
+    }
+
+    /// A variable tunnel `id` uses changed at generation `gen`. Returns
+    /// whether the tunnel now needs a reconnect (the caller re-emits its
+    /// status). A tunnel that is dialling picks it up when it connects; one
+    /// parked in `error` reads the new values on its retry.
+    pub fn note_variable_changed(&self, id: &str, gen: u64) -> bool {
+        let mut g = self.lock();
+        let Some(h) = g.get_mut(id) else {
+            return false;
+        };
+        h.changed_gen = h.changed_gen.max(gen);
+        h.needs_reconnect()
+    }
+
+    /// Whether a connected tunnel runs on values that have changed since.
+    pub fn needs_reconnect(&self, id: &str) -> bool {
+        self.lock()
+            .get(id)
+            .is_some_and(TunnelHandle::needs_reconnect)
+    }
+
     /// Enter terminal `error` AND check-and-clear the retry flag in the SAME
     /// critical section (F29, spec 03 §1). If `retry_already_requested`, the
     /// supervisor must loop into a new attempt instead of parking.
@@ -426,6 +481,8 @@ pub(crate) fn fake_handle(id: &str, status: ForwardStatus) -> TunnelHandle {
         status: status_tx,
         last_error: None,
         host_key_mismatch: None,
+        resolved_gen: 0,
+        changed_gen: 0,
         retry_requested: false,
         retry_notify: Arc::new(Notify::new()),
         wake_notify: Arc::new(Notify::new()),

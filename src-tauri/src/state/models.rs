@@ -82,6 +82,10 @@ pub struct ForwardConfig {
     /// Cleared when the SSH host or port changes. Never set from user input.
     #[serde(default)]
     pub host_key: Option<HostKeyPin>,
+    /// The secret variable this forward takes its password from (spec 03 §24),
+    /// instead of a password of its own. A name, never a value.
+    #[serde(default)]
+    pub password_variable: Option<String>,
 }
 
 fn default_ssh_port() -> u16 {
@@ -119,9 +123,18 @@ impl ForwardConfig {
     }
 
     /// Derived (not persisted): auth needs a password because there is no
-    /// identity file and no stored secret (spec 04 §1).
+    /// identity file, no stored secret and no password variable (spec 04 §1).
     pub fn needs_password(&self) -> bool {
-        self.identity_file_path.is_none() && !self.has_stored_password
+        self.identity_file_path.is_none()
+            && !self.has_stored_password
+            && self.password_variable.is_none()
+    }
+
+    /// Whether this forward uses variable `name` — in its username template or
+    /// as its password.
+    pub fn uses_variable(&self, name: &str) -> bool {
+        self.password_variable.as_deref() == Some(name)
+            || crate::variables::references(&self.ssh_username, name)
     }
 }
 
@@ -169,6 +182,41 @@ pub struct ForwardInput {
     pub keep_alive_max_count: u32,
     pub group_id: Option<String>,
     pub tags: Vec<String>,
+    /// Name of a secret variable to use as the password (spec 03 §24). Absent
+    /// in older clients' payloads, hence the default.
+    #[serde(default)]
+    pub password_variable: Option<String>,
+}
+
+/// A named value forwards can reference (spec 03 §24, 04 §14). A secret
+/// variable's value lives only in the credential store: this struct — the one
+/// that is persisted, emitted and returned — never carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Variable {
+    pub name: String,
+    #[serde(default)]
+    pub secret: bool,
+    /// The value of a plain variable; always empty for a secret one.
+    #[serde(default)]
+    pub value: String,
+    /// A secret variable has a value in the credential store.
+    #[serde(default)]
+    pub has_stored_value: bool,
+}
+
+/// Create/update payload for a variable. Carries a secret for a secret
+/// variable, so it has no `Debug` and is never logged (AGENTS §8).
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariableInput {
+    pub name: String,
+    #[serde(default)]
+    pub secret: bool,
+    /// Plain: the value (required). Secret: the new secret, or `None` to keep
+    /// the stored one.
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 /// The 5-state tunnel status (spec 04 §4). `disconnecting` is a real transient
@@ -205,6 +253,10 @@ pub struct ForwardRuntime {
     /// Set while the tunnel is parked because the server's host key changed.
     #[serde(default)]
     pub host_key_mismatch: Option<HostKeyMismatch>,
+    /// A variable this live tunnel uses changed after it dialled: the new value
+    /// applies on the next connection (spec 03 §24).
+    #[serde(default)]
+    pub needs_reconnect: bool,
 }
 
 /// Application settings (spec 04 §3). Only the fields the M1 engine reads
@@ -351,6 +403,7 @@ pub struct UpdateStatus {
 pub struct AppSnapshot {
     pub forwards: Vec<ForwardConfig>,
     pub groups: Vec<TunnelGroup>,
+    pub variables: Vec<Variable>,
     pub settings: AppSettings,
     pub logs: Vec<LogEntry>,
     /// `(forwardId, runtime)` pairs for every currently-live tunnel.

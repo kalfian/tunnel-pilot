@@ -8,6 +8,7 @@ import { settings } from "../stores/settings";
 import { importMode } from "../stores/backup";
 import { updateStatus, updateProgress } from "../stores/updater";
 import { activeView } from "../ui/view";
+import { variables } from "../stores/variables";
 
 // Control the effective theme so the OLED toggle can be enabled (it is disabled
 // in light mode). `vi.mock` is hoisted above imports, so the store is built in a
@@ -74,6 +75,8 @@ vi.mock("../ipc", () => ({
   cliShimStatus: vi.fn(() => Promise.resolve(UNSUPPORTED_SHIM)),
   installCliShim: vi.fn(() => Promise.resolve(UNSUPPORTED_SHIM)),
   uninstallCliShim: vi.fn(() => Promise.resolve(UNSUPPORTED_SHIM)),
+  saveVariable: vi.fn(),
+  deleteVariable: vi.fn(),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(() => Promise.resolve("/backups/tp.json")),
@@ -581,6 +584,32 @@ describe("SettingsView — command line (CLI shim)", () => {
     // Still offering the install; no scary failure copy in the row.
     expect(
       await screen.findByRole("button", { name: /install…/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("SettingsView — variables", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    settings.set(SETTINGS);
+    variables.set([
+      {
+        name: "DB_USER",
+        secret: false,
+        value: "kalfian",
+        hasStoredValue: false,
+      },
+    ]);
+  });
+
+  it("renders the Variables section with its list", () => {
+    render(SettingsView);
+    expect(
+      screen.getByRole("heading", { name: "Variables" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("{{DB_USER}}")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /add variable/i }),
     ).toBeInTheDocument();
   });
 });

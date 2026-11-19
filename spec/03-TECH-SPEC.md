@@ -1608,3 +1608,87 @@ socket commands `host-key-trust` / `host-key-forget`.
       reinstall → one refused attempt, no retry loop, exit 5; `trust-host-key` → connected
       with the new pin; a wrong known_hosts entry refuses and the file is unchanged; a right
       one is accepted and pinned.
+
+<a id="variables"></a>
+## 24. Variables (`variables.rs`, `ops/variables.rs`, both products)
+
+### Behavior
+A variable is a named value defined once and referenced by many forwards, so rotating a
+shared login is one change instead of an edit per forward.
+
+1. **Plain variable** — `{ name, value }`, stored in the config file. A forward's SSH
+   username may reference it as `{{NAME}}` (spaces inside the braces allowed; may be part of
+   a longer username, e.g. `{{USER}}-ro`).
+2. **Secret variable** — its value is stored in the credential store (keychain, or the
+   `0600` fallback file) under the account `var:<NAME>`; the config file keeps only
+   `hasStoredValue`. A forward uses it as its password through `passwordVariable`. **No
+   IPC/HTTP/socket response, event, log line, backup or `copy_ssh_command` ever carries a
+   secret value**; it only travels inbound (`save_variable`, or written by the CLI process
+   itself like `set-password`).
+3. **Roles never mix.** A username may reference only plain variables (it is displayed
+   everywhere); a password variable must be secret (it must never sit in the config file).
+   A variable cannot be switched to the other kind while a forward uses it that way.
+4. **Names** match `^[A-Za-z_][A-Za-z0-9_]{0,63}$`, are unique ignoring case and cannot be
+   renamed (forwards reference them). Delete is refused while any forward uses the variable.
+   Plain values: 1–256 characters, no control characters, no `{{` (no nesting).
+5. **Resolution happens when a tunnel dials** — every attempt, reconnects included — so a
+   change applies on the next connection without editing any forward. A `connected`
+   tunnel whose session resolved a variable before it last changed is flagged
+   `needsReconnect` (runtime + `tunnel://status`) — exact even when the change lands
+   mid-dial; the UI and `status` offer a reconnect. Nothing reconnects automatically. A
+   variable problem at dial time (undefined, no recorded value, wrong kind) fails the
+   attempt with `invalidInput` and parks the tunnel in `error` without auto-retry, like a
+   refused host key. A keychain that fails to answer is a `credential` error and IS
+   retried (transient, e.g. right after wake). Storing a forward's own password
+   (`set_forward_password` / CLI `set-password`) switches it off its password variable.
+6. **Save-time checks**: `create_forward` / `update_forward` refuse a username referencing an
+   unknown or secret variable, a `passwordVariable` that is unknown or plain, and a
+   `passwordVariable` together with an identity file. A forward that switches to a password
+   variable has its own stored password deleted.
+7. **Backups** carry plain variables with their values and secret variables by name only.
+   Import: *replace* takes the backup's list (a secret variable keeps the value already
+   stored on this machine under the same name; secrets of dropped variables are deleted);
+   *merge* adds names (ignoring case) that are new. A malformed entry is skipped.
+
+**Trust note.** Anyone who may edit forwards (desktop user, CLI user, web admin) can point a
+forward that uses a secret variable at a server of their choosing and so have the secret
+sent there — the same power they have over a forward's own password before typing it.
+Variables do not widen who can do that, but they make one secret reachable from many
+forwards; give the web UI's admin password accordingly.
+
+Surfaces: Settings → Variables (desktop + web) to list/add/edit/delete; the forward form's
+auth control gains "Variable" (pick a secret variable) and the username field inserts
+`{{NAME}}`; CLI `var list | var set NAME VALUE | var set NAME --secret [--password-stdin] |
+var rm NAME` and `add/edit --password-var NAME`, `edit --no-password-var` (socket commands
+`variable-list`, `variable-set`, `variable-secret-stored`, `variable-remove`; the protocol
+stays v1 — additive).
+
+### Rust approach
+- `variables.rs` (pure): name/value validation, `{{NAME}}` parsing, `render`,
+  `secret_account`. A uuid never contains `:`, so `var:<NAME>` cannot collide with a
+  forward's account.
+- `ops/variables.rs`: `save` / `mark_secret_stored` / `delete` / `check_forward_input`,
+  and the dial-time `resolve_username` / `resolve_password` used by
+  `ssh/client.rs::authenticate`.
+- `AppState.variables` is a RAM mirror persisted as its own config section through the single
+  ordered writer; `variables://changed` carries the list.
+- Generations: `TunnelRegistry` bumps a variables generation on every value change and
+  records it on each handle that uses the variable (`changed_gen`); `authenticate`
+  records the generation it read BEFORE resolving (`resolved_gen`).
+  `needsReconnect = connected && changed_gen > resolved_gen`.
+- `AppState::lock_variables` serializes variable saves/deletes with forward create/update
+  reference checks, so "exists / unused / name free" still holds when applied.
+- `TeardownCtx.fatal` covers `AppError::InvalidInput` from the dial path.
+
+### Acceptance criteria
+- [x] Unit: template parsing/rendering, name rules, values never echoed in errors.
+- [x] Ops: dial-time resolution picks up a changed value with no forward edit; secret values
+      absent from `list`, `app_hydrate` and backups; reference checks; in-use delete and
+      kind-switch refused; secret → plain drops the stored value; only live tunnels flagged.
+- [x] Backup: export strips secret values; parse drops a smuggled secret value and invalid
+      or duplicate entries; replace keeps local secrets by name and reports orphans.
+- [x] CLI: `var` parsing never accepts a secret from argv; `--password-var` excludes
+      `--identity` / `--password`.
+- [ ] E2E (real OpenSSH): two forwards share `{{USER}}` + a secret variable and connect;
+      rotating the server password + the variable → `needsReconnect`, `connect --force`
+      connects with the new password; a missing value fails once with no retry loop.

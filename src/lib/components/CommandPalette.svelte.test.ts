@@ -46,6 +46,7 @@ function mk(id: string, name: string): ForwardConfig {
     groupId: null,
     tags: [],
     hostKey: null,
+    passwordVariable: null,
   };
 }
 

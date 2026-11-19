@@ -35,6 +35,7 @@ function makeForward(id: string, name = id): ForwardConfig {
     groupId: null,
     tags: [],
     hostKey: null,
+    passwordVariable: null,
   };
 }
 
@@ -132,6 +133,7 @@ describe("applyRuntimes", () => {
           stats: statsWith(99),
           lastError: null,
           hostKeyMismatch: null,
+          needsReconnect: false,
         },
       ],
     ]);
@@ -208,6 +210,7 @@ describe("host key mismatch", () => {
           stats: EMPTY_STATS,
           lastError: "host key changed",
           hostKeyMismatch: MISMATCH,
+          needsReconnect: false,
         },
       ],
     ]);

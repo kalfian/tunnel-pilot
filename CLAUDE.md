@@ -152,6 +152,9 @@ The full rules live in `spec/AGENTS.md`; do not duplicate them here. The essenti
   (`ssh::engine::*`, `run_start_all`/`run_stop_all`) — not a second state owner, and it adds
   no `#[tauri::command]` and no event. No secret crosses it (`hasStoredPassword` flag only).
   See `spec/02-ARCHITECTURE.md` §9 + `spec/03-TECH-SPEC.md` §20.
+- **Variables** (spec 03 §24): plain ones render into `sshUsername` as `{{NAME}}`, secret
+  ones are a forward's `passwordVariable` (value in the credential store under `var:<NAME>`,
+  never returned anywhere). Resolved at dial time in `ops/variables.rs`; roles never mix.
 - **Tray/window**: native tray menu rebuilt on state change; dynamic icon (idle grey / blue
   badge with connection count, clamp 9). macOS uses `LSUIElement=true` with runtime
   activation-policy switching — window shown ⇒ Regular policy (Dock visible), hidden ⇒

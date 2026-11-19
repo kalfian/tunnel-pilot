@@ -41,6 +41,7 @@ const FORWARD: ForwardConfig = {
   groupId: null,
   tags: [],
   hostKey: null,
+  passwordVariable: null,
 };
 
 const STATS: TunnelStats = {
@@ -210,5 +211,45 @@ describe("ConnectionRow", () => {
       expect(screen.queryByText("Server now presents")).toBeNull();
       expect(screen.queryByRole("alert")).toBeNull();
     });
+  });
+});
+
+describe("ConnectionRow — variable changed (spec 03 §24)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function renderStale(status: ForwardStatus, needsReconnect = true) {
+    return render(ConnectionRow, {
+      props: {
+        forward: FORWARD,
+        status,
+        stats: STATS,
+        lastError: null,
+        needsReconnect,
+        selected: false,
+        onSelect: vi.fn(),
+        onEdit: vi.fn(),
+        onDelete: vi.fn(),
+        onViewLog: vi.fn(),
+      },
+    });
+  }
+
+  it("tells a live tunnel to reconnect and does it through connectForward", async () => {
+    renderStale("connected");
+    const note = screen.getByRole("status");
+    expect(note).toHaveTextContent(/variable changed — reconnect to apply/i);
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Reconnect Postgres" }),
+    );
+    expect(connectForward).toHaveBeenCalledWith("abc");
+    expect(disconnectForward).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet when nothing changed or the tunnel isn't live", () => {
+    const { unmount } = renderStale("connected", false);
+    expect(screen.queryByText(/reconnect to apply/i)).toBeNull();
+    unmount();
+    renderStale("disconnected");
+    expect(screen.queryByText(/reconnect to apply/i)).toBeNull();
   });
 });

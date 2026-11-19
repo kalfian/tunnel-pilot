@@ -12,6 +12,7 @@
 import { get, writable } from "svelte/store";
 import { API_HEADERS, onUnauthorized, type UnlistenFn } from "./transport";
 import type { WebSession } from "./types";
+import { APP_VERSION } from "./version";
 
 export type AuthPhase = "checking" | "signedOut" | "signedIn";
 
@@ -49,6 +50,7 @@ export async function checkSession(): Promise<void> {
     const body = (await res.json()) as WebSession;
     serverUnreachable.set(false);
     serverVersion.set(typeof body.version === "string" ? body.version : null);
+    if (reloadIfStale(body.version)) return;
     authPhase.set(body.authenticated === true ? "signedIn" : "signedOut");
   } catch {
     serverUnreachable.set(true);
@@ -117,9 +119,37 @@ async function refreshVersion(): Promise<void> {
     if (!res.ok) return;
     const body = (await res.json()) as WebSession;
     if (typeof body.version === "string") serverVersion.set(body.version);
+    reloadIfStale(body.version);
   } catch {
     // Cosmetic only.
   }
+}
+
+const RELOADED_FOR_KEY = "tp-reloaded-for-version";
+
+/**
+ * A tab still running the bundle of an older server (the daemon was upgraded
+ * under it) would speak an outdated command contract — e.g. an edit without
+ * `passwordVariable` would clear a forward's password variable. Reload once
+ * to pick up the bundle the server now serves. At most one reload per server
+ * version, so a mismatched build can never loop.
+ */
+export function reloadIfStale(
+  serverBuild: unknown,
+  reload: () => void = () => window.location.reload(),
+): boolean {
+  if (typeof serverBuild !== "string" || serverBuild === APP_VERSION) {
+    return false;
+  }
+  try {
+    if (sessionStorage.getItem(RELOADED_FOR_KEY) === serverBuild) return false;
+    sessionStorage.setItem(RELOADED_FOR_KEY, serverBuild);
+  } catch {
+    // No storage (private mode, blocked): skip rather than risk a loop.
+    return false;
+  }
+  reload();
+  return true;
 }
 
 function parseRetryAfter(value: string | null): number | null {

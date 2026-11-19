@@ -228,6 +228,7 @@
           "Groups, tags and a Cmd/Ctrl+K command palette",
           "Live per-tunnel stats and an activity log",
           "Passwords in the OS keychain; backups never contain passwords",
+          "Variables: share one SSH username or password across tunnels",
           "SSH host-key pinning: pinned on first connect, ~/.ssh/known_hosts honoured read-only, a changed key is refused until trusted",
           "Cryptographically signed automatic updates (minisign)",
           "Terminal CLI on macOS and Linux: list, status, connect, disconnect, add, edit, remove, set-password, with --json output",
@@ -999,8 +1000,8 @@
           </article>
           <article class="fcard reveal">
             <div class="ic"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></div>
-            <h3>Keychain &amp; pinned host keys</h3>
-            <p>Passwords live in your OS keychain (macOS Keychain, Windows Credential Manager, Secret Service), and backups never export them. Each SSH server&rsquo;s host key is pinned on first connect, so an impostor server is refused instead of receiving your password.</p>
+            <h3>Keychain, variables &amp; pinned host keys</h3>
+            <p>Passwords live in your OS keychain (macOS Keychain, Windows Credential Manager, Secret Service), and backups never export them. Variables let many tunnels share one username or password (<code>{{DB_USER}}</code>), so rotating it is one edit. Each SSH server&rsquo;s host key is pinned on first connect, so an impostor server is refused instead of receiving your password.</p>
           </article>
           <article class="fcard reveal">
             <div class="ic"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></div>

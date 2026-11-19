@@ -8,13 +8,17 @@ use std::sync::Arc;
 
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::storage::backup::{plan_import, BackupFile, ImportMode, ImportResult};
+use crate::storage::backup::{
+    plan_import, plan_variable_import, BackupFile, ImportMode, ImportResult,
+};
+use crate::variables::secret_account;
 
 /// The backup document for the current config, as pretty JSON.
 pub fn export_backup_text(state: &Arc<AppState>) -> Result<String, AppError> {
     BackupFile::export(
         &state.configs_snapshot(),
         &state.groups_snapshot(),
+        &state.variables_snapshot(),
         chrono::Utc::now().to_rfc3339(),
     )
     .to_json()
@@ -58,7 +62,12 @@ async fn import_backup_bytes(
     bytes: &[u8],
     mode: ImportMode,
 ) -> Result<ImportResult, AppError> {
-    let backup = crate::storage::backup::parse_backup(bytes)?;
+    let mut backup = crate::storage::backup::parse_backup(bytes)?;
+    let (variables, orphaned_secrets) = plan_variable_import(
+        &state.variables_snapshot(),
+        std::mem::take(&mut backup.variables),
+        mode,
+    );
     let (forwards, groups, result) = plan_import(
         &state.configs_snapshot(),
         &state.groups_snapshot(),
@@ -70,12 +79,23 @@ async fn import_backup_bytes(
         crate::ops::forwards::run_stop_all(state).await?;
     }
 
+    // Variables first, so no forward ever references one that is not there.
+    state.replace_variables(variables);
     state.replace_configs(forwards);
     state.replace_groups(groups);
+    state.persist_variables().await?;
     state.persist_forwards().await?;
     state.persist_groups().await?;
+    state.emit_variables_changed();
     state.emit_forwards_changed();
     state.emit_groups_changed();
+    // Secrets of variables the import dropped (best-effort: the config no
+    // longer references them either way).
+    for name in orphaned_secrets {
+        if let Err(e) = state.delete_password_checked(&secret_account(&name)).await {
+            tracing::warn!(variable = %name, error = %e, "could not delete a dropped variable's secret");
+        }
+    }
 
     tracing::info!(
         imported = result.imported,

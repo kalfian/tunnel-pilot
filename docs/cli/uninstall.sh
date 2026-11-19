@@ -138,13 +138,26 @@ remove_binaries() {
   done < <(installed_bins)
 }
 
+# Keychain accounts of secret variables (spec 03 §24): "var:<NAME>". Every
+# identifier-like "name" in the config is tried — forward and group names
+# included. Deleting an account that does not exist is a no-op, and every
+# account under this product's keychain service is ours to purge anyway.
+variable_accounts() {
+  local config="$1"
+  [ -f "$config" ] || return 0
+  grep -oE '"name"[[:space:]]*:[[:space:]]*"[A-Za-z_][A-Za-z0-9_]*"' "$config" \
+    | sed -E 's/.*"([A-Za-z_][A-Za-z0-9_]*)"$/var:\1/' | sort -u
+}
+
 purge_data() {
   local dir id count=0
   dir=$(config_dir)
   if [ "$(uname -s)" = "Darwin" ] && [ -f "$dir/tunnel_pilot_config.json" ]; then
-    # The macOS build stores passwords in the Keychain, one account per forward id.
+    # The macOS build stores passwords in the Keychain: one account per forward
+    # id, plus "var:<NAME>" per secret variable.
     for id in $(grep -oE '"id"[[:space:]]*:[[:space:]]*"[0-9a-fA-F-]{36}"' "$dir/tunnel_pilot_config.json" \
-                | grep -oE '[0-9a-fA-F-]{36}' | sort -u); do
+                | grep -oE '[0-9a-fA-F-]{36}' | sort -u) \
+              $(variable_accounts "$dir/tunnel_pilot_config.json"); do
       security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "$id" >/dev/null 2>&1 && count=$((count + 1))
     done
     [ "$count" -gt 0 ] && ok "Removed $count stored password(s) from the Keychain"

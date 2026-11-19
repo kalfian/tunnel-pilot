@@ -42,9 +42,13 @@ pub struct ForwardConfig {
     pub keep_alive_max_count: u32,          // default 5; 0 => treated as 3 at runtime
     pub group_id: Option<String>,           // NEW v2
     pub tags: Vec<String>,                  // NEW v2 (default empty)
+    pub host_key: Option<HostKeyPin>,       // 03 §23
+    pub password_variable: Option<String>,  // 03 §24: secret variable NAME (default None)
 }
 ```
-Derived (not persisted): `needs_password` = `identity_file_path.is_none() && !has_stored_password`.
+Derived (not persisted): `needs_password` = `identity_file_path.is_none() && !has_stored_password
+&& password_variable.is_none()`. `ssh_username` may contain `{{NAME}}` references to plain
+variables (§14), resolved at dial time.
 
 **Auth precedence (nit b — phrased identically to [03 §1](03-TECH-SPEC.md#ssh)):** identity
 file and password are mutually exclusive at auth time; if both are somehow set, **the identity
@@ -68,6 +72,7 @@ export interface ForwardConfig {
   groupId: string | null;
   tags: string[];
   hostKey: HostKeyPin | null;      // pinned on first successful connect (03 §23)
+  passwordVariable: string | null; // secret variable used as the password (03 §24)
 }
 
 /** A pinned SSH host key — public, never a secret. */
@@ -302,6 +307,7 @@ export interface UpdateStatus { available: boolean; version: string | null; note
 pub struct AppSnapshot {
     pub forwards: Vec<ForwardConfig>,
     pub groups: Vec<TunnelGroup>,
+    pub variables: Vec<Variable>,                // §14; never a secret value
     pub settings: AppSettings,
     pub logs: Vec<LogEntry>,
     pub runtimes: Vec<(String, ForwardRuntime)>, // (forwardId, runtime)
@@ -313,6 +319,7 @@ pub struct AppSnapshot {
 export interface AppSnapshot {
   forwards: ForwardConfig[];
   groups: TunnelGroup[];
+  variables: Variable[];
   settings: AppSettings;
   logs: LogEntry[];
   runtimes: [string, ForwardRuntime][];
@@ -354,6 +361,10 @@ display order** (no explicit order field on forwards — mirrors v1). Groups DO 
   "groups": [
     { "id": "grp-prod", "name": "Production", "color": "#EF4444", "order": 0, "collapsed": false }
   ],
+  "variables": [
+    { "name": "DB_USER", "secret": false, "value": "deploy", "hasStoredValue": false },
+    { "name": "DB_PASS", "secret": true, "value": "", "hasStoredValue": true }
+  ],
   "settings": {
     "launchAtLogin": true,
     "showNotifications": true,
@@ -368,7 +379,7 @@ display order** (no explicit order field on forwards — mirrors v1). Groups DO 
 }
 ```
 
-`forwards`, `groups`, `settings` saved independently via read-merge-write of the full file
+`forwards`, `groups`, `variables`, `settings` saved independently via read-merge-write of the full file
 (see [03 §persistence](03-TECH-SPEC.md#persistence)). `schemaVersion` gates migration.
 
 ---
@@ -379,7 +390,8 @@ display order** (no explicit order field on forwards — mirrors v1). Groups DO 
 - **Service** (`KC_SERVICE`): the stable string **`"tunnel-pilot"`** — deliberately chosen,
   **need NOT match any bundle id**, and must stay constant forever so keychain entries survive
   any future bundle-id change (nit c). Do not derive it from the bundle id.
-- **Account**: the forward `id` (uuid). One secret per forward.
+- **Account**: the forward `id` (uuid). One secret per forward. A secret variable (§14) uses
+  the account `var:<NAME>` (a uuid never contains `:`, so the two cannot collide).
 - API in [03 §credentials](03-TECH-SPEC.md#credentials).
 
 **Fallback secrets file** (only used when keychain unavailable) — kept **separate** from
@@ -409,6 +421,8 @@ pub struct BackupFile {
     pub forwards: Vec<ForwardConfig>, // hasStoredPassword forced false on export; no secrets
     #[serde(default)]                 // F19: v1 backups have NO `groups` key
     pub groups: Vec<TunnelGroup>,     // v2: include groups so org survives backup
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<Variable>,     // §14: plain values; secret ones by NAME only
 }
 ```
 ```typescript
@@ -438,6 +452,10 @@ On export: set every `hasStoredPassword` to `false` (recipient has no secret). O
 - **Merge**: append forwards whose `id` (or name+host+port key) is not already present;
   skip duplicates → reflected in `ImportResult.skipped`.
 - Imported forwards start with `hasStoredPassword=false` (user must re-enter passwords).
+- Variables (03 §24): a secret variable's value is never exported; on parse, any `value` on a
+  secret entry is dropped and `hasStoredValue` forced false; invalid or duplicate (ignoring
+  case) entries are skipped. Replace keeps a same-named secret already stored locally;
+  merge adds only new names.
 
 ---
 
@@ -522,3 +540,29 @@ fn v1_config_path() -> Option<PathBuf> {
 | `AppSettings.autoCheckUpdates` | true |
 | `schemaVersion` (config) | 2 |
 | `version` (backup) | 2 |
+
+---
+
+<a id="variables"></a>
+## 14. Variable (03 §24)
+
+```rust
+#[serde(rename_all = "camelCase")]
+pub struct Variable {
+    pub name: String,            // ^[A-Za-z_][A-Za-z0-9_]{0,63}$, unique ignoring case
+    pub secret: bool,
+    pub value: String,           // plain value; "" for a secret variable
+    pub has_stored_value: bool,  // secret: a value exists in the credential store
+}
+/// `save_variable` payload — carries a secret, so no Debug and never logged.
+pub struct VariableInput {
+    pub name: String,
+    pub secret: bool,
+    pub value: Option<String>,   // plain: required; secret: new value or None = keep
+}
+```
+```typescript
+export interface Variable { name: string; secret: boolean; value: string; hasStoredValue: boolean; }
+export interface VariableInput { name: string; secret: boolean; value: string | null; }
+```
+`ForwardRuntime` gains `needsReconnect: bool` (a variable the live tunnel uses changed).

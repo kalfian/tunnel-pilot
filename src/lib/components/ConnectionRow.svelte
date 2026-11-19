@@ -33,6 +33,9 @@
     lastError: string | null;
     /** Refused host key (spec 03 §23). Shown only while `status` is `error`. */
     hostKeyMismatch?: HostKeyMismatch | null;
+    /** A variable this live tunnel uses changed (spec 03 §24): it applies on
+        the next connection, so offer a reconnect instead of doing one. */
+    needsReconnect?: boolean;
     selected: boolean;
     /** All groups — powers the "Assign group ▸" menu. Empty = no group UI. */
     groups?: TunnelGroup[];
@@ -57,6 +60,7 @@
     stats,
     lastError,
     hostKeyMismatch = null,
+    needsReconnect = false,
     selected,
     groups = [],
     reorderable = true,
@@ -93,6 +97,26 @@
   const mismatch = $derived(status === "error" ? hostKeyMismatch : null);
   const hostPort = $derived(formatHostPort(forward.sshHost, forward.sshPort));
   const hkTitleId = $derived(`hk-title-${forward.id}`);
+
+  // Only meaningful while the tunnel is up on the old value: a stopped or
+  // failed tunnel picks up the new value on its next dial anyway.
+  const showStale = $derived(
+    needsReconnect && (status === "connected" || status === "connecting"),
+  );
+  let reconnecting = $state(false);
+
+  async function reconnect(): Promise<void> {
+    if (reconnecting) return;
+    reconnecting = true;
+    try {
+      // Connecting a live tunnel tears it down and dials again (spec 03 §1).
+      await connectForward(forward.id);
+    } catch (err) {
+      pushToast(`Reconnect failed: ${String(err)}`, { tone: "error" });
+    } finally {
+      reconnecting = false;
+    }
+  }
 
   const SUBTITLE: Partial<Record<ForwardStatus, string>> = {
     connecting: "Connecting…",
@@ -350,6 +374,23 @@
         </Button>
       </div>
     </section>
+  {:else if showStale}
+    <div class="stale-strip" role="status">
+      <span class="stale-icon"><Icon name="refresh-cw" size={14} /></span>
+      <span class="stale-msg">
+        Variable changed — reconnect to apply
+        <span class="sr-only">{forward.name}</span>
+      </span>
+      <button
+        type="button"
+        class="stale-action"
+        disabled={reconnecting || pending}
+        aria-label="Reconnect {forward.name}"
+        onclick={() => void reconnect()}
+      >
+        {reconnecting ? "Reconnecting…" : "Reconnect"}
+      </button>
+    </div>
   {:else if status === "error"}
     <div class="err-strip" role="alert">
       <Icon name="alert-triangle" size={14} />
@@ -558,6 +599,54 @@
   }
   .err-action:hover {
     text-decoration: underline;
+  }
+
+  /* --- Variable changed (spec 03 §24) ---
+     Informational, not a fault: an accent tint (the "live" colour) rather
+     than the error/pending hues, so it never reads as a failing tunnel. */
+  .stale-strip {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-1) var(--sp-2);
+    margin-top: var(--sp-1);
+    padding: var(--sp-2) var(--sp-3);
+    border-radius: var(--radius-sm);
+    background: var(--accent-subtle);
+    color: var(--text);
+    font-size: var(--fs-body-sm);
+    line-height: var(--lh-body-sm);
+  }
+  .stale-icon {
+    display: flex;
+    flex: none;
+    color: var(--accent-text);
+  }
+  .stale-msg {
+    flex: 1;
+    min-width: 0;
+  }
+  .stale-action {
+    flex: none;
+    min-height: var(--hit-min);
+    margin: calc(var(--sp-2) * -1) 0;
+    padding: 0 var(--sp-2);
+    border: none;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--accent-text);
+    font-weight: 600;
+    font-size: var(--fs-body-sm);
+    cursor: pointer;
+    transition: background-color var(--dur-fast) var(--ease-standard);
+  }
+  .stale-action:hover:not(:disabled) {
+    background: var(--accent-subtle-2);
+  }
+  .stale-action:disabled {
+    color: var(--text-2);
+    cursor: default;
   }
 
   /* --- Host key changed (spec 03 §23) ---

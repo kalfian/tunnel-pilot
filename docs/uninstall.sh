@@ -98,9 +98,20 @@ forward_ids() {
     | grep -oE '[0-9a-fA-F-]{36}' | sort -u
 }
 
+# Keychain accounts of secret variables (spec 03 §24): "var:<NAME>". Every
+# identifier-like "name" in the config is tried — forward and group names
+# included. Deleting an account that does not exist is a no-op, and every
+# account under this product's keychain service is ours to purge anyway.
+variable_accounts() {
+  local config="$1"
+  [ -f "$config" ] || return 0
+  grep -oE '"name"[[:space:]]*:[[:space:]]*"[A-Za-z_][A-Za-z0-9_]*"' "$config" \
+    | sed -E 's/.*"([A-Za-z_][A-Za-z0-9_]*)"$/var:\1/' | sort -u
+}
+
 purge_secrets() {
   local config="$1" id count=0
-  for id in $(forward_ids "$config"); do
+  for id in $(forward_ids "$config") $(variable_accounts "$config"); do
     case "$(uname -s)" in
       Darwin)
         security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "$id" >/dev/null 2>&1 && count=$((count + 1)) ;;

@@ -9,8 +9,8 @@
 //! Desktop-only commands (window, tray, updater, PATH shim, path-based backup)
 //! are deliberately absent and answer `notFound`, exactly like an unknown name.
 //!
-//! Security: argument structs that carry a secret (`set_forward_password`) do
-//! not derive `Debug`, and nothing here logs args or results (AGENTS §8).
+//! Security: argument structs that carry a secret (`set_forward_password`,
+//! `save_variable`'s `VariableInput`) do not derive `Debug`, and nothing here logs args or results (AGENTS §8).
 
 use std::sync::Arc;
 
@@ -19,9 +19,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::AppError;
-use crate::ops::{backup, forwards, groups, logs, settings};
+use crate::ops::{backup, forwards, groups, logs, settings, variables};
 use crate::ssh::engine;
-use crate::state::models::{AppSettings, ForwardInput, GroupInput, UpdateStatus};
+use crate::state::models::{AppSettings, ForwardInput, GroupInput, UpdateStatus, VariableInput};
 use crate::state::AppState;
 use crate::storage::backup::ImportMode;
 
@@ -55,6 +55,10 @@ pub const WEB_COMMANDS: &[&str] = &[
     "start_group",
     "stop_group",
     "list_tags",
+    // Variables (§6.9)
+    "list_variables",
+    "save_variable",
+    "delete_variable",
     // Settings (§6.3)
     "get_settings",
     "update_settings",
@@ -100,6 +104,12 @@ struct ReorderArgs {
 struct PasswordArgs {
     id: String,
     password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NameArgs {
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -198,7 +208,7 @@ pub async fn invoke(state: &Arc<AppState>, command: &str, raw: Value) -> Result<
             let cfg = state
                 .get_config(&a.id)
                 .ok_or_else(|| AppError::NotFound(format!("forward {}", a.id)))?;
-            json(forwards::build_ssh_command(&cfg))
+            json(forwards::ssh_command(state, &cfg))
         }
         "set_forward_password" => {
             let a: PasswordArgs = args(command, raw)?;
@@ -243,6 +253,16 @@ pub async fn invoke(state: &Arc<AppState>, command: &str, raw: Value) -> Result<
             json(groups::stop_group(state, a.group_id).await?)
         }
         "list_tags" => json(groups::list_tags(state)),
+        // --- Variables (a secret value only travels inbound) ---
+        "list_variables" => json(variables::list(state)),
+        "save_variable" => {
+            let a: InputArgs<VariableInput> = args(command, raw)?;
+            json(variables::save(state, a.input).await?)
+        }
+        "delete_variable" => {
+            let a: NameArgs = args(command, raw)?;
+            json(variables::delete(state, &a.name).await?)
+        }
         // --- Settings ---
         "get_settings" => json(settings::get_settings(state)),
         "update_settings" => {
@@ -381,6 +401,63 @@ mod tests {
             .await
             .expect("list");
         assert_eq!(listed.as_array().map(Vec::len), Some(0));
+    }
+
+    #[tokio::test]
+    async fn variables_over_the_web_never_return_a_secret() {
+        let state = state();
+        invoke(
+            &state,
+            "save_variable",
+            j!({ "input": { "name": "DB_USER", "secret": false, "value": "deploy" } }),
+        )
+        .await
+        .expect("plain");
+        let saved = invoke(
+            &state,
+            "save_variable",
+            j!({ "input": { "name": "DB_PASS", "secret": true, "value": "w3b-s3cret" } }),
+        )
+        .await
+        .expect("secret");
+        assert_eq!(saved["hasStoredValue"], j!(true));
+        assert!(!saved.to_string().contains("w3b-s3cret"));
+
+        let mut fwd = input("db");
+        fwd["sshUsername"] = j!("{{DB_USER}}");
+        fwd["identityFilePath"] = j!(null);
+        fwd["passwordVariable"] = j!("DB_PASS");
+        let created = invoke(&state, "create_forward", j!({ "input": fwd }))
+            .await
+            .expect("create with variables");
+        let id = created["id"].as_str().expect("id").to_string();
+        let ssh = invoke(&state, "copy_ssh_command", j!({ "id": id }))
+            .await
+            .expect("ssh");
+        assert!(ssh
+            .as_str()
+            .is_some_and(|s| s.ends_with("deploy@bastion.example.com")));
+
+        for cmd in [
+            "list_variables",
+            "app_hydrate",
+            "export_backup_text",
+            "list_forwards",
+        ] {
+            let out = invoke(&state, cmd, Value::Null).await.expect(cmd);
+            assert!(
+                !out.to_string().contains("w3b-s3cret"),
+                "{cmd} leaked a secret"
+            );
+        }
+        assert!(matches!(
+            invoke(&state, "delete_variable", j!({ "name": "DB_PASS" })).await,
+            Err(AppError::InvalidInput(_))
+        ));
+        // An older client that does not send `passwordVariable` still works.
+        invoke(&state, "create_forward", j!({ "input": input("legacy") }))
+            .await
+            .expect("legacy payload");
     }
 
     #[tokio::test]

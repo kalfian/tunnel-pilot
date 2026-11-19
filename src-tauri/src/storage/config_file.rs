@@ -19,7 +19,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
 use crate::error::AppError;
-use crate::state::models::{AppSettings, ForwardConfig, TunnelGroup};
+use crate::state::models::{AppSettings, ForwardConfig, TunnelGroup, Variable};
 
 /// Canonical config filename in the v2 `app_config_dir` (spec 03 §7). Same name
 /// as v1 on purpose; the directory differs (handled by migration, spec 04 §12).
@@ -40,6 +40,10 @@ pub struct ConfigDocument {
     pub forwards: Vec<ForwardConfig>,
     #[serde(default)]
     pub groups: Vec<TunnelGroup>,
+    /// Variables (spec 03 §24). Secret values are never here — only the
+    /// `hasStoredValue` flag; the value lives in the credential store.
+    #[serde(default)]
+    pub variables: Vec<Variable>,
     #[serde(default)]
     pub settings: AppSettings,
 }
@@ -51,6 +55,7 @@ impl Default for ConfigDocument {
             schema_version: SCHEMA_VERSION,
             forwards: Vec::new(),
             groups: Vec::new(),
+            variables: Vec::new(),
             settings: AppSettings::default(),
         }
     }
@@ -138,6 +143,15 @@ impl ConfigStore {
         let _guard = self.write_lock.lock().await;
         let mut doc = self.read_merge_base().await;
         doc.groups = groups;
+        doc.schema_version = SCHEMA_VERSION;
+        self.write_document_locked(&doc).await
+    }
+
+    /// Read-merge-write: replace only `variables`, preserving the rest.
+    pub async fn save_variables(&self, variables: Vec<Variable>) -> Result<(), AppError> {
+        let _guard = self.write_lock.lock().await;
+        let mut doc = self.read_merge_base().await;
+        doc.variables = variables;
         doc.schema_version = SCHEMA_VERSION;
         self.write_document_locked(&doc).await
     }
@@ -251,6 +265,7 @@ mod tests {
             group_id: None,
             tags: vec![],
             host_key: None,
+            password_variable: None,
         }
     }
 

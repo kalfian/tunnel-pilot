@@ -18,12 +18,12 @@ use tokio::time::{timeout_at, Duration, Instant};
 
 use crate::cli::protocol::{
     BulkResult, CliCommand, CliData, CliRequest, CliResponse, ForwardFields, ForwardView,
-    SaveChange, PROTOCOL_VERSION,
+    SaveChange, VariableChange, VariableView, PROTOCOL_VERSION,
 };
 use crate::error::AppError;
 use crate::ops::forwards::{self as ops, run_start_all, run_stop_all, runtime_or_default};
 use crate::ssh::engine;
-use crate::state::models::{ForwardConfig, ForwardInput, ForwardStatus};
+use crate::state::models::{ForwardConfig, ForwardInput, ForwardStatus, Variable, VariableInput};
 use crate::state::AppState;
 
 /// How long to wait for a supervisor handle to appear in the registry after
@@ -102,6 +102,65 @@ async fn dispatch(state: &Arc<AppState>, req: CliRequest) -> Result<CliData, App
             let cfg = ops::forget_host_key(state, &cfg.id).await?;
             Ok(saved(state, &cfg, SaveChange::HostKeyForgotten))
         }
+        CliCommand::VariableList => Ok(CliData::Variables {
+            variables: crate::ops::variables::list(state)
+                .into_iter()
+                .map(|v| variable_view(state, v))
+                .collect(),
+        }),
+        CliCommand::VariableSet => {
+            let name = require_target(req.target)?;
+            let value = req
+                .value
+                .ok_or_else(|| AppError::InvalidInput("variable-set requires a value".into()))?;
+            let v = crate::ops::variables::save(
+                state,
+                VariableInput {
+                    name,
+                    secret: false,
+                    value: Some(value),
+                },
+            )
+            .await?;
+            Ok(variable_saved(state, v, VariableChange::Saved))
+        }
+        CliCommand::VariableSecretStored => {
+            let name = require_target(req.target)?;
+            let v = crate::ops::variables::mark_secret_stored(state, &name).await?;
+            Ok(variable_saved(state, v, VariableChange::Saved))
+        }
+        CliCommand::VariableRemove => {
+            let name = require_target(req.target)?;
+            let v = state
+                .get_variable(name.trim())
+                .ok_or_else(|| AppError::NotFound(format!("variable {name}")))?;
+            crate::ops::variables::delete(state, &v.name).await?;
+            Ok(CliData::VariableSaved {
+                variable: VariableView {
+                    variable: v,
+                    used_by: Vec::new(),
+                },
+                variable_change: VariableChange::Removed,
+            })
+        }
+    }
+}
+
+/// A variable plus the names of the forwards that use it. No secret value.
+fn variable_view(state: &Arc<AppState>, variable: Variable) -> VariableView {
+    let used_by = state
+        .configs_snapshot()
+        .into_iter()
+        .filter(|c| c.uses_variable(&variable.name))
+        .map(|c| c.name)
+        .collect();
+    VariableView { variable, used_by }
+}
+
+fn variable_saved(state: &Arc<AppState>, v: Variable, change: VariableChange) -> CliData {
+    CliData::VariableSaved {
+        variable: variable_view(state, v),
+        variable_change: change,
     }
 }
 
@@ -128,11 +187,23 @@ fn default_input() -> ForwardInput {
         keep_alive_max_count: 5,
         group_id: None,
         tags: Vec::new(),
+        password_variable: None,
     }
 }
 
 /// Overlay the fields that are present onto `input`. Pure — unit-tested.
+///
+/// Key auth and a password variable exclude each other, so setting one on an
+/// `edit` drops the other unless the same request sets both (which
+/// `ops::forwards` then refuses with a clear message).
 pub(crate) fn apply_fields(mut input: ForwardInput, fields: ForwardFields) -> ForwardInput {
+    let sets = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.trim().is_empty());
+    if sets(&fields.identity_file_path) && fields.password_variable.is_none() {
+        input.password_variable = None;
+    }
+    if sets(&fields.password_variable) && fields.identity_file_path.is_none() {
+        input.identity_file_path = None;
+    }
     if let Some(v) = fields.name {
         input.name = v.trim().to_string();
     }
@@ -169,6 +240,10 @@ pub(crate) fn apply_fields(mut input: ForwardInput, fields: ForwardFields) -> Fo
     }
     if let Some(v) = fields.tags {
         input.tags = v;
+    }
+    if let Some(v) = fields.password_variable {
+        let v = v.trim();
+        input.password_variable = (!v.is_empty()).then(|| v.to_string());
     }
     input
 }

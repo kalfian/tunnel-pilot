@@ -29,6 +29,7 @@ pub mod rt;
 pub mod ssh;
 pub mod state;
 pub mod storage;
+pub mod variables;
 #[cfg(feature = "server")]
 pub mod web;
 
@@ -121,6 +122,9 @@ pub fn run() {
             crate::commands::forwards::clear_forward_password,
             crate::commands::forwards::trust_host_key,
             crate::commands::forwards::forget_host_key,
+            crate::commands::variables::list_variables,
+            crate::commands::variables::save_variable,
+            crate::commands::variables::delete_variable,
             // Groups & tags (§6.2)
             crate::commands::groups::list_groups,
             crate::commands::groups::create_group,

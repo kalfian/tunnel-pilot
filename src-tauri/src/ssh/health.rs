@@ -111,6 +111,8 @@ mod tests {
             stats_cell: stats_rx,
             stats: Arc::new(StatsInner::default()),
             host_key_mismatch: None,
+            resolved_gen: 0,
+            changed_gen: 0,
         }
     }
 

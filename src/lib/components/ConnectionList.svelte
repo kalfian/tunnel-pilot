@@ -28,6 +28,8 @@
     lastErrorById: Record<string, string | null>;
     /** Refused host key per id (spec 03 §23); absent/null = none. */
     hostKeyMismatchById?: Record<string, HostKeyMismatch | null>;
+    /** Live tunnels whose variables changed since they dialed (spec 03 §24). */
+    needsReconnectById?: Record<string, boolean>;
     selectedId: string | null;
     /** In-view search query (empty = no search filter). */
     filterQuery: string;
@@ -52,6 +54,7 @@
     statsById,
     lastErrorById,
     hostKeyMismatchById = {},
+    needsReconnectById = {},
     selectedId,
     filterQuery,
     activeTag,
@@ -381,6 +384,7 @@
                 stats={statsById[forward.id] ?? EMPTY_STATS}
                 lastError={lastErrorById[forward.id] ?? null}
                 hostKeyMismatch={hostKeyMismatchById[forward.id] ?? null}
+                needsReconnect={needsReconnectById[forward.id] ?? false}
                 selected={selectedId === forward.id}
                 {reorderable}
                 onSelect={() => onSelect(forward.id)}

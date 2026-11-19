@@ -23,6 +23,7 @@ import type {
   TunnelGroup,
   TunnelStats,
   UpdateStatus,
+  Variable,
 } from "./types";
 
 export const EVENTS = {
@@ -33,6 +34,7 @@ export const EVENTS = {
   forwardsChanged: "forwards://changed",
   groupsChanged: "groups://changed",
   settingsChanged: "settings://changed",
+  variablesChanged: "variables://changed",
   updateStatus: "update://status",
   updateProgress: "update://progress",
   windowFocus: "window://focus",
@@ -48,6 +50,8 @@ export interface TunnelStatusEvent {
   lastError: string | null;
   /** Set while parked on a refused host key (spec 03 §23). */
   hostKeyMismatch: HostKeyMismatch | null;
+  /** A variable the live tunnel uses changed; applies on reconnect (§24). */
+  needsReconnect?: boolean;
 }
 
 export interface TunnelStatsEvent {
@@ -83,6 +87,10 @@ export const onForwardsChanged = (
 export const onGroupsChanged = (
   cb: EventCallback<TunnelGroup[]>,
 ): Promise<UnlistenFn> => listen(EVENTS.groupsChanged, cb);
+
+export const onVariablesChanged = (
+  cb: EventCallback<Variable[]>,
+): Promise<UnlistenFn> => listen(EVENTS.variablesChanged, cb);
 
 export const onSettingsChanged = (
   cb: EventCallback<AppSettings>,

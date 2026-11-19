@@ -266,7 +266,14 @@ All commands return `Result<T, AppError>` where `AppError` is serde-serializable
 never send the password inside `ForwardInput`. Editing follows the same pattern with the
 existing id.
 
-`ForwardRuntime` = `{ status: ForwardStatus, stats: TunnelStats, lastError: Option<String> }`.
+`ForwardRuntime` = `{ status: ForwardStatus, stats: TunnelStats, lastError: Option<String>,
+hostKeyMismatch: Option<HostKeyMismatch>, needsReconnect: bool }`.
+
+`ForwardInput.passwordVariable` (a variable **name**, 03 §24) makes the forward take its
+password from a secret variable; `create_forward` / `update_forward` refuse a reference to a
+variable that does not exist or has the wrong kind, and `update_forward` drops the forward's
+own stored password once it uses a variable. `copy_ssh_command` renders the username with
+the plain variables' current values.
 
 ### 6.2 Groups & tags (`commands/groups.rs`)
 
@@ -321,13 +328,27 @@ existing id.
 
 | Command | Signature | Triggered by |
 |---------|-----------|--------------|
-| `app_hydrate` | `() -> AppSnapshot` | frontend boot — one call returns forwards+groups+settings+logs+runtime+update status |
+| `app_hydrate` | `() -> AppSnapshot` | frontend boot — one call returns forwards+groups+variables+settings+logs+runtime+update status |
 | `show_window` | `() -> ()` | tray "Open" |
 | `hide_window` | `() -> ()` | custom close button |
 | `quit_app` | `() -> ()` | tray "Quit" / palette |
 
 `AppSnapshot` = `{ forwards, groups, settings, logs, runtimes: Vec<(String, ForwardRuntime)>, update: UpdateStatus, keychain_available: bool }`.
 `keychain_available` drives the plaintext-fallback warning UI.
+
+### 6.9 Variables (`commands/variables.rs`, 03 §24)
+
+| Command | Signature | Triggered by |
+|---------|-----------|--------------|
+| `list_variables` | `() -> Vec<Variable>` | Settings → Variables (also in `AppSnapshot.variables`) |
+| `save_variable` | `(input: VariableInput) -> Variable` | variable dialog save — create, change the value, or switch plain ↔ secret |
+| `delete_variable` | `(name: String) -> ()` | variable delete; `invalidInput` while a forward uses it |
+
+`Variable` = `{ name, secret, value, hasStoredValue }` — `value` is `""` for a secret one;
+its value lives in the credential store and **no command returns it**. `VariableInput` =
+`{ name, secret, value: Option<String> }`: required for a plain variable; for a secret one
+the new value, or `None` to keep the stored one. Like `set_forward_password`, the secret
+only travels inbound. Names cannot be renamed and are unique ignoring case.
 
 ### 6.8 CLI on PATH (`commands/cli_shim.rs`)
 
@@ -355,12 +376,13 @@ Names are constants in `events.rs`. Payloads are serde structs. Frontend subscri
 
 | Event name | Payload | Meaning |
 |------------|---------|---------|
-| `tunnel://status` | `{ id: String, status: ForwardStatus, lastError: Option<String>, hostKeyMismatch: Option<HostKeyMismatch> }` | status transition (mismatch set while parked on a refused host key, 03 §23) |
+| `tunnel://status` | `{ id: String, status: ForwardStatus, lastError: Option<String>, hostKeyMismatch: Option<HostKeyMismatch>, needsReconnect: bool }` | status transition (mismatch set while parked on a refused host key, 03 §23); also re-emitted unchanged when a variable a live tunnel uses changes (`needsReconnect`, 03 §24) |
 | `tunnel://stats` | `{ id: String, stats: TunnelStats }` | stats update on the single 3s sampler tick ([03 §6/F4](03-TECH-SPEC.md#stats)) |
 | `log://line` | `LogEntry` | new log line appended |
 | `log://cleared` | `()` | logs cleared |
 | `forwards://changed` | `Vec<ForwardConfig>` | config list mutated (CRUD/reorder/migration) |
 | `groups://changed` | `Vec<TunnelGroup>` | groups mutated |
+| `variables://changed` | `Vec<Variable>` | variables mutated (never carries a secret value) |
 | `settings://changed` | `AppSettings` | settings changed (e.g. theme applied elsewhere) |
 | `update://status` | `UpdateStatus` | availability changed |
 | `update://progress` | `{ downloaded: u64, total: Option<u64> }` | download progress |

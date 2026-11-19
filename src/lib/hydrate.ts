@@ -25,6 +25,7 @@ import {
   onLogCleared,
   onLogLine,
   onSettingsChanged,
+  onVariablesChanged,
   onTunnelStats,
   onTunnelStatus,
   onTrayOpened,
@@ -42,6 +43,7 @@ import {
 import { applyGroups } from "./stores/groups";
 import { appendLogLine, resetLogs, setLogs } from "./stores/logs";
 import { applySettings, setKeychainAvailable } from "./stores/settings";
+import { applyVariables } from "./stores/variables";
 import { applyUpdateProgress, applyUpdateStatus } from "./stores/updater";
 
 /**
@@ -54,6 +56,7 @@ export async function hydrateAll(): Promise<void> {
   applyForwards(snap.forwards);
   applyRuntimes(snap.runtimes);
   applyGroups(snap.groups);
+  applyVariables(snap.variables);
   applySettings(snap.settings);
   setLogs(snap.logs);
   applyUpdateStatus(snap.update);
@@ -74,6 +77,7 @@ export async function subscribeEvents(): Promise<UnlistenFn> {
     onForwardsChanged((e) => applyForwards(e.payload)),
     onGroupsChanged((e) => applyGroups(e.payload)),
     onSettingsChanged((e) => applySettings(e.payload)),
+    onVariablesChanged((e) => applyVariables(e.payload)),
     onUpdateStatus((e) => applyUpdateStatus(e.payload)),
     onUpdateProgress((e) => applyUpdateProgress(e.payload)),
     onWindowFocus(() => {

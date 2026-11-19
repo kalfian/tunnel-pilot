@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::state::models::{ForwardConfig, TunnelGroup};
+use crate::state::models::{ForwardConfig, TunnelGroup, Variable};
 
 /// Current backup format version (spec 04 §13). v1 backups are `version:1`.
 pub const BACKUP_VERSION: u32 = 2;
@@ -114,6 +114,52 @@ pub fn plan_import(
     }
 }
 
+/// The variables after an import, plus the secret variables whose stored
+/// values must be deleted because the import dropped them (or made them
+/// plain). Pure — unit-tested (spec 04 §11, 03 §24).
+///
+/// - **Replace**: the backup's variables. A secret one keeps the value already
+///   stored on this machine under the same name (a backup never carries it).
+/// - **Merge**: current variables, plus backup variables whose name (ignoring
+///   case) is new.
+pub fn plan_variable_import(
+    current: &[Variable],
+    incoming: Vec<Variable>,
+    mode: ImportMode,
+) -> (Vec<Variable>, Vec<String>) {
+    match mode {
+        ImportMode::Replace => {
+            let planned: Vec<Variable> = incoming
+                .into_iter()
+                .map(|mut v| {
+                    if v.secret {
+                        v.has_stored_value = current
+                            .iter()
+                            .any(|c| c.name == v.name && c.secret && c.has_stored_value);
+                    }
+                    v
+                })
+                .collect();
+            let orphaned = current
+                .iter()
+                .filter(|c| c.secret && c.has_stored_value)
+                .filter(|c| !planned.iter().any(|v| v.name == c.name && v.secret))
+                .map(|c| c.name.clone())
+                .collect();
+            (planned, orphaned)
+        }
+        ImportMode::Merge => {
+            let mut merged = current.to_vec();
+            for v in incoming {
+                if !merged.iter().any(|c| c.name.eq_ignore_ascii_case(&v.name)) {
+                    merged.push(v);
+                }
+            }
+            (merged, Vec::new())
+        }
+    }
+}
+
 /// On-disk backup document (spec 04 §11).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -125,13 +171,22 @@ pub struct BackupFile {
     /// F19: v1 backups have NO `groups` key → defaults to empty.
     #[serde(default)]
     pub groups: Vec<TunnelGroup>,
+    /// Variables (spec 03 §24): plain values, and secret ones by NAME only —
+    /// a backup never holds a secret value. Absent in older backups.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<Variable>,
 }
 
 impl BackupFile {
     /// Build an export payload from the current forwards + groups. Every
     /// `hasStoredPassword` is forced false so the recipient sees no secret
     /// (AGENTS §8); no password field exists on the wire in the first place.
-    pub fn export(forwards: &[ForwardConfig], groups: &[TunnelGroup], now: String) -> Self {
+    pub fn export(
+        forwards: &[ForwardConfig],
+        groups: &[TunnelGroup],
+        variables: &[Variable],
+        now: String,
+    ) -> Self {
         let forwards = forwards
             .iter()
             .cloned()
@@ -145,6 +200,7 @@ impl BackupFile {
             exported_at: Some(now),
             forwards,
             groups: groups.to_vec(),
+            variables: variables.iter().cloned().map(strip_secret).collect(),
         }
     }
 
@@ -152,6 +208,15 @@ impl BackupFile {
     pub fn to_json(&self) -> Result<String, AppError> {
         serde_json::to_string_pretty(self).map_err(AppError::from)
     }
+}
+
+/// A variable as it may appear in a backup: a secret one by name only.
+fn strip_secret(mut v: Variable) -> Variable {
+    if v.secret {
+        v.value = String::new();
+    }
+    v.has_stored_value = false;
+    v
 }
 
 /// Lenient parse + version validation of a backup file (v1 or v2).
@@ -177,6 +242,27 @@ pub fn parse_backup(bytes: &[u8]) -> Result<BackupFile, AppError> {
         // Backups carry no secrets; the recipient must re-enter passwords.
         f.has_stored_password = false;
     }
+
+    // A hand-edited backup could put a value on a secret variable: drop it so
+    // it can never land in the config file. Malformed entries are skipped (a
+    // forward that used one reports the missing variable when it connects).
+    let mut seen: Vec<String> = Vec::new();
+    backup.variables = std::mem::take(&mut backup.variables)
+        .into_iter()
+        .map(strip_secret)
+        .filter(|v| {
+            let valid = crate::variables::validate_name(&v.name).is_ok()
+                && (v.secret || crate::variables::validate_plain_value(&v.name, &v.value).is_ok());
+            let fresh = !seen.iter().any(|n| n.eq_ignore_ascii_case(&v.name));
+            if valid && fresh {
+                seen.push(v.name.clone());
+                true
+            } else {
+                tracing::warn!(variable = %v.name, "skipping an invalid or duplicate variable in the backup");
+                false
+            }
+        })
+        .collect();
 
     Ok(backup)
 }
@@ -255,6 +341,7 @@ mod tests {
             group_id: None,
             tags: vec![],
             host_key: None,
+            password_variable: None,
         }
     }
 
@@ -277,6 +364,7 @@ mod tests {
             exported_at: None,
             forwards: vec![fwd("new1", "New1", 2), fwd("new2", "New2", 3)],
             groups: vec![grp("newgrp")],
+            variables: vec![],
         };
         let (forwards, groups, result) =
             plan_import(&current_f, &current_g, backup, ImportMode::Replace);
@@ -307,6 +395,7 @@ mod tests {
                 fwd("c", "Charlie", 11),            // new
             ],
             groups: vec![grp("g1"), grp("g2")], // g1 dup, g2 new
+            variables: vec![],
         };
         let (forwards, groups, result) =
             plan_import(&current_f, &current_g, backup, ImportMode::Merge);
@@ -340,11 +429,106 @@ mod tests {
             group_id: None,
             tags: vec![],
             host_key: None,
+            password_variable: None,
         };
-        let backup = BackupFile::export(&[f], &[], "now".into());
+        let backup = BackupFile::export(&[f], &[], &[], "now".into());
         assert_eq!(backup.version, BACKUP_VERSION);
         assert!(!backup.forwards[0].has_stored_password);
         let json = backup.to_json().expect("json");
         assert!(!json.contains("sshPassword"));
+    }
+
+    fn var(name: &str, secret: bool, value: &str, stored: bool) -> Variable {
+        Variable {
+            name: name.into(),
+            secret,
+            value: value.into(),
+            has_stored_value: stored,
+        }
+    }
+
+    #[test]
+    fn export_keeps_plain_values_and_only_names_of_secrets() {
+        let backup = BackupFile::export(
+            &[],
+            &[],
+            &[
+                var("USER", false, "kalfian", false),
+                var("PASS", true, "", true),
+            ],
+            "now".into(),
+        );
+        let json = backup.to_json().expect("json");
+        assert!(json.contains("kalfian"));
+        let pass = backup
+            .variables
+            .iter()
+            .find(|v| v.name == "PASS")
+            .expect("pass");
+        assert!(pass.secret && pass.value.is_empty() && !pass.has_stored_value);
+    }
+
+    #[test]
+    fn parse_drops_smuggled_secret_values_and_invalid_entries() {
+        let raw = r#"{
+            "version": 2,
+            "forwards": [],
+            "variables": [
+                { "name": "PASS", "secret": true, "value": "leaked", "hasStoredValue": true },
+                { "name": "USER", "value": "u" },
+                { "name": "user", "value": "dup" },
+                { "name": "bad-name", "value": "x" },
+                { "name": "EMPTY", "value": "" }
+            ]
+        }"#;
+        let backup = parse_backup(raw.as_bytes()).expect("parse");
+        let names: Vec<&str> = backup.variables.iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(names, vec!["PASS", "USER"]);
+        let pass = &backup.variables[0];
+        assert!(pass.value.is_empty() && !pass.has_stored_value);
+        assert!(!serde_json::to_string(&backup.variables)
+            .expect("json")
+            .contains("leaked"));
+    }
+
+    #[test]
+    fn older_backups_without_variables_still_parse() {
+        let raw = r#"{ "version": 2, "forwards": [], "groups": [] }"#;
+        assert!(parse_backup(raw.as_bytes())
+            .expect("parse")
+            .variables
+            .is_empty());
+    }
+
+    #[test]
+    fn replace_keeps_local_secrets_by_name_and_reports_orphans() {
+        let current = vec![
+            var("PASS", true, "", true),
+            var("OLD", true, "", true),
+            var("USER", false, "a", false),
+        ];
+        let incoming = vec![var("PASS", true, "", false), var("USER", false, "b", false)];
+        let (planned, orphaned) = plan_variable_import(&current, incoming, ImportMode::Replace);
+        assert_eq!(planned.len(), 2);
+        assert!(
+            planned[0].has_stored_value,
+            "PASS keeps this machine's secret"
+        );
+        assert_eq!(planned[1].value, "b");
+        assert_eq!(orphaned, vec!["OLD".to_string()]);
+    }
+
+    #[test]
+    fn merge_adds_only_new_names() {
+        let current = vec![var("USER", false, "mine", false)];
+        let incoming = vec![
+            var("user", false, "theirs", false),
+            var("PASS", true, "", false),
+        ];
+        let (planned, orphaned) = plan_variable_import(&current, incoming, ImportMode::Merge);
+        assert_eq!(planned.len(), 2);
+        assert_eq!(planned[0].value, "mine");
+        assert_eq!(planned[1].name, "PASS");
+        assert!(orphaned.is_empty());
     }
 }

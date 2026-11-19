@@ -26,7 +26,7 @@ use crate::events;
 use crate::state::log_buffer::LogBuffer;
 use crate::state::models::{
     AppSettings, AppSnapshot, ForwardConfig, ForwardStatus, HostKeyMismatch, TunnelGroup, TunnelId,
-    TunnelStats, UpdateStatus,
+    TunnelStats, UpdateStatus, Variable,
 };
 use crate::state::tunnel_registry::TunnelRegistry;
 use crate::storage::config_file::{ConfigDocument, ConfigStore};
@@ -40,6 +40,8 @@ pub struct StatusPayload {
     pub last_error: Option<String>,
     /// Set while parked on a refused host key (spec 03 §23).
     pub host_key_mismatch: Option<HostKeyMismatch>,
+    /// A variable the live tunnel uses changed; it applies on reconnect (§24).
+    pub needs_reconnect: bool,
 }
 
 /// Payload for `tunnel://stats` (spec 02 §7, events.rs).
@@ -57,6 +59,7 @@ enum Section {
     Forwards(Vec<ForwardConfig>),
     Settings(AppSettings),
     Groups(Vec<TunnelGroup>),
+    Variables(Vec<Variable>),
 }
 
 /// A pending persistence request for the single ordered writer. `ack` (when
@@ -113,11 +116,13 @@ async fn persist_writer_loop(store: Arc<ConfigStore>, mut rx: mpsc::UnboundedRec
         let mut forwards: Pending<Vec<ForwardConfig>> = Pending::default();
         let mut settings: Pending<AppSettings> = Pending::default();
         let mut groups: Pending<Vec<TunnelGroup>> = Pending::default();
+        let mut variables: Pending<Vec<Variable>> = Pending::default();
 
         let mut accept = |msg: PersistMsg| match msg.section {
             Section::Forwards(v) => forwards.accept(v, msg.ack),
             Section::Settings(v) => settings.accept(v, msg.ack),
             Section::Groups(v) => groups.accept(v, msg.ack),
+            Section::Variables(v) => variables.accept(v, msg.ack),
         };
         accept(first);
         // Drain anything already queued, keeping only the newest per section.
@@ -146,6 +151,13 @@ async fn persist_writer_loop(store: Arc<ConfigStore>, mut rx: mpsc::UnboundedRec
             }
             groups.resolve(&result);
         }
+        if let Some(v) = variables.payload.take() {
+            let result = store.save_variables(v).await;
+            if let Err(e) = &result {
+                tracing::error!(error = %e, "failed to persist variables");
+            }
+            variables.resolve(&result);
+        }
     }
 }
 
@@ -159,6 +171,13 @@ pub struct AppState {
     configs: RwLock<Vec<ForwardConfig>>,
     /// Groups — RAM mirror of the persisted file (spec 04 §2).
     groups: RwLock<Vec<TunnelGroup>>,
+    /// Variables — RAM mirror of the persisted file (spec 04 §14). No secret
+    /// values: those stay in `credentials`.
+    variables: RwLock<Vec<Variable>>,
+    /// Serializes variable changes against forward saves, so a check ("this
+    /// variable exists / is unused / the name is free") still holds when the
+    /// change it guards is applied (spec 03 §24).
+    variables_lock: tokio::sync::Mutex<()>,
     /// App settings — RAM mirror of the persisted file.
     settings: RwLock<AppSettings>,
     /// In-memory log ring buffer (cap 500, newest-first; not persisted). Shared
@@ -227,6 +246,8 @@ impl AppState {
             registry: Arc::new(TunnelRegistry::new()),
             configs: RwLock::new(doc.forwards),
             groups: RwLock::new(doc.groups),
+            variables: RwLock::new(doc.variables),
+            variables_lock: tokio::sync::Mutex::new(()),
             settings: RwLock::new(doc.settings),
             logs,
             credentials,
@@ -252,6 +273,8 @@ impl AppState {
             registry: Arc::new(TunnelRegistry::new()),
             configs: RwLock::new(Vec::new()),
             groups: RwLock::new(Vec::new()),
+            variables: RwLock::new(Vec::new()),
+            variables_lock: tokio::sync::Mutex::new(()),
             settings: RwLock::new(AppSettings::default()),
             logs,
             credentials,
@@ -299,6 +322,7 @@ impl AppState {
                 status,
                 last_error,
                 host_key_mismatch: self.registry.host_key_mismatch(id),
+                needs_reconnect: self.registry.needs_reconnect(id),
             },
         );
     }
@@ -394,6 +418,33 @@ impl AppState {
         }
     }
 
+    /// Snapshot of all variables (no secret values — see [`Variable`]).
+    pub fn variables_snapshot(&self) -> Vec<Variable> {
+        self.variables.read().map(|g| g.clone()).unwrap_or_default()
+    }
+
+    /// Hold while checking and applying a change that depends on the variables
+    /// (a variable save/delete, or a forward save that references them).
+    pub async fn lock_variables(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.variables_lock.lock().await
+    }
+
+    /// One variable by exact name.
+    pub fn get_variable(&self, name: &str) -> Option<Variable> {
+        self.variables
+            .read()
+            .ok()
+            .and_then(|g| g.iter().find(|v| v.name == name).cloned())
+    }
+
+    /// Replace the entire variables list. RAM-only (pair with
+    /// [`persist_variables`](Self::persist_variables)).
+    pub fn replace_variables(&self, variables: Vec<Variable>) {
+        if let Ok(mut g) = self.variables.write() {
+            *g = variables;
+        }
+    }
+
     /// Current settings.
     pub fn settings_snapshot(&self) -> AppSettings {
         self.settings.read().map(|g| g.clone()).unwrap_or_default()
@@ -425,6 +476,7 @@ impl AppState {
         AppSnapshot {
             forwards: self.configs_snapshot(),
             groups: self.groups_snapshot(),
+            variables: self.variables_snapshot(),
             settings: self.settings_snapshot(),
             logs: self.logs.snapshot(),
             runtimes: self.registry.all_runtimes(),
@@ -443,6 +495,11 @@ impl AppState {
     /// Emit `groups://changed` with the current full group list.
     pub fn emit_groups_changed(&self) {
         self.emit(events::GROUPS_CHANGED, self.groups_snapshot());
+    }
+
+    /// Emit `variables://changed` with the current list (no secret values).
+    pub fn emit_variables_changed(&self) {
+        self.emit(events::VARIABLES_CHANGED, self.variables_snapshot());
     }
 
     /// Emit `settings://changed` with the current settings.
@@ -501,6 +558,21 @@ impl AppState {
         }
     }
 
+    /// Like [`get_password_async`](Self::get_password_async) but SURFACES a
+    /// store failure instead of folding it into `None`, so the caller can tell
+    /// "nothing stored" (the user must act) from "the keychain did not answer"
+    /// (transient — worth a retry). Runs on `spawn_blocking` (F38).
+    pub async fn get_password_checked_async(
+        &self,
+        account: &str,
+    ) -> Result<Option<String>, AppError> {
+        let credentials = self.credentials.clone();
+        let account = account.to_string();
+        tokio::task::spawn_blocking(move || credentials.get_password(&account))
+            .await
+            .map_err(|e| AppError::Credential(format!("password read task failed: {e}")))?
+    }
+
     /// Delete a forward's password from every store (best-effort).
     pub fn delete_password(&self, id: &str) {
         if let Err(e) = self.credentials.delete_password(id) {
@@ -552,6 +624,12 @@ impl AppState {
             .map_err(|_| AppError::Storage("persistence writer dropped before ack".into()))?
     }
 
+    /// Persist the current variables list and await the outcome (F37).
+    pub async fn persist_variables(&self) -> Result<(), AppError> {
+        self.persist_section(Section::Variables(self.variables_snapshot()))
+            .await
+    }
+
     /// Persist the current forwards list and await the outcome (F37).
     pub async fn persist_forwards(&self) -> Result<(), AppError> {
         self.persist_section(Section::Forwards(self.configs_snapshot()))
@@ -593,6 +671,7 @@ mod tests {
             group_id: None,
             tags: vec![],
             host_key: None,
+            password_variable: None,
         }
     }
 

@@ -11,6 +11,7 @@ import {
 import ForwardForm from "./ForwardForm.svelte";
 import type { ForwardConfig } from "../types";
 import { forwards } from "../stores/forwards";
+import { variables } from "../stores/variables";
 
 vi.mock("../ipc", () => ({
   createForward: vi.fn((input) =>
@@ -31,7 +32,13 @@ vi.mock("@tauri-apps/api/path", () => ({
   homeDir: vi.fn(() => Promise.resolve("/home/u")),
 }));
 
-import { createForward, forgetHostKey, setForwardPassword } from "../ipc";
+import {
+  clearForwardPassword,
+  createForward,
+  forgetHostKey,
+  setForwardPassword,
+  updateForward,
+} from "../ipc";
 
 function saveButton(): HTMLButtonElement {
   return screen.getByRole("button", { name: /save tunnel/i });
@@ -148,6 +155,7 @@ describe("ForwardForm — host key pin", () => {
       fingerprint: "SHA256:pinnedPinnedPinnedPinnedPinnedPinnedPinne",
       pinnedAt: "2026-10-01T09:00:00Z",
     },
+    passwordVariable: null,
   };
 
   function hostKeyGroup(): HTMLElement {
@@ -310,5 +318,188 @@ describe("ForwardForm — host key pin", () => {
     expect(
       await screen.findByText(PINNED.hostKey!.fingerprint),
     ).toBeInTheDocument();
+  });
+});
+
+describe("ForwardForm — variables (spec 03 §24)", () => {
+  const EXISTING: ForwardConfig = {
+    id: "fwd-2",
+    name: "Reports",
+    sshHost: "bastion.example.com",
+    sshPort: 22,
+    sshUsername: "{{DB_USER}}",
+    identityFilePath: null,
+    hasStoredPassword: false,
+    localBindAddress: "127.0.0.1",
+    localPort: 5433,
+    remoteHost: "10.0.4.13",
+    remotePort: 5432,
+    keepAliveIntervalSec: 30,
+    keepAliveMaxCount: 5,
+    groupId: null,
+    tags: [],
+    hostKey: null,
+    passwordVariable: "DB_PASS",
+  };
+
+  function authGroup(): HTMLElement {
+    return screen.getByRole("radiogroup", { name: /authentication method/i });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    forwards.set([]);
+    variables.set([
+      {
+        name: "DB_USER",
+        secret: false,
+        value: "kalfian",
+        hasStoredValue: false,
+      },
+      { name: "DB_PASS", secret: true, value: "", hasStoredValue: true },
+      { name: "NEW_PASS", secret: true, value: "", hasStoredValue: false },
+    ]);
+  });
+
+  it("saves a password variable: passwordVariable set, no identity, no password", async () => {
+    render(ForwardForm, { props: { mode: "add", onClose: vi.fn() } });
+    await fillValid();
+    await fireEvent.click(
+      within(authGroup()).getByRole("radio", { name: "Variable" }),
+    );
+    // Variable mode needs a choice before it is valid.
+    expect(saveButton()).toBeDisabled();
+    const select = screen.getByLabelText(/password variable/i);
+    expect(
+      within(select).getByRole("option", { name: /NEW_PASS — no value yet/ }),
+    ).toBeInTheDocument();
+    await fireEvent.change(select, { target: { value: "DB_PASS" } });
+    await fireEvent.click(saveButton());
+
+    const arg = vi.mocked(createForward).mock.calls[0][0];
+    expect(arg.passwordVariable).toBe("DB_PASS");
+    expect(arg.identityFilePath).toBeNull();
+    expect(setForwardPassword).not.toHaveBeenCalled();
+  });
+
+  it("sends passwordVariable: null outside variable mode", async () => {
+    render(ForwardForm, { props: { mode: "add", onClose: vi.fn() } });
+    await fillValid();
+    await fireEvent.click(saveButton());
+    expect(
+      vi.mocked(createForward).mock.calls[0][0].passwordVariable,
+    ).toBeNull();
+  });
+
+  it("warns when the chosen secret has no value yet", async () => {
+    render(ForwardForm, { props: { mode: "add", onClose: vi.fn() } });
+    await fireEvent.click(
+      within(authGroup()).getByRole("radio", { name: "Variable" }),
+    );
+    await fireEvent.change(screen.getByLabelText(/password variable/i), {
+      target: { value: "NEW_PASS" },
+    });
+    expect(screen.getByText(/NEW_PASS has no value yet/)).toBeInTheDocument();
+  });
+
+  it("points to Settings when there are no secret variables", async () => {
+    variables.set([]);
+    render(ForwardForm, { props: { mode: "add", onClose: vi.fn() } });
+    await fireEvent.click(
+      within(authGroup()).getByRole("radio", { name: "Variable" }),
+    );
+    expect(screen.getByText(/no secret variables yet/i)).toHaveTextContent(
+      /Settings → Variables/,
+    );
+    expect(
+      screen.queryByRole("combobox", { name: /password variable/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens an existing forward in variable mode and tracks the choice as dirty", async () => {
+    render(ForwardForm, {
+      props: { mode: "edit", forward: EXISTING, onClose: vi.fn() },
+    });
+    expect(
+      within(authGroup()).getByRole("radio", { name: "Variable" }),
+    ).toHaveAttribute("aria-checked", "true");
+    const select = screen.getByLabelText(/password variable/i);
+    expect(select).toHaveValue("DB_PASS");
+    const save = screen.getByRole("button", { name: /save changes/i });
+    expect(save).toBeDisabled();
+    await fireEvent.change(select, { target: { value: "NEW_PASS" } });
+    expect(save).toBeEnabled();
+    await fireEvent.click(save);
+    expect(vi.mocked(updateForward).mock.calls[0][1]).toMatchObject({
+      passwordVariable: "NEW_PASS",
+      identityFilePath: null,
+    });
+  });
+
+  it("clears the tunnel's own stored password when switching to a variable", async () => {
+    const withPassword = {
+      ...EXISTING,
+      passwordVariable: null,
+      hasStoredPassword: true,
+    };
+    render(ForwardForm, {
+      props: { mode: "edit", forward: withPassword, onClose: vi.fn() },
+    });
+    await fireEvent.click(
+      within(authGroup()).getByRole("radio", { name: "Variable" }),
+    );
+    expect(
+      screen.getByText(/saving deletes the password/i),
+    ).toBeInTheDocument();
+    await fireEvent.change(screen.getByLabelText(/password variable/i), {
+      target: { value: "DB_PASS" },
+    });
+    await fireEvent.click(
+      screen.getByRole("button", { name: /save changes/i }),
+    );
+    await waitFor(() =>
+      expect(clearForwardPassword).toHaveBeenCalledWith("fwd-2"),
+    );
+  });
+
+  it("previews the resolved username", async () => {
+    render(ForwardForm, { props: { mode: "add", onClose: vi.fn() } });
+    await type(/^username$/i, "{{ DB_USER }}-admin");
+    expect(screen.getByText("kalfian-admin")).toBeInTheDocument();
+    expect(screen.getByLabelText(/^username$/i)).toHaveAccessibleDescription(
+      /logs in as kalfian-admin/i,
+    );
+  });
+
+  it("flags unknown and secret variables in the username", async () => {
+    render(ForwardForm, { props: { mode: "add", onClose: vi.fn() } });
+    const field = screen.getByLabelText(/^username$/i);
+    await fireEvent.keyDown(field, { key: "{" });
+    await type(/^username$/i, "{{NOPE}}");
+    expect(
+      await screen.findByText(/\{\{NOPE\}\} isn't a variable/),
+    ).toBeInTheDocument();
+    await type(/^username$/i, "{{DB_PASS}}");
+    expect(
+      await screen.findByText(/a username can only use plain variables/),
+    ).toBeInTheDocument();
+    await type(/^username$/i, "{{DB_USER");
+    expect(await screen.findByText(/unclosed/i)).toBeInTheDocument();
+  });
+
+  it("inserts a plain variable at the caret from its chip", async () => {
+    render(ForwardForm, { props: { mode: "add", onClose: vi.fn() } });
+    const field = screen.getByLabelText(/^username$/i) as HTMLInputElement;
+    await type(/^username$/i, "-admin");
+    field.setSelectionRange(0, 0);
+    // Secret variables are never offered for a username.
+    expect(
+      screen.queryByRole("button", { name: /insert \{\{DB_PASS\}\}/i }),
+    ).not.toBeInTheDocument();
+    await fireEvent.click(
+      screen.getByRole("button", { name: /insert \{\{DB_USER\}\}/i }),
+    );
+    expect(field).toHaveValue("{{DB_USER}}-admin");
+    await waitFor(() => expect(field).toHaveFocus());
   });
 });

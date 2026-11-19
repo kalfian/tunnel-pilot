@@ -1,5 +1,9 @@
 //! Client side of the forward CRUD commands: `add`, `edit`, `remove`,
-//! `set-password`, `clear-password` (spec 03 §20).
+//! `set-password`, `clear-password` (spec 03 §20), and of `var` (§24).
+//!
+//! A secret variable's value follows the same rule as a password: this process
+//! reads it and writes it into the credential store itself, then tells the
+//! owner only that it is stored (`variable-secret-stored`).
 //!
 //! The owner (desktop app or headless daemon) does every config mutation
 //! through the control socket. The one thing it never receives is a password:
@@ -13,10 +17,10 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cli::args::{Command, Invocation, PasswordSource};
+use crate::cli::args::{Command, Invocation, PasswordSource, VarAction};
 use crate::cli::client::{report, report_client_error, send, EXIT_INTERNAL, EXIT_USAGE};
 use crate::cli::protocol::{
-    CliCommand, CliData, CliRequest, CliResponse, ForwardFields, SaveChange,
+    CliCommand, CliData, CliRequest, CliResponse, ForwardFields, SaveChange, VariableView,
 };
 use crate::credentials::CredentialStore;
 use crate::error::AppError;
@@ -39,6 +43,7 @@ pub fn run(invocation: &Invocation, path: &Path) -> i32 {
         Command::ClearPassword { target } => simple(path, CliCommand::PasswordClear, target),
         Command::TrustHostKey { target } => simple(path, CliCommand::HostKeyTrust, target),
         Command::ForgetHostKey { target } => simple(path, CliCommand::HostKeyForget, target),
+        Command::Var(action) => var(path, action),
         _ => Err(EXIT_INTERNAL),
     };
     match outcome {
@@ -48,11 +53,12 @@ pub fn run(invocation: &Invocation, path: &Path) -> i32 {
 }
 
 /// `report` with one CRUD-specific twist: a validation failure of `add`/`edit`
-/// is a usage error (2), not "target not found" (4).
+/// or `var` (bad value, variable in use, …) is a usage error (2), not "target
+/// not found" (4).
 fn report_crud(invocation: &Invocation, response: CliResponse) -> i32 {
     let is_field_command = matches!(
         invocation.command,
-        Command::Add { .. } | Command::Edit { .. }
+        Command::Add { .. } | Command::Edit { .. } | Command::Var(_)
     );
     let validation_failure = is_field_command
         && matches!(
@@ -106,9 +112,11 @@ fn edit(
     let secret = read_password(password, target)?;
     let mut fields = with_absolute_identity(fields.clone())?;
     if secret.is_some() {
-        // Switching to password auth: the engine prefers an identity file when
-        // both exist (ssh/client.rs), so the key must go.
+        // Switching to the forward's own password: the engine prefers an
+        // identity file, and a password variable would win over the stored
+        // password, so both must go.
         fields.identity_file_path = Some(String::new());
+        fields.password_variable = Some(String::new());
     }
     let switching_to_key = fields
         .identity_file_path
@@ -154,14 +162,16 @@ fn set_password(path: &Path, target: &str, source: PasswordSource) -> Result<Cli
         .identity_file_path
         .as_deref()
         .is_some_and(|p| !p.is_empty());
+    let uses_variable = forward.password_variable.is_some();
     let secret = read_password(source, &name)?;
-    if uses_key {
-        // The engine would keep using the key; switch the forward to password
-        // auth so the new secret is actually used.
+    if uses_key || uses_variable {
+        // The engine would keep using the key / the password variable; switch
+        // the forward to its own password so the new secret is actually used.
         let request = CliRequest {
             target: Some(id.clone()),
             forward: Some(ForwardFields {
                 identity_file_path: Some(String::new()),
+                password_variable: Some(String::new()),
                 ..ForwardFields::default()
             }),
             ..CliRequest::new(CliCommand::Edit)
@@ -208,14 +218,7 @@ fn finish_with_password(
 /// Write the secret into the credential store from this process, then flip the
 /// owner's `hasStoredPassword` flag. Returns the `password-set` response.
 fn store_password(path: &Path, id: &str, secret: String) -> Result<CliResponse, i32> {
-    let Some(config_dir) = crate::cli::default_config_dir() else {
-        eprintln!(
-            "error: could not resolve the config dir; set {}",
-            crate::cli::CONFIG_DIR_ENV
-        );
-        return Err(EXIT_INTERNAL);
-    };
-    let store = CredentialStore::from_app_dir(&config_dir);
+    let store = credential_store()?;
     if let Err(e) = store.set_password(id, &secret) {
         eprintln!("error: could not store the password: {e}");
         return Err(EXIT_INTERNAL);
@@ -227,6 +230,135 @@ fn store_password(path: &Path, id: &str, secret: String) -> Result<CliResponse, 
         );
     }
     round_trip(path, &targeted(CliCommand::PasswordSet, id))
+}
+
+// --- var (spec 03 §24) ---
+
+fn var(path: &Path, action: &VarAction) -> Result<CliResponse, i32> {
+    match action {
+        VarAction::List => round_trip(path, &CliRequest::new(CliCommand::VariableList)),
+        VarAction::SetPlain { name, value } => round_trip(
+            path,
+            &CliRequest {
+                target: Some(name.clone()),
+                value: Some(value.clone()),
+                ..CliRequest::new(CliCommand::VariableSet)
+            },
+        ),
+        VarAction::Remove { name } => round_trip(
+            path,
+            &CliRequest {
+                target: Some(name.clone()),
+                ..CliRequest::new(CliCommand::VariableRemove)
+            },
+        ),
+        VarAction::SetSecret { name, source } => set_secret_variable(path, name, *source),
+    }
+}
+
+/// Check with the owner first (a refusal must come before the user types a
+/// secret), then store the value from this process and tell the owner.
+fn set_secret_variable(
+    path: &Path,
+    name: &str,
+    source: PasswordSource,
+) -> Result<CliResponse, i32> {
+    let listed = round_trip(path, &CliRequest::new(CliCommand::VariableList))?;
+    let Some(CliData::Variables { variables }) = &listed.data else {
+        return Ok(listed);
+    };
+    if let Some(problem) = secret_variable_conflict(variables, name) {
+        eprintln!("error: {problem}");
+        return Err(EXIT_USAGE);
+    }
+    let had_secret = variables
+        .iter()
+        .any(|v| v.variable.name == name && v.variable.secret && v.variable.has_stored_value);
+
+    let Some(value) = read_secret(source, &format!("Value for secret variable {name}: "))? else {
+        return Err(EXIT_USAGE);
+    };
+    if let Err(e) = crate::variables::validate_secret_value(name, &value) {
+        eprintln!("error: {e}");
+        return Err(EXIT_USAGE);
+    }
+    let account = crate::variables::secret_account(name);
+    let store = credential_store()?;
+    // Keep the value it replaces, to put back if the owner does not confirm.
+    let previous = if had_secret {
+        match store.get_password(&account) {
+            Ok(previous) => previous,
+            Err(e) => {
+                eprintln!("error: could not read the current value: {e}");
+                return Err(EXIT_INTERNAL);
+            }
+        }
+    } else {
+        None
+    };
+    if let Err(e) = store.set_password(&account, &value) {
+        eprintln!("error: could not store the value: {e}");
+        return Err(EXIT_INTERNAL);
+    }
+    if !store.keychain_available() {
+        eprintln!(
+            "note: no OS keychain here; the value is in {} (owner-only, 0600)",
+            store.fallback_path().display()
+        );
+    }
+    let marked = round_trip(
+        path,
+        &CliRequest {
+            target: Some(name.to_string()),
+            ..CliRequest::new(CliCommand::VariableSecretStored)
+        },
+    );
+    let failed = !matches!(&marked, Ok(r) if r.ok);
+    if failed {
+        // The owner did not record the change: restore what it knows about —
+        // the previous value, or nothing (no orphaned secret).
+        let restored = match &previous {
+            Some(old) => store.set_password(&account, old),
+            None => store.delete_password(&account),
+        };
+        if let Err(e) = restored {
+            eprintln!("warning: could not restore the previous value of {name}: {e}");
+        }
+    }
+    marked
+}
+
+/// Why `name` cannot become a secret variable, judged from the owner's list
+/// (the owner re-checks; this only spares the user typing a secret in vain).
+fn secret_variable_conflict(variables: &[VariableView], name: &str) -> Option<String> {
+    let existing = variables
+        .iter()
+        .find(|v| v.variable.name.eq_ignore_ascii_case(name))?;
+    if existing.variable.name != name {
+        return Some(format!(
+            "a variable named {} already exists (names ignore case)",
+            existing.variable.name
+        ));
+    }
+    if !existing.variable.secret && !existing.used_by.is_empty() {
+        return Some(format!(
+            "{name} is a plain variable used in the SSH username of {}; a secret variable \
+             can only be a password",
+            existing.used_by.join(", ")
+        ));
+    }
+    None
+}
+
+fn credential_store() -> Result<CredentialStore, i32> {
+    let Some(config_dir) = crate::cli::default_config_dir() else {
+        eprintln!(
+            "error: could not resolve the config dir; set {}",
+            crate::cli::CONFIG_DIR_ENV
+        );
+        return Err(EXIT_INTERNAL);
+    };
+    Ok(CredentialStore::from_app_dir(&config_dir))
 }
 
 /// `(id, hasStoredPassword)` from a `Saved` or `Status` payload.
@@ -252,20 +384,24 @@ fn relabel(response: CliResponse, change: SaveChange) -> CliResponse {
 
 /// Read a password per `source`. `Ok(None)` for [`PasswordSource::None`].
 fn read_password(source: PasswordSource, label: &str) -> Result<Option<String>, i32> {
+    read_secret(source, &format!("SSH password for '{label}': "))
+}
+
+/// Read a secret per `source` with `prompt` (echo off). `Ok(None)` for
+/// [`PasswordSource::None`].
+fn read_secret(source: PasswordSource, prompt: &str) -> Result<Option<String>, i32> {
     let secret = match source {
         PasswordSource::None => return Ok(None),
-        PasswordSource::Prompt => {
-            match rpassword::prompt_password(format!("SSH password for '{label}': ")) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!(
-                        "error: cannot prompt for a password ({e}); \
+        PasswordSource::Prompt => match rpassword::prompt_password(prompt) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "error: cannot prompt for a password ({e}); \
                          pipe it in with --password-stdin instead"
-                    );
-                    return Err(EXIT_USAGE);
-                }
+                );
+                return Err(EXIT_USAGE);
             }
-        }
+        },
         PasswordSource::Stdin => {
             let mut line = String::new();
             if let Err(e) = std::io::stdin().lock().read_line(&mut line) {
@@ -354,6 +490,7 @@ mod tests {
                 stats: TunnelStats::default(),
                 last_error: None,
                 host_key_mismatch: None,
+                needs_reconnect: false,
             },
         );
         let res = CliResponse::ok(CliData::Saved {

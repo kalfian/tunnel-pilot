@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::state::models::{
     ForwardConfig, ForwardRuntime, ForwardStatus, HostKeyMismatch, HostKeyPin, TunnelStats,
+    Variable,
 };
 
 /// Wire protocol version. Bumped only on a breaking schema change; the server
@@ -60,6 +61,10 @@ pub struct CliRequest {
     /// `add`/`edit` only: the fields to set. Never carries a password.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forward: Option<ForwardFields>,
+    /// `variable-set` only: a PLAIN variable's value. A secret variable's
+    /// value never crosses the socket — see `variable-secret-stored`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
 }
 
 impl CliRequest {
@@ -73,6 +78,7 @@ impl CliRequest {
             wait: false,
             force: false,
             forward: None,
+            value: None,
         }
     }
 
@@ -113,6 +119,15 @@ pub enum CliCommand {
     HostKeyTrust,
     /// Forget the `target`'s pinned host key.
     HostKeyForget,
+    /// Every variable (spec 03 §24), with the forwards that use each.
+    VariableList,
+    /// Create/update the PLAIN variable `target` with `value`.
+    VariableSet,
+    /// Mark `target` as a secret variable whose value the CLI process already
+    /// wrote into the credential store (the value never crosses the socket).
+    VariableSecretStored,
+    /// Delete the variable `target` (refused while a forward uses it).
+    VariableRemove,
 }
 
 /// The editable fields of a forward for `add` / `edit`. Every field is
@@ -147,6 +162,9 @@ pub struct ForwardFields {
     /// `Some(vec![])` clears the tags; `None` leaves them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// Secret variable to use as the password; `Some("")` clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_variable: Option<String>,
 }
 
 impl ForwardFields {
@@ -241,6 +259,34 @@ pub enum CliData {
     List { forwards: Vec<ForwardView> },
     #[serde(rename_all = "camelCase")]
     Version { app_version: String, protocol: u32 },
+    #[serde(rename_all = "camelCase")]
+    Variables { variables: Vec<VariableView> },
+    /// `variable-*` mutations. `variableChange` keeps untagged decoding
+    /// unambiguous (no other variant has it).
+    #[serde(rename_all = "camelCase")]
+    VariableSaved {
+        variable: VariableView,
+        variable_change: VariableChange,
+    },
+}
+
+/// What a `VariableSaved` response did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VariableChange {
+    Saved,
+    Removed,
+}
+
+/// A variable as the CLI sees it: no secret value (only `hasStoredValue`),
+/// plus the names of the forwards that use it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariableView {
+    #[serde(flatten)]
+    pub variable: Variable,
+    #[serde(default)]
+    pub used_by: Vec<String>,
 }
 
 /// A forward as the CLI sees it: config + live runtime, flattened. Contains no
@@ -265,6 +311,12 @@ pub struct ForwardView {
     pub group_id: Option<String>,
     pub tags: Vec<String>,
     pub has_stored_password: bool,
+    /// Secret variable used as the password (a name, never a value).
+    #[serde(default)]
+    pub password_variable: Option<String>,
+    /// A variable this live tunnel uses changed; reconnect to apply it.
+    #[serde(default)]
+    pub needs_reconnect: bool,
     /// The pinned SSH host key (public; spec 03 §23).
     #[serde(default)]
     pub host_key: Option<HostKeyPin>,
@@ -292,6 +344,8 @@ impl ForwardView {
             group_id: cfg.group_id.clone(),
             tags: cfg.tags.clone(),
             has_stored_password: cfg.has_stored_password,
+            password_variable: cfg.password_variable.clone(),
+            needs_reconnect: runtime.needs_reconnect,
             host_key: cfg.host_key.clone(),
             host_key_mismatch: runtime.host_key_mismatch.clone(),
         }
@@ -370,6 +424,7 @@ pub(crate) fn sample_config(id: &str, name: &str) -> ForwardConfig {
         group_id: None,
         tags: vec!["prod".into()],
         host_key: None,
+        password_variable: None,
     }
 }
 
@@ -404,6 +459,7 @@ mod tests {
             stats: TunnelStats::default(),
             last_error: None,
             host_key_mismatch: None,
+            needs_reconnect: false,
         }
     }
 
@@ -417,6 +473,7 @@ mod tests {
             wait: true,
             force: false,
             forward: None,
+            value: None,
         };
         let line = serde_json::to_string(&req).expect("serialize");
         assert!(
@@ -497,8 +554,12 @@ mod tests {
         let object = value.as_object().expect("view is a JSON object");
         for key in object.keys() {
             let lower = key.to_lowercase();
+            // `passwordVariable` carries a variable NAME (spec 03 §24) — the
+            // secret itself stays in the credential store.
             assert!(
-                !lower.contains("password") || key == "hasStoredPassword",
+                !lower.contains("password")
+                    || key == "hasStoredPassword"
+                    || key == "passwordVariable",
                 "unexpected password-ish key on the wire: {key}"
             );
             assert!(!lower.contains("secret"), "unexpected secret key: {key}");
@@ -597,5 +658,40 @@ mod tests {
             let wire = serde_json::to_string(&status).expect("serialize status");
             assert_eq!(wire, format!("\"{}\"", status_label(status)));
         }
+    }
+
+    #[test]
+    fn variable_payloads_round_trip_without_a_secret_value() {
+        let data = CliData::Variables {
+            variables: vec![VariableView {
+                variable: Variable {
+                    name: "DB_PASS".into(),
+                    secret: true,
+                    value: String::new(),
+                    has_stored_value: true,
+                },
+                used_by: vec!["prod-db".into()],
+            }],
+        };
+        let line = serde_json::to_string(&data).expect("serialize");
+        assert!(line.contains("\"hasStoredValue\":true") && line.contains("\"usedBy\""));
+        let back: CliData = serde_json::from_str(&line).expect("untagged decode");
+        assert_eq!(back, data);
+
+        let saved = CliData::VariableSaved {
+            variable: VariableView {
+                variable: Variable {
+                    name: "DB_USER".into(),
+                    secret: false,
+                    value: "kalfian".into(),
+                    has_stored_value: false,
+                },
+                used_by: vec![],
+            },
+            variable_change: VariableChange::Saved,
+        };
+        let line = serde_json::to_string(&saved).expect("serialize");
+        let back: CliData = serde_json::from_str(&line).expect("untagged decode");
+        assert_eq!(back, saved);
     }
 }

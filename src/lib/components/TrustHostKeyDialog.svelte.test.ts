@@ -39,6 +39,7 @@ const FORWARD: ForwardConfig = {
     fingerprint: "SHA256:old",
     pinnedAt: "2026-10-01T09:00:00Z",
   },
+  passwordVariable: null,
 };
 
 const MISMATCH: HostKeyMismatch = {

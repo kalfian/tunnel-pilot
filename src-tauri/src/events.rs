@@ -25,6 +25,9 @@ pub const FORWARDS_CHANGED: &str = "forwards://changed";
 /// `Vec<TunnelGroup>` — groups mutated.
 pub const GROUPS_CHANGED: &str = "groups://changed";
 
+/// `Vec<Variable>` — variables mutated (never carries a secret value).
+pub const VARIABLES_CHANGED: &str = "variables://changed";
+
 /// `AppSettings` — settings changed (e.g. theme applied elsewhere).
 pub const SETTINGS_CHANGED: &str = "settings://changed";
 

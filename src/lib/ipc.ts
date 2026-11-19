@@ -26,6 +26,8 @@ import type {
   ShimTarget,
   TunnelGroup,
   UpdateStatus,
+  Variable,
+  VariableInput,
 } from "./types";
 
 // --- Forwards (spec 02 §6.1) ---
@@ -90,6 +92,19 @@ export const forgetHostKey = (id: string): Promise<ForwardConfig> =>
   invoke("forget_host_key", { id });
 
 // --- Groups & tags (spec 02 §6.2) ---
+
+// --- Variables (spec 02 §6.9) ---
+
+export const listVariables = (): Promise<Variable[]> =>
+  invoke("list_variables");
+
+/** Create or change a variable. A secret value travels inbound only. */
+export const saveVariable = (input: VariableInput): Promise<Variable> =>
+  invoke("save_variable", { input });
+
+/** Refused while any forward uses the variable. */
+export const deleteVariable = (name: string): Promise<void> =>
+  invoke("delete_variable", { name });
 
 export const listGroups = (): Promise<TunnelGroup[]> => invoke("list_groups");
 

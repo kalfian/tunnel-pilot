@@ -24,6 +24,7 @@ vi.mock("./events", () => {
     onForwardsChanged: register("onForwardsChanged"),
     onGroupsChanged: register("onGroupsChanged"),
     onSettingsChanged: register("onSettingsChanged"),
+    onVariablesChanged: register("onVariablesChanged"),
     onUpdateStatus: register("onUpdateStatus"),
     onUpdateProgress: register("onUpdateProgress"),
     onWindowFocus: register("onWindowFocus"),
@@ -33,6 +34,7 @@ vi.mock("./events", () => {
 });
 
 import { appHydrate } from "./ipc";
+import { variables } from "./stores/variables";
 import { hydrateAll, startSync, subscribeEvents } from "./hydrate";
 import {
   forwards,
@@ -79,9 +81,13 @@ const SNAPSHOT: AppSnapshot = {
       groupId: null,
       tags: [],
       hostKey: null,
+      passwordVariable: null,
     },
   ],
   groups: [{ id: "g1", name: "prod", color: null, order: 0, collapsed: false }],
+  variables: [
+    { name: "DB_USER", secret: false, value: "kalfian", hasStoredValue: false },
+  ],
   settings: SETTINGS,
   logs: [
     { level: "info", tunnelName: null, message: "boot", timestamp: "00:00:00" },
@@ -100,6 +106,7 @@ const SNAPSHOT: AppSnapshot = {
         },
         lastError: null,
         hostKeyMismatch: null,
+        needsReconnect: false,
       },
     ],
   ],
@@ -133,6 +140,7 @@ describe("hydrateAll", () => {
     expect(get(statusById).a).toBe("connected");
     expect(get(statsById).a.lastPingLatencyMs).toBe(42);
     expect(get(groups)).toHaveLength(1);
+    expect(get(variables).map((v) => v.name)).toEqual(["DB_USER"]);
     expect(get(settings)).toEqual(SETTINGS);
     expect(get(logs).map((e) => e.message)).toEqual(["boot"]);
     expect(get(updateStatus)).toEqual(SNAPSHOT.update);

@@ -5,6 +5,8 @@
   import {
     validateForwardForm,
     isFormValid,
+    resolveUsername,
+    variableToken,
     type ForwardFormField,
     type ForwardFormValues,
   } from "../validation";
@@ -18,6 +20,11 @@
   import { keychainUnavailable } from "../stores/settings";
   import { groups } from "../stores/groups";
   import { forwards } from "../stores/forwards";
+  import {
+    variables,
+    plainVariables,
+    secretVariables,
+  } from "../stores/variables";
   import { pushToast } from "../ui/toast";
   import { formatPinnedAt } from "../ui/format";
   import Dialog from "./ui/Dialog.svelte";
@@ -28,6 +35,7 @@
   import TagPill from "./ui/TagPill.svelte";
   import HostKeyFingerprint from "./HostKeyFingerprint.svelte";
   import { tick } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   interface Props {
     mode: "add" | "edit";
@@ -39,14 +47,16 @@
   const { mode, forward, onClose, onSaved }: Props = $props();
 
   type Tab = "general" | "advanced";
-  type Auth = "password" | "identity";
+  type Auth = "password" | "identity" | "variable";
 
   let tab = $state<Tab>("general");
   let saving = $state(false);
   let submitted = $state(false);
   let shake = $state(false);
   let confirmDiscard = $state(false);
-  const touched = $state<Set<ForwardFormField>>(new Set());
+  // Reactive set: `showErr` only reads `errors` once a field is touched, so
+  // the touch itself has to be tracked for a live inline error to appear.
+  const touched = new SvelteSet<ForwardFormField>();
 
   // --- Field state (strings for inputs; numbers parsed for validation) ---
   // The dialog is remounted per open, so `forward` never changes across its
@@ -57,8 +67,15 @@
   let sshHost = $state(c?.sshHost ?? "");
   let sshPort = $state(String(c?.sshPort ?? 22));
   let sshUsername = $state(c?.sshUsername ?? "");
-  let authMode = $state<Auth>(c?.identityFilePath ? "identity" : "password");
+  // A password variable wins: the backend refuses it alongside an identity.
+  const initialAuth: Auth = c?.passwordVariable
+    ? "variable"
+    : c?.identityFilePath
+      ? "identity"
+      : "password";
+  let authMode = $state<Auth>(initialAuth);
   let identityFilePath = $state(c?.identityFilePath ?? "");
+  let passwordVariable = $state(c?.passwordVariable ?? "");
   let password = $state("");
   let localBindAddress = $state(c?.localBindAddress ?? "127.0.0.1");
   let localPort = $state(c ? String(c.localPort) : "");
@@ -195,6 +212,8 @@
     identityFilePath: authMode === "identity" ? identityFilePath || null : null,
     password: authMode === "password" ? password : "",
     hasStoredPassword: authMode === "password" ? hadStoredPassword : false,
+    passwordVariable: authMode === "variable" ? passwordVariable : null,
+    variables: $variables,
   });
 
   const errors = $derived(validateForwardForm(values));
@@ -205,8 +224,9 @@
       sshHost !== (c?.sshHost ?? "") ||
       sshPort !== String(c?.sshPort ?? 22) ||
       sshUsername !== (c?.sshUsername ?? "") ||
-      authMode !== (c?.identityFilePath ? "identity" : "password") ||
+      authMode !== initialAuth ||
       identityFilePath !== (c?.identityFilePath ?? "") ||
+      passwordVariable !== (c?.passwordVariable ?? "") ||
       password !== "" ||
       localBindAddress !== (c?.localBindAddress ?? "127.0.0.1") ||
       localPort !== (c ? String(c.localPort) : "") ||
@@ -261,6 +281,8 @@
       keepAliveMaxCount: num(keepAliveMaxCount),
       groupId,
       tags,
+      passwordVariable:
+        authMode === "variable" ? passwordVariable.trim() || null : null,
     };
   }
 
@@ -268,10 +290,53 @@
     if (authMode === "password") {
       if (password.trim().length > 0) await setForwardPassword(id, password);
     } else if (hadStoredPassword) {
-      // Switched away from a stored password → drop it.
+      // Switched away from a stored password → drop it. With a password
+      // variable the backend already deleted it; the extra clear is a no-op.
       await clearForwardPassword(id);
     }
   }
+
+  // --- Variables (spec 03 §24) ---
+
+  // "Logs in as …" — the username with today's plain values substituted.
+  const resolvedUsername = $derived(resolveUsername(sshUsername, $variables));
+  const usernameDescribedBy = $derived(
+    resolvedUsername !== null && !errors.sshUsername
+      ? "f-user-hint f-user-preview"
+      : "f-user-hint",
+  );
+
+  /** Put `{{NAME}}` at the caret (or over the selection) in the username. */
+  async function insertVariable(varName: string): Promise<void> {
+    const el = document.getElementById("f-user") as HTMLInputElement | null;
+    const token = variableToken(varName);
+    const start = el?.selectionStart ?? sshUsername.length;
+    const end = el?.selectionEnd ?? start;
+    sshUsername = sshUsername.slice(0, start) + token + sshUsername.slice(end);
+    touch("sshUsername");
+    await tick();
+    if (el) {
+      el.focus();
+      const caret = start + token.length;
+      el.setSelectionRange(caret, caret);
+    }
+  }
+
+  const selectedSecret = $derived(
+    $secretVariables.find((v) => v.name === passwordVariable),
+  );
+  const secretOptions = $derived([
+    { value: "", label: "Choose a secret variable…" },
+    ...$secretVariables.map((v) => ({
+      value: v.name,
+      label: v.hasStoredValue ? v.name : `${v.name} — no value yet`,
+    })),
+    // Keep a saved choice visible even if it is no longer a secret variable,
+    // so the select doesn't silently show something else (validation flags it).
+    ...(passwordVariable !== "" && !selectedSecret
+      ? [{ value: passwordVariable, label: `${passwordVariable} — not found` }]
+      : []),
+  ]);
 
   async function save(): Promise<void> {
     submitted = true;
@@ -456,10 +521,38 @@
             bind:value={sshUsername}
             placeholder="deploy"
             mono
+            autocomplete="off"
+            describedby={usernameDescribedBy}
             invalid={!!showErr("sshUsername")}
             errorText={showErr("sshUsername")}
             onkeydown={() => touch("sshUsername")}
           />
+          {#if resolvedUsername !== null && !errors.sshUsername}
+            <p class="hint resolved" id="f-user-preview">
+              Logs in as <span class="mono selectable">{resolvedUsername}</span>
+            </p>
+          {/if}
+          <div class="var-insert">
+            <p class="hint" id="f-user-hint">
+              {#if $plainVariables.length > 0}
+                <span class="mono tok">{variableToken("NAME")}</span> inserts a variable:
+              {:else}
+                <span class="mono tok">{variableToken("NAME")}</span> inserts a plain
+                variable from Settings → Variables.
+              {/if}
+            </p>
+            {#each $plainVariables as v (v.name)}
+              <button
+                type="button"
+                class="var-chip mono"
+                aria-label="Insert {variableToken(v.name)} into the username"
+                title={v.value}
+                onclick={() => void insertVariable(v.name)}
+              >
+                {variableToken(v.name)}
+              </button>
+            {/each}
+          </div>
         </div>
       </div>
 
@@ -552,13 +645,55 @@
         options={[
           { value: "password", label: "Password" },
           { value: "identity", label: "Identity file" },
+          { value: "variable", label: "Variable" },
         ]}
         onchange={(v) => {
           authMode = v as Auth;
-          touch("auth");
+          // Variable mode starts with no choice; flag that only once the user
+          // picks from the list or tries to save, not on the switch itself.
+          if (v !== "variable") touch("auth");
         }}
       />
-      {#if authMode === "identity"}
+      {#if authMode === "variable"}
+        <div class="row">
+          {#if $secretVariables.length === 0 && passwordVariable === ""}
+            <span class="lbl">Password variable</span>
+            <p class="hint var-empty">
+              No secret variables yet. Add one in Settings → Variables, then
+              choose it here — every tunnel that uses it shares one password.
+            </p>
+          {:else}
+            <label class="lbl" for="f-pwvar">Password variable</label>
+            <div class="group-select">
+              <Select
+                id="f-pwvar"
+                value={passwordVariable}
+                options={secretOptions}
+                onchange={(v) => {
+                  passwordVariable = v;
+                  touch("auth");
+                }}
+              />
+            </div>
+            {#if selectedSecret && !selectedSecret.hasStoredValue}
+              <p class="hint warn">
+                {selectedSecret.name} has no value yet. Set it in Settings → Variables
+                before connecting.
+              </p>
+            {:else}
+              <p class="hint">
+                Takes the password from a secret variable, so changing the
+                variable updates every tunnel that uses it.
+              </p>
+            {/if}
+          {/if}
+          {#if hadStoredPassword}
+            <p class="hint">
+              Saving deletes the password stored for this tunnel itself.
+            </p>
+          {/if}
+        </div>
+      {:else if authMode === "identity"}
         <div class="row">
           <label class="lbl" for="f-identity">Identity file</label>
           {#if isWeb}
@@ -854,6 +989,57 @@
   }
   .hint.warn {
     color: var(--status-pending-fg);
+  }
+  /* Username variables: the resolved login and the insert chips. */
+  .resolved {
+    color: var(--text-2);
+    overflow-wrap: anywhere;
+  }
+  .resolved .mono {
+    font-size: var(--fs-mono-sm);
+    color: var(--text);
+  }
+  .tok {
+    font-size: var(--fs-mono-sm);
+    color: var(--text);
+  }
+  .var-insert {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  .var-chip {
+    max-width: 100%;
+    min-height: var(--btn-h-sm);
+    padding: 0 var(--sp-2);
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-xs);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: var(--fs-mono-sm);
+    line-height: var(--lh-mono-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--dur-fast) var(--ease-standard),
+      border-color var(--dur-fast) var(--ease-standard);
+  }
+  .var-chip:hover {
+    background: var(--accent-subtle);
+    border-color: var(--border-strong);
+  }
+  .var-chip:active {
+    background: var(--accent-subtle-2);
+  }
+  .var-empty {
+    padding: var(--sp-3);
+    border: var(--border-w) dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text);
   }
   .hostkey:focus {
     outline: none;

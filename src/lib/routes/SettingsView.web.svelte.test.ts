@@ -6,10 +6,12 @@
  */
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/svelte";
+import { render, screen, fireEvent, within } from "@testing-library/svelte";
 import type { AppSettings } from "../types";
 import { settings } from "../stores/settings";
 import { importMode } from "../stores/backup";
+import { variables } from "../stores/variables";
+import { keychainUnavailable } from "../stores/settings";
 
 vi.mock("../runtime", () => ({ isWeb: true }));
 
@@ -27,6 +29,15 @@ vi.mock("../ipc", () => ({
   cliShimStatus: vi.fn(),
   installCliShim: vi.fn(),
   uninstallCliShim: vi.fn(),
+  saveVariable: vi.fn(() =>
+    Promise.resolve({
+      name: "TOKEN",
+      secret: true,
+      value: "",
+      hasStoredValue: true,
+    }),
+  ),
+  deleteVariable: vi.fn(),
 }));
 
 vi.mock("../auth", async () => {
@@ -39,6 +50,7 @@ vi.mock("../auth", async () => {
 
 import SettingsView from "./SettingsView.svelte";
 import {
+  saveVariable,
   cliShimStatus,
   exportBackupText,
   importBackup,
@@ -147,5 +159,39 @@ describe("SettingsView — web mode", () => {
     );
     expect(importBackup).not.toHaveBeenCalled();
     click.mockRestore();
+  });
+
+  it("offers Variables in web mode, with server wording for secrets", async () => {
+    variables.set([]);
+    keychainUnavailable.set(true);
+    render(SettingsView);
+    expect(
+      screen.getByRole("heading", { name: "Variables" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No variables yet")).toBeInTheDocument();
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: /add variable/i }),
+    );
+    await fireEvent.click(screen.getByRole("radio", { name: "Secret" }));
+    expect(screen.getByText(/server's keychain/i)).toBeInTheDocument();
+    expect(screen.getByText(/no keychain on the server/i)).toBeInTheDocument();
+    await fireEvent.input(screen.getByLabelText(/^name$/i), {
+      target: { value: "TOKEN" },
+    });
+    await fireEvent.input(screen.getByLabelText(/secret value/i), {
+      target: { value: "hunter2" },
+    });
+    await fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add variable",
+      }),
+    );
+    expect(saveVariable).toHaveBeenCalledWith({
+      name: "TOKEN",
+      secret: true,
+      value: "hunter2",
+    });
+    keychainUnavailable.set(false);
   });
 });

@@ -35,8 +35,10 @@
   import Button from "../components/ui/Button.svelte";
   import Icon from "../components/ui/Icon.svelte";
   import Dialog from "../components/ui/Dialog.svelte";
+  import VariablesSection from "../components/VariablesSection.svelte";
+  import { APP_VERSION } from "../version";
 
-  const VERSION = "2.4.0";
+  const VERSION = APP_VERSION;
   // Web mode shows the server build it is talking to.
   const shownVersion = $derived(isWeb ? ($serverVersion ?? VERSION) : VERSION);
 
@@ -635,6 +637,9 @@
             </div>
           </div>
         </section>
+
+        <!-- VARIABLES (desktop + web; spec 03 §24) -->
+        <VariablesSection />
 
         <!-- UPDATES (desktop only) -->
         {#if !isWeb}

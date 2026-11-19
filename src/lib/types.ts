@@ -55,6 +55,12 @@ export interface ForwardConfig {
    * by the backend when the SSH host or port changes. Never sent by the UI.
    */
   hostKey: HostKeyPin | null;
+  /**
+   * Name of the secret variable this forward takes its password from (spec 03
+   * §24) instead of a password of its own; null when it has none. A name,
+   * never a value.
+   */
+  passwordVariable: string | null;
 }
 
 /** Create/update payload — no `id`, no live state, no secret, no pin. */
@@ -62,6 +68,32 @@ export type ForwardInput = Omit<
   ForwardConfig,
   "id" | "hasStoredPassword" | "hostKey"
 >;
+
+// --- Variables (spec 03 §24, 04 §14) ---
+
+/**
+ * A named value forwards reference. Plain variables can appear in a forward's
+ * SSH username as `{{NAME}}`; secret ones can be its password. A secret value
+ * is NEVER sent to the frontend — only `hasStoredValue`.
+ */
+export interface Variable {
+  name: string;
+  secret: boolean;
+  /** The plain value; always "" for a secret variable. */
+  value: string;
+  /** A secret variable has a value in the keychain / secrets file. */
+  hasStoredValue: boolean;
+}
+
+/**
+ * `save_variable` payload. Plain: `value` is required. Secret: `value` is the
+ * new secret, or null to keep the stored one. Inbound only — never echoed.
+ */
+export interface VariableInput {
+  name: string;
+  secret: boolean;
+  value: string | null;
+}
 
 // --- Groups & tags (spec 04 §2) ---
 
@@ -118,6 +150,8 @@ export interface ForwardRuntime {
   lastError: string | null;
   /** Set while parked in `error` on a refused host key. */
   hostKeyMismatch: HostKeyMismatch | null;
+  /** A variable this live tunnel uses changed; it applies on reconnect. */
+  needsReconnect: boolean;
 }
 
 // --- Logs (spec 04 §6) ---
@@ -151,6 +185,7 @@ export interface UpdateStatus {
 export interface AppSnapshot {
   forwards: ForwardConfig[];
   groups: TunnelGroup[];
+  variables: Variable[];
   settings: AppSettings;
   logs: LogEntry[];
   runtimes: [string, ForwardRuntime][];
@@ -165,6 +200,8 @@ export interface BackupFile {
   exportedAt: string | null;
   forwards: ForwardConfig[]; // no passwords; hasStoredPassword = false
   groups: TunnelGroup[]; // [] when importing a v1 backup
+  /** Plain values, and secret variables by name only. Absent in older backups. */
+  variables?: Variable[];
 }
 
 export type ImportMode = "replace" | "merge";

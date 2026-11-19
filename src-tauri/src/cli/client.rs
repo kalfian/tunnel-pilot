@@ -17,12 +17,13 @@ use std::time::Duration;
 
 use crate::cli::args::{self, Command, Invocation};
 use crate::cli::protocol::{
-    status_label, BulkResult, CliCommand, CliData, CliRequest, CliResponse, ForwardView, SaveChange,
+    status_label, BulkResult, CliCommand, CliData, CliRequest, CliResponse, ForwardView,
+    SaveChange, VariableChange, VariableView,
 };
 use crate::cli::shim::{self, CliShimStatus, ShimState};
 use crate::cli::SOCKET_ENV;
 use crate::error::AppError;
-use crate::state::models::{ForwardStatus, TunnelStats};
+use crate::state::models::{ForwardStatus, TunnelStats, Variable};
 
 /// Success.
 pub const EXIT_OK: i32 = 0;
@@ -138,6 +139,7 @@ pub fn run(args: &[String]) -> i32 {
             | Command::ClearPassword { .. }
             | Command::TrustHostKey { .. }
             | Command::ForgetHostKey { .. }
+            | Command::Var(_)
     ) {
         return crate::cli::forward_cmd::run(&invocation, &path);
     }
@@ -206,7 +208,8 @@ fn build_request(command: &Command) -> CliRequest {
         | Command::SetPassword { .. }
         | Command::ClearPassword { .. }
         | Command::TrustHostKey { .. }
-        | Command::ForgetHostKey { .. } => CliRequest::new(CliCommand::Version),
+        | Command::ForgetHostKey { .. }
+        | Command::Var(_) => CliRequest::new(CliCommand::Version),
         Command::List => CliRequest::new(CliCommand::List),
         Command::Version => CliRequest::new(CliCommand::Version),
         Command::Status { target } => CliRequest {
@@ -385,6 +388,95 @@ pub fn render(data: &CliData) -> String {
             protocol,
         } => render_version(app_version, *protocol),
         CliData::Saved { forward, change } => render_saved(forward, *change),
+        CliData::Variables { variables } => render_variables(variables),
+        CliData::VariableSaved {
+            variable,
+            variable_change,
+        } => render_variable_saved(variable, *variable_change),
+    }
+}
+
+/// The variables table. A secret variable shows only whether a value is
+/// stored — never the value (the owner never sends it).
+pub fn render_variables(variables: &[VariableView]) -> String {
+    if variables.is_empty() {
+        return format!(
+            "No variables. Create one with: {} var set <NAME> <value>\n",
+            crate::cli::PROGRAM
+        );
+    }
+    let rows: Vec<[String; 4]> = variables
+        .iter()
+        .map(|v| {
+            [
+                v.variable.name.clone(),
+                if v.variable.secret { "secret" } else { "plain" }.to_string(),
+                variable_value_label(&v.variable),
+                if v.used_by.is_empty() {
+                    "-".to_string()
+                } else {
+                    v.used_by.join(", ")
+                },
+            ]
+        })
+        .collect();
+    let headers = ["NAME", "KIND", "VALUE", "USED BY"];
+    let widths: Vec<usize> = (0..4)
+        .map(|i| {
+            rows.iter()
+                .map(|r| r[i].chars().count())
+                .chain([headers[i].len()])
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let mut out = String::new();
+    let line = |cells: [&str; 4]| -> String {
+        let mut l = String::new();
+        for (i, cell) in cells.iter().enumerate() {
+            if i == 3 {
+                l.push_str(cell);
+            } else {
+                l.push_str(&pad(cell, widths[i] + 2));
+            }
+        }
+        l.trim_end().to_string() + "\n"
+    };
+    out.push_str(&line(headers));
+    for r in &rows {
+        out.push_str(&line([&r[0], &r[1], &r[2], &r[3]]));
+    }
+    out
+}
+
+fn variable_value_label(v: &Variable) -> String {
+    match (v.secret, v.has_stored_value) {
+        (false, _) => v.value.clone(),
+        (true, true) => "(stored)".to_string(),
+        (true, false) => "(no value yet)".to_string(),
+    }
+}
+
+/// One line for a `var set` / `var rm`.
+pub fn render_variable_saved(variable: &VariableView, change: VariableChange) -> String {
+    let v = &variable.variable;
+    match change {
+        VariableChange::Removed => format!("removed variable {}\n", v.name),
+        VariableChange::Saved => {
+            let mut out = format!(
+                "saved {} variable {} = {}\n",
+                if v.secret { "secret" } else { "plain" },
+                v.name,
+                variable_value_label(v)
+            );
+            if !variable.used_by.is_empty() {
+                out.push_str(&format!(
+                    "  used by {} (live tunnels pick it up on their next connection)\n",
+                    variable.used_by.join(", ")
+                ));
+            }
+            out
+        }
     }
 }
 
@@ -400,11 +492,7 @@ pub fn render_saved(forward: &ForwardView, change: SaveChange) -> String {
         SaveChange::HostKeyTrusted => "host key trusted for",
         SaveChange::HostKeyForgotten => "host key forgotten for",
     };
-    let auth = match forward.identity_file_path.as_deref() {
-        Some(key) if !key.is_empty() => format!("key {key}"),
-        _ if forward.has_stored_password => "password (stored)".to_string(),
-        _ => "none".to_string(),
-    };
+    let auth = auth_label(forward);
     format!(
         "{verb} {}  ({})\n  local   {}\n  remote  {}\n  via     {}\n  auth    {auth}\n",
         forward.name,
@@ -413,6 +501,18 @@ pub fn render_saved(forward: &ForwardView, change: SaveChange) -> String {
         forward.remote_endpoint(),
         forward.ssh_endpoint(),
     )
+}
+
+/// How a forward authenticates, for humans. Never a secret.
+fn auth_label(forward: &ForwardView) -> String {
+    match forward.identity_file_path.as_deref() {
+        Some(key) if !key.is_empty() => format!("key {key}"),
+        _ => match &forward.password_variable {
+            Some(name) => format!("password variable {name}"),
+            None if forward.has_stored_password => "password (stored)".to_string(),
+            None => "none".to_string(),
+        },
+    }
 }
 
 /// A command that belongs to the other product (spec 03 §22).
@@ -526,6 +626,7 @@ pub fn render_status(forward: &ForwardView, stats: &TunnelStats) -> String {
     field("local", forward.local_endpoint());
     field("remote", forward.remote_endpoint());
     field("ssh", forward.ssh_endpoint());
+    field("auth", auth_label(forward));
     if !forward.tags.is_empty() {
         field("tags", forward.tags.join(", "));
     }
@@ -562,6 +663,14 @@ pub fn render_status(forward: &ForwardView, stats: &TunnelStats) -> String {
         out.push_str(&format!(
             "\nThe server's host key CHANGED. Confirm the presented fingerprint with the \
              server's administrator; only if it is genuine, run:\n  {} trust-host-key {}\n",
+            crate::cli::PROGRAM,
+            forward.id
+        ));
+    }
+    if forward.needs_reconnect {
+        out.push_str(&format!(
+            "\nA variable this tunnel uses changed; it applies on the next connection:\n  \
+             {} connect --force {}\n",
             crate::cli::PROGRAM,
             forward.id
         ));
@@ -648,7 +757,9 @@ pub fn exit_code_for_data(command: &Command, data: &CliData) -> i32 {
         CliData::List { .. }
         | CliData::Status { .. }
         | CliData::Version { .. }
-        | CliData::Saved { .. } => EXIT_OK,
+        | CliData::Saved { .. }
+        | CliData::Variables { .. }
+        | CliData::VariableSaved { .. } => EXIT_OK,
         CliData::Action {
             forward, timed_out, ..
         } => {
@@ -843,6 +954,7 @@ mod tests {
                 stats: TunnelStats::default(),
                 last_error: last_error.map(|e| e.to_string()),
                 host_key_mismatch: None,
+                needs_reconnect: false,
             },
         )
     }

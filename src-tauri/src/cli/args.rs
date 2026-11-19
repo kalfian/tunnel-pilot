@@ -99,12 +99,32 @@ pub enum Command {
     ForgetHostKey {
         target: String,
     },
+    /// Manage variables (spec 03 §24).
+    Var(VarAction),
     /// Run the headless engine + control socket in the foreground.
     Daemon(DaemonOptions),
     /// Manage the background service that runs `daemon` at login/boot.
     Service(ServiceAction),
     /// Web UI administration (`tunnel-pilot-cli` only).
     Web(WebAction),
+}
+
+/// `var` subcommands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VarAction {
+    /// List every variable and the forwards that use it.
+    List,
+    /// Set a plain variable to `value` (an argument — plain values are not
+    /// secret, e.g. a username).
+    SetPlain { name: String, value: String },
+    /// Set a secret variable; the value is prompted or read from stdin, never
+    /// taken from argv.
+    SetSecret {
+        name: String,
+        source: PasswordSource,
+    },
+    /// Delete a variable.
+    Remove { name: String },
 }
 
 /// `web` subcommands.
@@ -209,6 +229,7 @@ pub fn is_cli_subcommand(word: &str) -> bool {
             | "clear-password"
             | "trust-host-key"
             | "forget-host-key"
+            | "var"
             | "daemon"
             | "service"
             | "web"
@@ -233,7 +254,8 @@ TUNNELS:
 
 FORWARDS:
     add <name> --ssh <user@host[:port]> --forward <[bind:]lport:host:rport>
-               (--identity <keyfile> | --password | --password-stdin)
+               (--identity <keyfile> | --password | --password-stdin |
+                --password-var <NAME>)
                                Create a forward
     edit <id|name> [field options]
                                Change a forward (disconnects it if live)
@@ -241,6 +263,14 @@ FORWARDS:
     set-password <id|name> [--password-stdin]
                                Store a password (prompted with echo off)
     clear-password <id|name>   Delete the stored password
+
+VARIABLES (reuse a username / password across forwards; applied on reconnect):
+    var list                   List variables and the forwards using them
+    var set <NAME> <value>     Set a plain variable (use in a username as {{NAME}})
+    var set <NAME> --secret [--password-stdin]
+                               Set a secret variable (prompted with echo off);
+                               use it as a password with --password-var NAME
+    var rm <NAME>              Delete a variable (refused while a forward uses it)
 
 HOST KEYS (pinned on first connect; a changed key is refused):
     trust-host-key <id|name>   Accept the changed key the server last presented
@@ -302,6 +332,9 @@ FIELD OPTIONS (add / edit):
                                clears a stored password)
     --password                 Prompt for a password (echo off)
     --password-stdin           Read the password from the first line of stdin
+    --password-var <NAME>      Use secret variable NAME as the password
+    --no-password-var          edit only: stop using a password variable
+    The SSH user may reference plain variables: --ssh '{{DB_USER}}@host'
     --keepalive <secs>         Keep-alive interval (0 = default)
     --keepalive-max <n>        Missed keep-alives before reconnect (0 = default)
     --tag <tag>                Add a tag (repeatable; on edit, replaces the tags)
@@ -364,6 +397,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
     let mut field_flag: Option<&str> = None;
     let mut password = PasswordSource::None;
     let mut no_identity_conflict = false;
+    let mut secret = false;
     let mut tags: Option<Vec<String>> = None;
     // daemon / service install flags.
     let mut daemon = DaemonOptions::default();
@@ -382,6 +416,18 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             }
             "--password-stdin" => {
                 set_password_source(&mut password, PasswordSource::Stdin)?;
+            }
+            "--secret" => secret = true,
+            "--no-password-var" => {
+                field_flag = Some("--no-password-var");
+                fields.password_variable = Some(String::new());
+            }
+            _ if is_flag(arg, "--password-var") => {
+                field_flag = Some("--password-var");
+                fields.password_variable = Some(non_blank(
+                    "--password-var",
+                    take_value(arg, "--password-var", &mut rest)?,
+                )?);
             }
             "--no-tags" => {
                 field_flag = Some("--no-tags");
@@ -530,17 +576,34 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
         }
     }
     if password != PasswordSource::None
-        && !matches!(subcommand.as_str(), "add" | "edit" | "set-password" | "web")
+        && !matches!(
+            subcommand.as_str(),
+            "add" | "edit" | "set-password" | "web" | "var"
+        )
     {
         return Err(UsageError::new(format!(
-            "--password/--password-stdin only apply to 'add', 'edit', 'set-password' and \
-             'web set-password', not '{subcommand}'"
+            "--password/--password-stdin only apply to 'add', 'edit', 'set-password', \
+             'var set --secret' and 'web set-password', not '{subcommand}'"
         )));
     }
     if no_identity_conflict && password != PasswordSource::None {
         return Err(UsageError::new(
             "use either --identity or a password, not both",
         ));
+    }
+    let password_var = fields
+        .password_variable
+        .as_deref()
+        .is_some_and(|v| !v.is_empty());
+    if password_var && (no_identity_conflict || password != PasswordSource::None) {
+        return Err(UsageError::new(
+            "--password-var replaces --identity / --password; use only one auth method",
+        ));
+    }
+    if secret && subcommand != "var" {
+        return Err(UsageError::new(format!(
+            "--secret only applies to 'var set', not '{subcommand}'"
+        )));
     }
     if !daemon.web
         && (daemon.bind.is_some() || daemon.trust_proxy || !daemon.public_hosts.is_empty())
@@ -628,11 +691,17 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
                     "'add' needs --forward <[bind:]localPort:remoteHost:remotePort>",
                 ));
             }
-            if fields.identity_file_path.is_none() && password == PasswordSource::None {
+            if fields.identity_file_path.is_none()
+                && password == PasswordSource::None
+                && !password_var
+            {
                 return Err(UsageError::new(
-                    "'add' needs an auth method: --identity <keyfile>, --password or \
-                     --password-stdin",
+                    "'add' needs an auth method: --identity <keyfile>, --password, \
+                     --password-stdin or --password-var <NAME>",
                 ));
+            }
+            if fields.password_variable.as_deref() == Some("") {
+                return Err(UsageError::new("--no-password-var is for 'edit'"));
             }
             fields.name = Some(non_blank("name", name)?);
             Command::Add { fields, password }
@@ -670,6 +739,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
         "forget-host-key" => Command::ForgetHostKey {
             target: one_target("forget-host-key", &positionals)?,
         },
+        "var" => Command::Var(parse_var(&positionals, secret, password)?),
         "daemon" => {
             no_positionals("daemon", &positionals)?;
             Command::Daemon(daemon)
@@ -710,6 +780,52 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
         json,
         socket,
     })
+}
+
+/// `var list | set NAME VALUE | set NAME --secret | rm NAME`.
+fn parse_var(
+    positionals: &[&str],
+    secret: bool,
+    password: PasswordSource,
+) -> Result<VarAction, UsageError> {
+    const USAGE: &str = "usage: var list | var set <NAME> <value> | \
+                         var set <NAME> --secret [--password-stdin] | var rm <NAME>";
+    let check_name = |name: &str| {
+        crate::variables::validate_name(name)
+            .map(|()| name.to_string())
+            .map_err(|e| UsageError::new(e.to_string().replace("invalid input: ", "")))
+    };
+    if !matches!(positionals.first(), Some(&"set")) && (secret || password != PasswordSource::None)
+    {
+        return Err(UsageError::new(
+            "--secret / --password-stdin only apply to 'var set'",
+        ));
+    }
+    match positionals {
+        ["list"] | ["ls"] => Ok(VarAction::List),
+        ["set", name] if secret => Ok(VarAction::SetSecret {
+            name: check_name(name)?,
+            source: match password {
+                PasswordSource::Stdin => PasswordSource::Stdin,
+                _ => PasswordSource::Prompt,
+            },
+        }),
+        ["set", _, _] if secret => Err(UsageError::new(
+            "a secret value is never taken as an argument (it would show in ps and shell \
+             history): omit it to be prompted, or pipe it in with --password-stdin",
+        )),
+        ["set", name, value] if password == PasswordSource::None => Ok(VarAction::SetPlain {
+            name: check_name(name)?,
+            value: (*value).to_string(),
+        }),
+        ["set", _] => Err(UsageError::new(
+            "'var set <NAME>' needs a value, or --secret to be prompted for a secret one",
+        )),
+        ["rm", name] | ["remove", name] => Ok(VarAction::Remove {
+            name: check_name(name)?,
+        }),
+        _ => Err(UsageError::new(USAGE)),
+    }
 }
 
 /// Whether `arg` is `flag` itself or its `flag=value` form.
@@ -1475,5 +1591,93 @@ mod tests {
             parse_str(&["--version"]).expect("version").command,
             Command::LocalVersion
         );
+    }
+
+    #[test]
+    fn var_subcommands_parse_and_never_take_a_secret_from_argv() {
+        let cmd = |args: &[&str]| parse_str(args).map(|i| i.command);
+        assert_eq!(cmd(&["var", "list"]), Ok(Command::Var(VarAction::List)));
+        assert_eq!(
+            cmd(&["var", "set", "DB_USER", "kalfian"]),
+            Ok(Command::Var(VarAction::SetPlain {
+                name: "DB_USER".into(),
+                value: "kalfian".into()
+            }))
+        );
+        assert_eq!(
+            cmd(&["var", "set", "DB_PASS", "--secret"]),
+            Ok(Command::Var(VarAction::SetSecret {
+                name: "DB_PASS".into(),
+                source: PasswordSource::Prompt
+            }))
+        );
+        assert_eq!(
+            cmd(&["var", "set", "DB_PASS", "--secret", "--password-stdin"]),
+            Ok(Command::Var(VarAction::SetSecret {
+                name: "DB_PASS".into(),
+                source: PasswordSource::Stdin
+            }))
+        );
+        assert_eq!(
+            cmd(&["var", "rm", "DB_USER"]),
+            Ok(Command::Var(VarAction::Remove {
+                name: "DB_USER".into()
+            }))
+        );
+        for bad in [
+            vec!["var"],
+            vec!["var", "set", "DB_PASS", "hunter2", "--secret"],
+            vec!["var", "set", "DB_USER"],
+            vec!["var", "set", "bad-name", "x"],
+            vec!["var", "list", "--secret"],
+            vec!["list", "--secret"],
+        ] {
+            assert!(parse_str(&bad).is_err(), "{bad:?} must be rejected");
+        }
+        let err = parse_str(&["var", "set", "P", "s3cret", "--secret"]).expect_err("argv secret");
+        assert!(!err.message.contains("s3cret"), "never echo the secret");
+    }
+
+    #[test]
+    fn password_var_is_an_auth_method_and_excludes_the_others() {
+        let add = parse_str(&[
+            "add",
+            "db",
+            "--ssh",
+            "{{DB_USER}}@bastion",
+            "--forward",
+            "1:h:2",
+            "--password-var",
+            "DB_PASS",
+        ])
+        .expect("add with a password variable");
+        match add.command {
+            Command::Add { fields, .. } => {
+                assert_eq!(fields.ssh_username.as_deref(), Some("{{DB_USER}}"));
+                assert_eq!(fields.password_variable.as_deref(), Some("DB_PASS"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let edit = parse_str(&["edit", "db", "--no-password-var"]).expect("edit");
+        assert!(matches!(
+            edit.command,
+            Command::Edit { ref fields, .. } if fields.password_variable.as_deref() == Some("")
+        ));
+        for bad in [
+            vec!["edit", "db", "--password-var", "P", "--identity", "k"],
+            vec!["edit", "db", "--password-var", "P", "--password"],
+            vec![
+                "add",
+                "db",
+                "--ssh",
+                "u@h",
+                "--forward",
+                "1:h:2",
+                "--no-password-var",
+            ],
+            vec!["list", "--password-var", "P"],
+        ] {
+            assert!(parse_str(&bad).is_err(), "{bad:?} must be rejected");
+        }
     }
 }

@@ -15,3 +15,4 @@ pub mod groups;
 pub mod logs;
 pub mod settings;
 pub mod updater;
+pub mod variables;
